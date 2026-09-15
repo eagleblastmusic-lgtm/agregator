@@ -136,6 +136,74 @@ class EmployerDiscoveryPipeline:
             verification_signals=["known_or_user_supplied_website"],
         )
 
+    async def verify_website_candidate(
+        self,
+        company_name: str,
+        website_url: str,
+        city: str | None = None,
+        *,
+        candidate_confidence: float = 0.95,
+        source_signal: str = "source_website_candidate",
+    ) -> DiscoveryResult:
+        """Verify a source-provided website candidate as first-party evidence.
+
+        A URL present in a job/feed is useful provenance but is not accepted blindly.
+        It is crawled and run through the same identity verifier used for search
+        candidates. This lets official feeds reduce search cost without weakening the
+        false-positive guardrail.
+        """
+
+        score = min(max(candidate_confidence, 0.0), 1.0)
+        candidate = SearchCandidate(
+            title=company_name,
+            url=website_url,
+            snippet=source_signal,
+            score=score,
+        )
+        pages = await self.crawler.crawl(website_url)
+        resolved_url = pages[0].url if pages else website_url
+        verification = verify_company_website(
+            company_name,
+            city,
+            resolved_url,
+            pages,
+            search_score=score,
+        )
+        attempt = self._verification_attempt(
+            candidate,
+            resolved_url,
+            pages,
+            verification,
+        )
+
+        if verification.accepted:
+            return self._result_from_pages(
+                company_name=company_name,
+                city=city,
+                website_url=resolved_url,
+                website_confidence=verification.score,
+                pages=pages,
+                verification_signals=[source_signal, *verification.signals],
+                website_attempts=[attempt],
+            )
+
+        return DiscoveryResult(
+            company=CompanyIdentity(
+                name=company_name,
+                city=city,
+                website_verification_signals=[
+                    source_signal,
+                    "source_candidate_not_verified",
+                    *verification.signals,
+                ],
+            ),
+            channels=[],
+            scanned_pages=[],
+            page_snapshots=[],
+            search_candidates=[],
+            website_attempts=[attempt],
+        )
+
     async def discover(self, company_name: str, city: str | None = None) -> DiscoveryResult:
         if self.search_provider is None:
             raise RuntimeError("Search provider is required for automatic website discovery")
