@@ -104,30 +104,15 @@ jobs:
           echo "$code" > benchmark/exit_code.txt
           exit 0
 
-      - name: Export source identity diagnostics
+      - name: Export source diagnostics
         if: steps.preflight.outputs.exit_code == '0'
         shell: bash
         run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          from agregator.source_quality import build_source_identity_metrics
-          from agregator.storage import SQLiteStore
-
-          database = Path("benchmark/benchmark.sqlite3")
-          output = Path("benchmark/source_identity_metrics.json")
-          if database.exists():
-              metrics = build_source_identity_metrics(SQLiteStore(database))
-              payload = {
-                  source: item.to_dict()
-                  for source, item in sorted(metrics.items())
-              }
-              output.write_text(
-                  json.dumps(payload, ensure_ascii=False, indent=2),
-                  encoding="utf-8",
-              )
-          PY
+          if [ -f benchmark/benchmark.sqlite3 ]; then
+            agregator-benchmark source-diagnostics \
+              --db benchmark/benchmark.sqlite3 \
+              > benchmark/source_diagnostics.json
+          fi
 
       - name: Record benchmark skip after failed preflight
         if: steps.preflight.outputs.exit_code != '0'
