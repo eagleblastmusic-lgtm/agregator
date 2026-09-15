@@ -18,6 +18,12 @@ on:
         required: true
         default: true
         type: boolean
+  pull_request:
+    branches:
+      - feat/m0-employer-discovery-core
+    paths:
+      - ".github/workflows/public-scraper-smoke.yml"
+      - ".github/p10-smoke-trigger.txt"
 
 permissions:
   contents: read
@@ -53,14 +59,23 @@ jobs:
         shell: bash
         run: |
           set +e
+          sources="${{ inputs.sources }}"
+          pages="${{ inputs.pages_per_source }}"
+          strict="${{ inputs.strict }}"
+          [[ -n "$sources" ]] || sources="all"
+          [[ -n "$pages" ]] || pages="1"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            strict="true"
+          fi
+
           args=(
             run
-            --sources "${{ inputs.sources }}"
-            --pages-per-source "${{ inputs.pages_per_source }}"
+            --sources "$sources"
+            --pages-per-source "$pages"
             --db scraper-smoke/scrape.sqlite3
             --fresh
           )
-          if [[ "${{ inputs.strict }}" == "true" ]]; then
+          if [[ "$strict" == "true" ]]; then
             args+=(--strict)
           fi
           agregator-scrape "${args[@]}" | tee scraper-smoke/result.json
@@ -68,6 +83,15 @@ jobs:
           echo "$code" > scraper-smoke/exit_code.txt
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit 0
+
+      - name: Build P10 validation report
+        if: always()
+        continue-on-error: true
+        run: |
+          agregator-validate report \
+            --db scraper-smoke/scrape.sqlite3 \
+            --output scraper-smoke/p10-validation.json \
+            --markdown scraper-smoke/p10-validation.md
 
       - name: Write step summary
         if: always()
@@ -108,6 +132,10 @@ jobs:
                       )
           else:
               lines.append("No result.json was produced.")
+
+          validation_path = Path("scraper-smoke/p10-validation.md")
+          if validation_path.exists():
+              lines.extend(["", validation_path.read_text(encoding="utf-8")])
 
           Path("summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY

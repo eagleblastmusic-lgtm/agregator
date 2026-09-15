@@ -123,3 +123,35 @@ def test_parse_aplikuj_detail_uses_jsonld_and_augments_nip() -> None:
         item.kind == "nip" and item.value == "9876543210"
         for item in job.company_identifiers
     )
+
+
+def test_parse_aplikuj_detail_uses_country_when_city_is_not_in_jsonld() -> None:
+    html = """
+    <html><body>
+      <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "JobPosting",
+        "title": "Pracownik produkcji",
+        "description": "<p>Praca za granicą.</p>",
+        "hiringOrganization": {"@type": "Organization", "name": "E&A Agencja Zatrudnienia"},
+        "jobLocation": {
+          "@type": "Place",
+          "address": {"@type": "PostalAddress", "addressCountry": "Holandia"}
+        },
+        "applicantLocationRequirements": {"@type": "Country", "name": "Holandia"}
+      }
+      </script>
+      <h1>Pracownik produkcji</h1>
+      <a href="/pracodawca/e-a">E&A Agencja Zatrudnienia (nr KRAZ 385)</a>
+    </body></html>
+    """
+
+    job = parse_aplikuj_detail(
+        "https://www.aplikuj.pl/oferta/888/pracownik-produkcji",
+        html,
+    )
+
+    assert job is not None
+    assert job.city == "Holandia"
+    assert job.city != job.company_name

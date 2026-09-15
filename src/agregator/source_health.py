@@ -83,7 +83,7 @@ def build_source_health(
         result.append(
             SourceHealth(
                 source=name,
-                state="healthy" if latest["status"] == "success" else "failing",
+                state=_source_state(latest),
                 runs=runs,
                 successful_runs=len(successful),
                 failed_runs=len(failed),
@@ -106,3 +106,29 @@ def build_source_health(
         )
 
     return result
+
+
+def _source_state(latest: Any) -> str:
+    if latest["status"] == "success":
+        return "healthy" if int(latest["jobs_seen"] or 0) > 0 else "empty"
+
+    error_type = str(latest["error_type"] or "").lower()
+    error_message = str(latest["error_message"] or "").lower()
+    http_access_markers = (
+        "401 unauthorized",
+        "403 forbidden",
+        "406 not acceptable",
+    )
+    general_access_markers = (
+        "access denied",
+        "captcha",
+        "robots.txt disallows",
+        "robots disallows",
+    )
+    if error_type == "httpstatuserror" and any(
+        marker in error_message for marker in http_access_markers
+    ):
+        return "access_blocked"
+    if any(marker in error_message for marker in general_access_markers):
+        return "access_blocked"
+    return "failing"

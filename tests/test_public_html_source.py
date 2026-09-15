@@ -152,3 +152,33 @@ def test_detail_parser_has_html_selector_fallback() -> None:
     assert job.company_name == "Example S.A."
     assert job.city == "Gdańsk"
     assert job.source_payload["html_fallback"]["company_name"] == "Example S.A."
+
+
+def test_jsonld_location_falls_back_to_country_before_html_guessing() -> None:
+    config = HtmlJobSourceConfig(
+        name="fixture",
+        base_url="https://jobs.example",
+        listing_url_template="https://jobs.example/list",
+        offer_path_patterns=(r"^/job/",),
+    )
+    payload = {
+        "@context": "https://schema.org",
+        "@type": "JobPosting",
+        "title": "Warehouse Worker",
+        "hiringOrganization": {"@type": "Organization", "name": "Agency BV"},
+        "jobLocation": {
+            "@type": "Place",
+            "address": {"@type": "PostalAddress", "addressCountry": "Holandia"},
+        },
+        "applicantLocationRequirements": {"@type": "Country", "name": "Holandia"},
+    }
+    html = (
+        '<script type="application/ld+json">'
+        + json.dumps(payload)
+        + "</script><h1>Warehouse Worker</h1>"
+    )
+
+    job = parse_job_detail_html(config, "https://jobs.example/job/1", html)
+
+    assert job is not None
+    assert job.city == "Holandia"

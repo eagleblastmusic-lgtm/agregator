@@ -13,8 +13,7 @@ from .base import SourceBatch
 from .public_html import HtmlJobSourceConfig, parse_job_detail_html
 
 BASE_URL = "https://www.manpower.pl"
-LISTING_FIRST = BASE_URL + "/pl/szukaj-pracy"
-LISTING_PAGE = BASE_URL + "/pl/szukaj-pracy/p{page}"
+ALL_JOBS_URL = BASE_URL + "/pl/all-jobs"
 _OFFER_PATH = re.compile(r"^/pl/job/(\d+)/[^/?#]+/?$", re.IGNORECASE)
 _REFERENCE = re.compile(
     r"\b(?:reference\s+number|reference-number|numer\s+ref\.?|nr\s+ref\.?)\s*:?\s*(\d+)\b",
@@ -48,9 +47,9 @@ _MONTHS = {
 _CONFIG = HtmlJobSourceConfig(
     name="manpower",
     base_url=BASE_URL,
-    listing_url_template=LISTING_FIRST,
+    listing_url_template=ALL_JOBS_URL,
     offer_path_patterns=(r"^/pl/job/\d+/",),
-    paginated=True,
+    paginated=False,
     title_selectors=("h1",),
     description_selectors=("main", "article"),
 )
@@ -59,9 +58,9 @@ _CONFIG = HtmlJobSourceConfig(
 class ManpowerPublicSource:
     """Collect public Manpower Poland job listing/detail pages.
 
-    Manpower frequently publishes vacancies for unnamed clients. If structured data
-    does not disclose the end employer, the adapter keeps Manpower as a transparent
-    low-confidence agency fallback rather than inventing a client identity.
+    The search UI requires JavaScript, while `/pl/all-jobs` is the site's own public,
+    server-rendered fallback containing job detail links. Cursor pages slice that list
+    without relying on a private API.
     """
 
     name = "manpower"
@@ -84,7 +83,6 @@ class ManpowerPublicSource:
 
     async def collect(self, cursor: str | None = None) -> SourceBatch:
         page = self._parse_page(cursor)
-        listing_url = LISTING_FIRST if page == 1 else LISTING_PAGE.format(page=page)
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(
             timeout=25,
@@ -97,10 +95,12 @@ class ManpowerPublicSource:
         )
 
         try:
-            await self._assert_allowed(client, listing_url)
-            listing_html = await self._get_text(client, listing_url)
-            links = extract_offer_links(listing_url, listing_html)
-            links = links[: self.max_details_per_page]
+            await self._assert_allowed(client, ALL_JOBS_URL)
+            listing_html = await self._get_text(client, ALL_JOBS_URL)
+            all_links = extract_offer_links(ALL_JOBS_URL, listing_html)
+            start = (page - 1) * self.max_details_per_page
+            end = start + self.max_details_per_page
+            links = all_links[start:end]
 
             jobs: list[JobPosting] = []
             for index, url in enumerate(links):
@@ -118,7 +118,7 @@ class ManpowerPublicSource:
             if owns_client:
                 await client.aclose()
 
-        next_cursor = str(page + 1) if links else None
+        next_cursor = str(page + 1) if end < len(all_links) else None
         return SourceBatch(jobs=jobs, next_cursor=next_cursor)
 
     @staticmethod
@@ -250,6 +250,7 @@ def _augment_job(job: JobPosting, text: str) -> None:
             "agency_fallback": job.company_name_source == "manpower.agency_fallback",
             "client_employer_disclosed": job.company_name_source
             != "manpower.agency_fallback",
+            "discovery_source": ALL_JOBS_URL,
         }
     )
     job.source_payload = payload
@@ -272,6 +273,9 @@ def _published_date(text: str) -> str | None:
 
 def _city_from_text(text: str) -> str | None:
     match = _LOCATION.search(text)
+    if match is None:
+        # Current Manpower pages also expose Polish prose as "Miejsce pracy: ...".
+        match = re.search(r"(?:^|\n)Miejsce\s+pracy\s*:\s*([^\n]+)", text, re.IGNORECASE)
     if match is None:
         return None
     location = match.group(1).strip()

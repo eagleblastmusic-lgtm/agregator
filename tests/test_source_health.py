@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import httpx
+
 from agregator.source_health import build_source_health
 from agregator.storage import SQLiteStore, UpsertStats
 
@@ -56,3 +58,54 @@ def test_source_health_aggregates_persisted_runs(tmp_path: Path) -> None:
     assert beta.runs == 0
     assert beta.success_rate is None
     assert beta.latest_status is None
+
+
+def test_source_health_distinguishes_success_with_zero_records(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "empty.sqlite3")
+    store.init_schema()
+    run_id = store.start_source_run("empty", cursor_before=None, pages_requested=1)
+    store.finish_source_run(
+        run_id,
+        status="success",
+        cursor_after=None,
+        pages_processed=1,
+        stats=UpsertStats(),
+    )
+
+    health = build_source_health(store, ["empty"])[0]
+
+    assert health.state == "empty"
+    assert health.successful_runs == 1
+    assert health.jobs_seen == 0
+
+
+def _record_http_failure(tmp_path: Path, status_code: int, reason: str) -> str:
+    store = SQLiteStore(tmp_path / f"blocked-{status_code}.sqlite3")
+    store.init_schema()
+    run_id = store.start_source_run("blocked", cursor_before=None, pages_requested=1)
+    response = httpx.Response(
+        status_code,
+        request=httpx.Request("GET", "https://example.test/jobs"),
+    )
+    error = httpx.HTTPStatusError(
+        f"Client error '{status_code} {reason}' for url 'https://example.test/jobs'",
+        request=response.request,
+        response=response,
+    )
+    store.finish_source_run(
+        run_id,
+        status="failed",
+        cursor_after=None,
+        pages_processed=0,
+        stats=UpsertStats(),
+        error=error,
+    )
+    return build_source_health(store, ["blocked"])[0].state
+
+
+def test_source_health_distinguishes_http_access_block(tmp_path: Path) -> None:
+    assert _record_http_failure(tmp_path, 403, "Forbidden") == "access_blocked"
+
+
+def test_source_health_distinguishes_http_406_access_block(tmp_path: Path) -> None:
+    assert _record_http_failure(tmp_path, 406, "Not Acceptable") == "access_blocked"

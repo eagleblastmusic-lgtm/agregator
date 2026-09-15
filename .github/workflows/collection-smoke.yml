@@ -23,13 +23,19 @@ on:
         required: true
         default: false
         type: boolean
+  pull_request:
+    branches:
+      - feat/m0-employer-discovery-core
+    paths:
+      - ".github/workflows/collection-smoke.yml"
+      - ".github/p10-smoke-trigger.txt"
 
 permissions:
   contents: read
 
 concurrency:
-  group: faro-collection-smoke
-  cancel-in-progress: false
+  group: faro-collection-smoke-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   smoke:
@@ -75,12 +81,15 @@ jobs:
         shell: bash
         run: |
           set +e
+          sources="${{ inputs.sources }}"
+          [[ -n "$sources" ]] || sources="jooble,adzuna,careerjet,epraca"
+          allow_experimental="${{ inputs.allow_experimental_sources }}"
           extra_args=()
-          if [ "${{ inputs.allow_experimental_sources }}" = "true" ]; then
+          if [ "$allow_experimental" = "true" ]; then
             extra_args+=(--allow-experimental-sources)
           fi
           agregator-collect preflight \
-            --sources "${{ inputs.sources }}" \
+            --sources "$sources" \
             "${extra_args[@]}" \
             --strict \
             > benchmark/collection-smoke/preflight.json
@@ -94,16 +103,23 @@ jobs:
         shell: bash
         run: |
           set +e
+          sources="${{ inputs.sources }}"
+          target_jobs="${{ inputs.target_jobs }}"
+          max_rounds="${{ inputs.max_rounds }}"
+          allow_experimental="${{ inputs.allow_experimental_sources }}"
+          [[ -n "$sources" ]] || sources="jooble,adzuna,careerjet,epraca"
+          [[ -n "$target_jobs" ]] || target_jobs="20"
+          [[ -n "$max_rounds" ]] || max_rounds="1"
           extra_args=()
-          if [ "${{ inputs.allow_experimental_sources }}" = "true" ]; then
+          if [ "$allow_experimental" = "true" ]; then
             extra_args+=(--allow-experimental-sources)
           fi
           agregator-collect run \
             --db benchmark/collection-smoke/collection.sqlite3 \
             --output-dir benchmark/collection-smoke/run \
-            --sources "${{ inputs.sources }}" \
-            --target-jobs "${{ inputs.target_jobs }}" \
-            --max-rounds "${{ inputs.max_rounds }}" \
+            --sources "$sources" \
+            --target-jobs "$target_jobs" \
+            --max-rounds "$max_rounds" \
             "${extra_args[@]}" \
             --strict \
             > benchmark/collection-smoke/run_result.json
@@ -151,6 +167,8 @@ jobs:
               blockers = preflight.get("blockers") or []
               if blockers:
                   lines.append("- Preflight blockers: `" + ", ".join(map(str, blockers)) + "`")
+                  if all(str(item).startswith("source_not_ready:") for item in blockers):
+                      lines.append("- P10 state: `not_configured` (partner credentials unavailable)")
 
           if result is not None:
               collection = result.get("collection") or {}
@@ -199,6 +217,30 @@ jobs:
           fi
 
           if [ "$preflight_code" -ne 0 ]; then
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              only_not_ready="$(python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("benchmark/collection-smoke/preflight.json")
+          value = False
+          if path.exists():
+              try:
+                  payload = json.loads(path.read_text(encoding="utf-8"))
+                  blockers = payload.get("blockers") or []
+                  value = bool(blockers) and all(
+                      str(item).startswith("source_not_ready:") for item in blockers
+                  )
+              except Exception:
+                  value = False
+          print("true" if value else "false")
+          PY
+              )"
+              if [[ "$only_not_ready" == "true" ]]; then
+                echo "Partner sources are not configured; recorded as P10 not_configured."
+                exit 0
+              fi
+            fi
             echo "Collection preflight failed (exit code: $preflight_code)."
             exit "$preflight_code"
           fi

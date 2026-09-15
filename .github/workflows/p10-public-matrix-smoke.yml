@@ -1,0 +1,243 @@
+name: P10 Public Matrix Smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - feat/m0-employer-discovery-core
+    paths:
+      - ".github/workflows/p10-public-matrix-smoke.yml"
+      - ".github/p10-smoke-trigger.txt"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faro-p10-public-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: smoke / ${{ matrix.source }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        source:
+          - aplikuj
+          - bulldogjob
+          - justjoinit
+          - karierawfinansach
+          - kprm
+          - manpower
+          - nofluffjobs
+          - ngo
+          - ofertypracyedu
+          - olx
+          - pracuj
+          - randstad
+          - rocketjobs
+          - skillshot
+          - theprotocol
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Prepare workspace
+        shell: bash
+        run: |
+          mkdir -p "p10-public/${{ matrix.source }}"
+          echo "99" > "p10-public/${{ matrix.source }}/exit_code.txt"
+
+      - name: Run source smoke
+        id: scrape
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          root="p10-public/${{ matrix.source }}"
+          agregator-scrape run \
+            --sources "${{ matrix.source }}" \
+            --pages-per-source 1 \
+            --db "$root/smoke.sqlite3" \
+            --fresh \
+            --strict \
+            | tee "$root/result.json"
+          code=${PIPESTATUS[0]}
+          echo "$code" > "$root/exit_code.txt"
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Build source validation
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          root="p10-public/${{ matrix.source }}"
+          agregator-validate report \
+            --db "$root/smoke.sqlite3" \
+            --output "$root/validation.json" \
+            --markdown "$root/validation.md"
+
+      - name: Upload source artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: faro-p10-public-${{ matrix.source }}-${{ github.run_id }}
+          path: p10-public/
+          retention-days: 7
+
+      - name: Enforce source result
+        if: always()
+        shell: bash
+        run: |
+          root="p10-public/${{ matrix.source }}"
+          code="$(cat "$root/exit_code.txt" 2>/dev/null || echo 1)"
+          state="$(python - "$root/validation.json" "${{ matrix.source }}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          source = sys.argv[2]
+          state = "unknown"
+          if path.exists():
+              try:
+                  payload = json.loads(path.read_text(encoding="utf-8"))
+                  row = next(
+                      (item for item in payload.get("sources", []) if item.get("source") == source),
+                      None,
+                  )
+                  if row:
+                      state = str(row.get("state", "unknown"))
+              except Exception:
+                  pass
+          print(state)
+          PY
+          )"
+          echo "${{ matrix.source }} state: $state"
+          if [[ "$state" == "access_blocked" ]]; then
+            echo "Access is blocked by the source; preserving as P10 access_blocked."
+            exit 0
+          fi
+          if [[ "$code" != "0" ]]; then
+            echo "${{ matrix.source }} smoke failed with exit code $code"
+            exit "$code"
+          fi
+
+  aggregate:
+    name: aggregate P10 public smoke
+    needs: smoke
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: faro-p10-public-*-${{ github.run_id }}
+          path: aggregate
+          merge-multiple: true
+
+      - name: Build aggregate summary
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("aggregate")
+          rows = []
+          for result_path in sorted(root.glob("*/result.json")):
+              source = result_path.parent.name
+              try:
+                  payload = json.loads(result_path.read_text(encoding="utf-8"))
+              except Exception as exc:
+                  rows.append({"source": source, "state": "invalid_result", "error": str(exc)})
+                  continue
+              item = (payload.get("results") or [{}])[0]
+              state = str(item.get("status", "unknown"))
+              validation_path = result_path.parent / "validation.json"
+              if validation_path.exists():
+                  try:
+                      validation = json.loads(validation_path.read_text(encoding="utf-8"))
+                      validation_row = next(
+                          (
+                              row
+                              for row in validation.get("sources", [])
+                              if row.get("source") == source
+                          ),
+                          None,
+                      )
+                      if validation_row:
+                          state = str(validation_row.get("state", state))
+                  except Exception:
+                      pass
+              rows.append(
+                  {
+                      "source": source,
+                      "state": state,
+                      "jobs_seen": item.get("jobs_seen", 0),
+                      "jobs_inserted": item.get("jobs_inserted", 0),
+                      "companies_created": item.get("companies_created", 0),
+                      "error": item.get("error", ""),
+                  }
+              )
+
+          payload = {
+              "sources": rows,
+              "healthy": [row["source"] for row in rows if row["state"] == "healthy"],
+              "empty": [row["source"] for row in rows if row["state"] == "empty"],
+              "access_blocked": [
+                  row["source"] for row in rows if row["state"] == "access_blocked"
+              ],
+              "failing": [
+                  row["source"]
+                  for row in rows
+                  if row["state"] not in {"healthy", "empty", "access_blocked"}
+              ],
+          }
+          Path("p10-public-summary.json").write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          lines = [
+              "## P10 public source matrix smoke",
+              "",
+              f"- Healthy: `{len(payload['healthy'])}`",
+              f"- Empty (run OK, 0 ofert): `{len(payload['empty'])}`",
+              f"- Access blocked: `{len(payload['access_blocked'])}`",
+              f"- Failing: `{len(payload['failing'])}`",
+              "",
+              "| Source | State | Seen | Inserted | Companies | Error |",
+              "|---|---|---:|---:|---:|---|",
+          ]
+          for row in rows:
+              error = str(row.get("error", "")).replace("|", "\\|").replace("\n", " ")
+              lines.append(
+                  f"| {row['source']} | {row['state']} | {row.get('jobs_seen', 0)} | "
+                  f"{row.get('jobs_inserted', 0)} | {row.get('companies_created', 0)} | {error} |"
+              )
+          summary = "\n".join(lines) + "\n"
+          Path("p10-public-summary.md").write_text(summary, encoding="utf-8")
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(summary, encoding="utf-8")
+          PY
+
+      - name: Upload aggregate summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: faro-p10-public-summary-${{ github.run_id }}
+          path: |
+            p10-public-summary.json
+            p10-public-summary.md
+          retention-days: 7
