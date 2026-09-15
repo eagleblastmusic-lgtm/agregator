@@ -56,6 +56,7 @@ class CompanyIdentity(BaseModel):
     website_url: str | None = None
     domain: str | None = None
     website_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    website_verification_signals: list[str] = Field(default_factory=list)
 
 
 class JobPosting(BaseModel):
