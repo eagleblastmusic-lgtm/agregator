@@ -55,6 +55,9 @@ jobs:
       CAREERJET_USER_IP: ${{ secrets.CAREERJET_USER_IP }}
       CAREERJET_USER_AGENT: ${{ secrets.CAREERJET_USER_AGENT }}
       EPRACA_PARTNER: ${{ secrets.EPRACA_PARTNER }}
+      EPRACA_WOJEWODZTWO: ${{ vars.EPRACA_WOJEWODZTWO }}
+      EPRACA_JEDNOSTKA: ${{ vars.EPRACA_JEDNOSTKA }}
+      EPRACA_ALL: ${{ vars.EPRACA_ALL }}
       AGREGATOR_USER_AGENT: FaroEmployerDiscoveryBenchmark/0.1
 
     steps:
