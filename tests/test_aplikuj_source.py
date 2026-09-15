@@ -48,9 +48,14 @@ async def test_aplikuj_source_collects_public_offer_and_preserves_employer_data(
     assert job.company_name == "ACME S.A."
     assert job.city == "Warszawa"
     assert job.published_at == "2026-09-15"
-    assert any(item.kind == "nip" and item.value == "1234567890" for item in job.company_identifiers)
+    assert any(
+        item.kind == "nip" and item.value == "1234567890"
+        for item in job.company_identifiers
+    )
     assert job.source_payload["portal_offer_id"] == "123456"
-    assert job.source_payload["employer_profile_url"] == "https://www.aplikuj.pl/pracodawca/acme-sa"
+    assert job.source_payload["employer_profile_url"] == (
+        "https://www.aplikuj.pl/pracodawca/acme-sa"
+    )
     assert "Obsługa klientów biznesowych" in job.source_payload["visible_text"]
 
 
@@ -114,4 +119,7 @@ def test_parse_aplikuj_detail_uses_jsonld_and_augments_nip() -> None:
     assert job.company_name == "Data Sp. z o.o."
     assert job.city == "Gdańsk"
     assert job.published_at == "2026-09-14"
-    assert any(item.kind == "nip" and item.value == "9876543210" for item in job.company_identifiers)
+    assert any(
+        item.kind == "nip" and item.value == "9876543210"
+        for item in job.company_identifiers
+    )
