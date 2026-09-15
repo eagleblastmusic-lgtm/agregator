@@ -20,6 +20,8 @@ from .label_workflow import (
 )
 from .pipeline import EmployerDiscoveryPipeline
 from .search import BraveSearchProvider
+from .source_provenance import build_source_provenance_metrics
+from .source_quality import build_source_identity_metrics
 from .sources import default_registry
 from .storage import SQLiteStore
 
@@ -160,6 +162,28 @@ def run(
     typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     if strict and not result.readiness.ready_for_manual_labeling:
         raise typer.Exit(code=2)
+
+
+@app.command("source-diagnostics")
+def source_diagnostics(
+    db: str = typer.Option("benchmark/benchmark.sqlite3", "--db"),
+) -> None:
+    """Report source-level identity and explicit-evidence provenance diagnostics."""
+
+    store = SQLiteStore(db)
+    identity = build_source_identity_metrics(store)
+    provenance = build_source_provenance_metrics(store)
+    payload = {
+        "identity": {
+            source: metrics.to_dict()
+            for source, metrics in sorted(identity.items())
+        },
+        "provenance": {
+            source: metrics.to_dict()
+            for source, metrics in sorted(provenance.items())
+        },
+    }
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 @app.command("status")
