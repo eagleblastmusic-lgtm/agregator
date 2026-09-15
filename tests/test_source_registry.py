@@ -19,6 +19,7 @@ def test_default_registry_contains_api_and_public_sources(
 
     assert registry.names() == [
         "adzuna",
+        "aplikuj",
         "careerjet",
         "epraca",
         "jooble",
@@ -35,6 +36,7 @@ def test_default_registry_contains_api_and_public_sources(
     ]
     assert registry.create("OLX").name == "olx"
     assert registry.create("PRACUJ").name == "pracuj"
+    assert registry.create("APLIKUJ").name == "aplikuj"
     assert registry.create("SKILLSHOT").name == "skillshot"
     assert registry.create("NOFLUFFJOBS").name == "nofluffjobs"
     assert registry.create("JUSTJOINIT").name == "justjoinit"
@@ -62,6 +64,11 @@ def test_default_registry_exposes_access_policy_metadata() -> None:
     assert pracuj.access_mode == "public_sitemap_html"
     assert pracuj.experimental is True
     assert pracuj.required_env == ()
+
+    aplikuj = registry.describe("aplikuj")
+    assert aplikuj.access_mode == "public_html"
+    assert aplikuj.experimental is True
+    assert aplikuj.required_env == ()
 
     skillshot = registry.describe("skillshot")
     assert skillshot.access_mode == "public_html"
