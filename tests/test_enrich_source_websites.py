@@ -184,7 +184,7 @@ async def test_enrichment_falls_back_to_search_after_bad_source_candidate(tmp_pa
 
     assert row["website_url"] == official_url
     assert row["resolution_origin"] == WebsiteResolutionOrigin.SEARCH.value
-    assert row["resolution_source"] == "search_provider"
+    assert row["resolution_source"] == "static"
     attempts = json.loads(row["website_attempts_json"])
     assert len(attempts) == 2
     assert attempts[0]["url"] == source_url
@@ -194,4 +194,4 @@ async def test_enrichment_falls_back_to_search_after_bad_source_candidate(tmp_pa
     assert attempts[1]["url"] == official_url
     assert attempts[1]["accepted"] is True
     assert attempts[1]["origin"] == WebsiteResolutionOrigin.SEARCH.value
-    assert attempts[1]["source"] == "search_provider"
+    assert attempts[1]["source"] == "static"
