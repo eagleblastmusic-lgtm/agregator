@@ -4,7 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import JobPosting
+from .models import DiscoveryResult, JobPosting
 from .normalize import company_key, normalize_company_name, normalize_text
 
 
@@ -37,8 +37,11 @@ class SQLiteStore:
                     normalized_name TEXT NOT NULL,
                     city TEXT,
                     normalized_city TEXT,
+                    identity_source TEXT,
+                    identity_confidence REAL NOT NULL DEFAULT 0,
                     website_url TEXT,
                     website_confidence REAL NOT NULL DEFAULT 0,
+                    enriched_at TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -67,6 +70,25 @@ class SQLiteStore:
                     ON job_postings(company_id);
                 CREATE INDEX IF NOT EXISTS idx_job_postings_source
                     ON job_postings(source);
+
+                CREATE TABLE IF NOT EXISTS contact_channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    purpose TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    evidence_url TEXT NOT NULL,
+                    evidence_text TEXT NOT NULL,
+                    evidence_signal TEXT,
+                    verified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(company_id) REFERENCES companies(id),
+                    UNIQUE(company_id, kind, value)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_contact_channels_decision
+                    ON contact_channels(decision);
 
                 CREATE TABLE IF NOT EXISTS source_state (
                     source TEXT PRIMARY KEY,
@@ -156,6 +178,7 @@ class SQLiteStore:
                     ),
                 )
 
+                self._upgrade_company_identity(connection, company_id, job)
                 if exists:
                     stats.jobs_updated += 1
                 else:
@@ -170,14 +193,126 @@ class SQLiteStore:
                     c.id,
                     c.canonical_name,
                     c.city,
+                    c.identity_source,
+                    c.identity_confidence,
                     c.website_url,
                     c.website_confidence,
                     COUNT(j.id) AS job_count,
-                    GROUP_CONCAT(DISTINCT j.source) AS sources
+                    GROUP_CONCAT(DISTINCT j.source) AS sources,
+                    SUM(CASE WHEN cc.decision = 'green' THEN 1 ELSE 0 END) AS green_channels
                 FROM companies c
                 LEFT JOIN job_postings j ON j.company_id = c.id
+                LEFT JOIN contact_channels cc ON cc.company_id = c.id
                 GROUP BY c.id
                 ORDER BY job_count DESC, c.canonical_name ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def companies_for_enrichment(
+        self,
+        *,
+        limit: int = 20,
+        min_identity_confidence: float = 0.7,
+        refresh: bool = False,
+    ) -> list[dict[str, object]]:
+        where_website = "1 = 1" if refresh else "c.website_url IS NULL"
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    c.id,
+                    c.canonical_name,
+                    c.city,
+                    c.identity_confidence,
+                    COUNT(j.id) AS job_count
+                FROM companies c
+                LEFT JOIN job_postings j ON j.company_id = c.id
+                WHERE {where_website}
+                  AND c.identity_confidence >= ?
+                GROUP BY c.id
+                ORDER BY job_count DESC, c.identity_confidence DESC
+                LIMIT ?
+                """,
+                (min_identity_confidence, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_discovery_result(self, company_id: int, result: DiscoveryResult) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE companies
+                SET website_url = ?,
+                    website_confidence = ?,
+                    enriched_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    result.company.website_url,
+                    result.company.website_confidence,
+                    company_id,
+                ),
+            )
+
+            for channel in result.channels:
+                connection.execute(
+                    """
+                    INSERT INTO contact_channels(
+                        company_id,
+                        kind,
+                        value,
+                        purpose,
+                        decision,
+                        confidence,
+                        evidence_url,
+                        evidence_text,
+                        evidence_signal
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(company_id, kind, value) DO UPDATE SET
+                        purpose = excluded.purpose,
+                        decision = excluded.decision,
+                        confidence = excluded.confidence,
+                        evidence_url = excluded.evidence_url,
+                        evidence_text = excluded.evidence_text,
+                        evidence_signal = excluded.evidence_signal,
+                        verified_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        company_id,
+                        channel.kind.value,
+                        channel.value,
+                        channel.purpose.value,
+                        channel.decision.value,
+                        channel.confidence,
+                        channel.evidence.url,
+                        channel.evidence.text,
+                        channel.evidence.signal,
+                    ),
+                )
+
+    def list_green_channels(self, limit: int = 100) -> list[dict[str, object]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    c.canonical_name,
+                    c.city,
+                    c.website_url,
+                    cc.kind,
+                    cc.value,
+                    cc.purpose,
+                    cc.confidence,
+                    cc.evidence_url,
+                    cc.evidence_text,
+                    cc.verified_at
+                FROM contact_channels cc
+                JOIN companies c ON c.id = cc.company_id
+                WHERE cc.decision = 'green'
+                ORDER BY cc.confidence DESC, c.canonical_name ASC
                 LIMIT ?
                 """,
                 (limit,),
@@ -207,9 +342,50 @@ class SQLiteStore:
                 canonical_name,
                 normalized_name,
                 city,
-                normalized_city
-            ) VALUES (?, ?, ?, ?, ?)
+                normalized_city,
+                identity_source,
+                identity_confidence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (key, job.company_name, normalized_name, job.city, normalized_city),
+            (
+                key,
+                job.company_name,
+                normalized_name,
+                job.city,
+                normalized_city,
+                job.company_name_source,
+                job.company_name_confidence,
+            ),
         )
         return int(cursor.lastrowid), True
+
+    @staticmethod
+    def _upgrade_company_identity(
+        connection: sqlite3.Connection,
+        company_id: int,
+        job: JobPosting,
+    ) -> None:
+        connection.execute(
+            """
+            UPDATE companies
+            SET canonical_name = CASE
+                    WHEN ? > identity_confidence THEN ?
+                    ELSE canonical_name
+                END,
+                identity_source = CASE
+                    WHEN ? > identity_confidence THEN ?
+                    ELSE identity_source
+                END,
+                identity_confidence = MAX(identity_confidence, ?),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                job.company_name_confidence,
+                job.company_name,
+                job.company_name_confidence,
+                job.company_name_source,
+                job.company_name_confidence,
+                company_id,
+            ),
+        )
