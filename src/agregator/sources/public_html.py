@@ -7,7 +7,7 @@ import urllib.robotparser
 from dataclasses import dataclass
 from html import unescape
 from typing import Any
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -149,19 +149,17 @@ def extract_offer_links(
         raw = str(anchor.get("href") or "").strip()
         if not raw:
             continue
-        absolute = urljoin(listing_url, raw)
+        absolute = _normalize_url(urljoin(listing_url, raw))
         parsed = urlparse(absolute)
         if parsed.netloc.lower() != expected_host:
             continue
-        if not any(pattern.search(parsed.path) for pattern in patterns):
+        decoded_path = unquote(parsed.path)
+        if not any(pattern.search(decoded_path) for pattern in patterns):
             continue
-        normalized = _normalize_url(
-            urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
-        )
-        if normalized in seen:
+        if absolute in seen:
             continue
-        seen.add(normalized)
-        output.append(normalized)
+        seen.add(absolute)
+        output.append(absolute)
     return output
 
 
@@ -364,9 +362,7 @@ def _job_city(payload: dict[str, Any]) -> str | None:
     locations = payload.get("jobLocation")
     if not isinstance(locations, list):
         locations = [locations]
-
-    region_fallback: str | None = None
-    country_fallback: str | None = None
+    fallback: str | None = None
     for location in locations:
         if not isinstance(location, dict):
             continue
@@ -376,32 +372,15 @@ def _job_city(payload: dict[str, Any]) -> str | None:
         city = _text(address.get("addressLocality"))
         if city:
             return city
-        if region_fallback is None:
-            region_fallback = _text(address.get("addressRegion"))
-        if country_fallback is None:
-            country_fallback = _structured_location_name(address.get("addressCountry"))
-
+        for key in ("addressRegion", "addressCountry"):
+            value = _text(address.get(key))
+            if value and fallback is None:
+                fallback = value
+    if fallback:
+        return fallback
     if str(payload.get("jobLocationType") or "").upper() == "TELECOMMUTE":
         return "Remote"
-    if region_fallback:
-        return region_fallback
-    if country_fallback:
-        return country_fallback
-
-    requirements = payload.get("applicantLocationRequirements")
-    if not isinstance(requirements, list):
-        requirements = [requirements]
-    for requirement in requirements:
-        location_name = _structured_location_name(requirement)
-        if location_name:
-            return location_name
     return None
-
-
-def _structured_location_name(value: Any) -> str | None:
-    if isinstance(value, dict):
-        return _text(value.get("name")) or _text(value.get("addressCountry"))
-    return _text(value)
 
 
 def _job_identifier(payload: dict[str, Any]) -> str | None:
@@ -431,7 +410,7 @@ def _html_to_text(value: str | None) -> str | None:
 
 def _normalize_url(url: str) -> str:
     parsed = urlparse(url)
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, ""))
+    return parsed._replace(fragment="").geturl()
 
 
 def _text(value: Any) -> str | None:
