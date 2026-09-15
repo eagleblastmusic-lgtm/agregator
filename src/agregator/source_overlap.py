@@ -5,6 +5,7 @@ from itertools import combinations
 from typing import Any
 
 from .normalize import normalize_company_name, normalize_text
+from .source_quality import build_source_identity_metrics
 from .storage import SQLiteStore
 
 
@@ -43,6 +44,7 @@ class SourceOverlapReport:
     cross_source_shared_fingerprints: int
     cross_source_shared_fingerprint_rate: float
     by_source: dict[str, SourceFingerprintValue]
+    identity_quality: dict[str, dict[str, Any]]
     pairwise: dict[str, SourcePairOverlap]
 
     def to_dict(self) -> dict[str, Any]:
@@ -54,6 +56,7 @@ class SourceOverlapReport:
                 key: value.to_dict()
                 for key, value in self.by_source.items()
             },
+            "identity_quality": self.identity_quality,
             "pairwise": {
                 key: value.to_dict()
                 for key, value in self.pairwise.items()
@@ -66,7 +69,8 @@ def build_source_overlap_report(store: SQLiteStore) -> SourceOverlapReport:
 
     A fingerprint is based on normalized company name, title and city. It is only a
     benchmark diagnostic: matching fingerprints are candidates for overlap, not a
-    production-grade duplicate identity decision.
+    production-grade duplicate identity decision. The report also carries job-level
+    identity-quality diagnostics so source value can be judged alongside exclusivity.
     """
 
     store.init_schema()
@@ -127,6 +131,10 @@ def build_source_overlap_report(store: SQLiteStore) -> SourceOverlapReport:
             overlap_rate_b=_ratio(len(shared), len(fingerprints_b)),
         )
 
+    identity_quality = {
+        source: metrics.to_dict()
+        for source, metrics in build_source_identity_metrics(store).items()
+    }
     unique_fingerprints = len(fingerprint_sources)
     shared_fingerprints = sum(
         1 for sources in fingerprint_sources.values() if len(sources) >= 2
@@ -139,6 +147,7 @@ def build_source_overlap_report(store: SQLiteStore) -> SourceOverlapReport:
             unique_fingerprints,
         ),
         by_source=by_source,
+        identity_quality=identity_quality,
         pairwise=pairwise,
     )
 
