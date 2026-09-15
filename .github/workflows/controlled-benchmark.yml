@@ -1,0 +1,115 @@
+name: Controlled Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Comma-separated job sources"
+        required: true
+        default: "olx,jooble,adzuna"
+        type: string
+      target_jobs:
+        description: "Target number of jobs in the benchmark database"
+        required: true
+        default: "1000"
+        type: string
+      max_rounds:
+        description: "Maximum collection rounds"
+        required: true
+        default: "100"
+        type: string
+      max_enrichment_companies:
+        description: "Maximum companies to enrich"
+        required: true
+        default: "1000"
+        type: string
+      label_sampling_seed:
+        description: "Deterministic ground-truth sampling seed"
+        required: true
+        default: "faro-ground-truth-v1"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faro-controlled-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+      JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
+      ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+      ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+      CAREERJET_API_KEY: ${{ secrets.CAREERJET_API_KEY }}
+      CAREERJET_REFERER: ${{ secrets.CAREERJET_REFERER }}
+      CAREERJET_USER_IP: ${{ secrets.CAREERJET_USER_IP }}
+      CAREERJET_USER_AGENT: ${{ secrets.CAREERJET_USER_AGENT }}
+      EPRACA_PARTNER: ${{ secrets.EPRACA_PARTNER }}
+      AGREGATOR_USER_AGENT: FaroEmployerDiscoveryBenchmark/0.1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Preflight
+        run: |
+          agregator-benchmark preflight \
+            --sources "${{ inputs.sources }}" \
+            --strict
+
+      - name: Initialize benchmark outcome
+        run: |
+          mkdir -p benchmark
+          echo "99" > benchmark/exit_code.txt
+
+      - name: Run controlled benchmark
+        shell: bash
+        run: |
+          set +e
+          agregator-benchmark run \
+            --db benchmark/benchmark.sqlite3 \
+            --output-dir benchmark/run \
+            --sources "${{ inputs.sources }}" \
+            --target-jobs "${{ inputs.target_jobs }}" \
+            --max-rounds "${{ inputs.max_rounds }}" \
+            --enrichment-batch-size 25 \
+            --max-enrichment-companies "${{ inputs.max_enrichment_companies }}" \
+            --label-sampling-seed "${{ inputs.label_sampling_seed }}" \
+            --strict
+          code=$?
+          echo "$code" > benchmark/exit_code.txt
+          exit 0
+
+      - name: Upload benchmark workspace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: faro-controlled-benchmark-${{ github.run_id }}
+          path: benchmark/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce benchmark result
+        if: always()
+        shell: bash
+        run: |
+          code=99
+          if [ -f benchmark/exit_code.txt ]; then
+            code=$(cat benchmark/exit_code.txt)
+          fi
+          if [ "$code" -ne 0 ]; then
+            echo "Controlled benchmark did not complete successfully (exit code: $code)."
+            exit "$code"
+          fi
