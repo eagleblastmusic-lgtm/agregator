@@ -13,7 +13,7 @@ Szczegóły planu: [`PLAN.md`](PLAN.md). Uruchomienie benchmarku: [`BENCHMARK_RU
 - **M4 foundations** — `sitemap.xml`, priorytety stron kontakt/B2B, obfuskowane e-maile, semantyka formularzy, immutable contact/page evidence z SHA-256 oraz timeline obserwacji evidence.
 - **Quality benchmark** — osobne ground truth i ewaluatory dla Company Resolution, domen i kontaktów, wspólny `quality-gate` oraz diagnostyka `decision_by_kind`.
 - **Employer Discovery Score** — niezależny biznesowy ranking 0–100.
-- **Controlled benchmark workspace** — end-to-end collection → enrichment → report → dataset → offline evidence → deterministycznie próbkowane label templates.
+- **Controlled benchmark workspace** — end-to-end collection → enrichment → report → dataset → offline evidence → deterministyczny sampling → blind primary labels + prediction reference.
 
 ## Źródła ofert
 
@@ -106,10 +106,11 @@ agregator-benchmark run \
   --target-jobs 1000 \
   --max-rounds 100 \
   --enrichment-batch-size 25 \
-  --max-enrichment-companies 1000
+  --max-enrichment-companies 1000 \
+  --label-sampling-seed faro-ground-truth-v1
 ```
 
-Workflow tworzy `collection.json`, `enrichment.json`, `benchmark_report.json`, dataset schema v7, pakiet etykiet, `labels/sampling_manifest.json` i `benchmark_run_manifest.json`.
+Workflow tworzy `collection.json`, `enrichment.json`, `benchmark_report.json`, dataset schema v7, pakiet etykiet, `labels/sampling_manifest.json`, `labels/prediction_reference/` i `benchmark_run_manifest.json` schema v5.
 
 Manifest zawiera `readiness`:
 
@@ -123,9 +124,9 @@ Manifest zawiera `readiness`:
 
 `--strict` zwraca kod wyjścia 2, jeśli target nie został osiągnięty albo enrichment nie został w pełni domknięty. Nie zastępuje to quality gate — oznacza tylko techniczną gotowość do ręcznego labelingu.
 
-## Ground truth i sampling
+## Ground truth, sampling i blind labeling
 
-Pakiet labelingu obejmuje:
+Pakiet labelingu obejmuje główne pliki do niezależnego oznaczania:
 
 ```text
 company_resolution_truth.csv
@@ -134,7 +135,16 @@ contact_classification_truth.csv
 sampling_manifest.json
 ```
 
-Label templates nie są już po prostu pierwszymi N rekordami z SQLite. Jeżeli populacja przekracza limit, stosowany jest deterministyczny sampling warstwowy z audytowalnym seedem.
+oraz osobny katalog:
+
+```text
+prediction_reference/
+  company_resolution_reference.csv
+  website_resolution_reference.csv
+  contact_classification_reference.csv
+```
+
+Label templates nie są po prostu pierwszymi N rekordami z SQLite. Jeżeli populacja przekracza limit, stosowany jest deterministyczny sampling warstwowy z audytowalnym seedem.
 
 Warstwy obejmują m.in.:
 
@@ -144,9 +154,11 @@ Warstwy obejmują m.in.:
 
 Dla Company Resolution część budżetu próbki jest rezerwowana na pary ofert należące do tego samego przewidywanego `company_id`, aby pairwise precision/recall/F1 nie były liczone na próbce pozbawionej przypadków merge. Pozostały budżet jest rozdzielany proporcjonalnie pomiędzy warstwy.
 
-`sampling_manifest.json` zapisuje population/sample count per stratum, seed i liczbę pairwise anchors. Dzięki temu próbkę można odtworzyć oraz ocenić jej pokrycie przed ręcznym labelingiem.
+`sampling_manifest.json` zapisuje population/sample count per stratum, seed i liczbę pairwise anchors. `agregator-benchmark status` sprawdza także zgodność deklarowanych sampled rows z faktyczną liczbą rekordów w plikach truth i raportuje niespójności jako `audit_warnings`.
 
-Website ground truth zawiera dodatkowo `latest_verification_id`, outcome, predicted origin/source, liczbę source website candidates i verification signals. `latest_verification_id` można łączyć z `website_page_snapshots.csv` podczas ręcznego audytu.
+Po samplingu pełne prediction-rich rekordy są kopiowane do `prediction_reference/`. Główne `*_truth.csv` są następnie **blind**: usuwane są kolumny z prognozą modelu, metodą/scoringiem i classifier signal, ale pozostają identyfikatory, puste pola truth oraz potrzebny kontekst/evidence.
+
+Dzięki temu primary annotator nie widzi np. `predicted_company_id`, `predicted_website_url` czy `predicted_decision` przed zapisaniem własnej etykiety. Prediction-reference służy później do adjudication i analizy błędów.
 
 Quality gate mierzy:
 
@@ -178,6 +190,7 @@ Należy zmierzyć:
 - jakość GREEN/REVIEW/IGNORE globalnie i per `email`/`form`,
 - stabilność evidence przy powtórnych obserwacjach,
 - pokrycie warstw w `sampling_manifest.json`,
+- różnicę pomiędzy blind primary labels a ewentualnym późniejszym adjudication,
 - rozkład Employer Discovery Score,
 - koszt/czas per source i per firma.
 
@@ -191,5 +204,6 @@ Należy zmierzyć:
 - integracje partnerskie wymagają prawidłowej autoryzacji,
 - formularz/checkbox marketingowy jest sygnałem do REVIEW, nie zgodą na outreach,
 - quality gate wymaga ręcznie oznaczonego ground truth,
-- sampling pomaga zbudować reprezentatywniejszą próbkę, ale nie zastępuje ręcznej walidacji i interpretacji supportu per stratum,
+- sampling pomaga zbudować mniej tendencyjną próbkę, ale nie zastępuje ręcznej walidacji ani interpretacji supportu per stratum,
+- prediction-reference nie powinien być używany podczas primary labeling,
 - outreach i automatyczna wysyłka wiadomości pozostają poza zakresem repo.
