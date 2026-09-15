@@ -32,14 +32,30 @@ def test_default_registry_exposes_access_policy_metadata() -> None:
     assert olx.access_mode == "public_web_endpoint"
     assert olx.experimental is True
     assert olx.notes is not None
+    assert olx.required_env == ()
 
     epraca = registry.describe("epraca")
     assert epraca.access_mode == "official_partner_feed"
     assert epraca.experimental is False
+    assert epraca.required_env == ("EPRACA_PARTNER",)
+    assert "EPRACA_ALL" in epraca.configuration_env
 
     jooble = registry.describe("jooble")
     assert jooble.access_mode == "partner_api"
     assert jooble.experimental is False
+    assert jooble.required_env == ("JOOBLE_API_KEY",)
+    assert "JOOBLE_LOCATION" in jooble.configuration_env
+
+    adzuna = registry.describe("adzuna")
+    assert adzuna.required_env == ("ADZUNA_APP_ID", "ADZUNA_APP_KEY")
+
+    careerjet = registry.describe("careerjet")
+    assert careerjet.required_env == (
+        "CAREERJET_API_KEY",
+        "CAREERJET_REFERER",
+        "CAREERJET_USER_IP",
+        "CAREERJET_USER_AGENT",
+    )
 
 
 def test_jooble_registry_requires_key(monkeypatch: pytest.MonkeyPatch) -> None:
