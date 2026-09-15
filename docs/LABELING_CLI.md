@@ -1,8 +1,8 @@
 # Faro — blind ground-truth labeling CLI
 
-Ten workflow służy wyłącznie do ręcznego oznaczania plików `labels/*_truth.csv` wygenerowanych przez kontrolowany benchmark.
+Ten workflow służy wyłącznie do ręcznego oznaczania plików `labels/*_truth.csv` wygenerowanych przez kontrolowany benchmark oraz późniejszego, jawnie oddzielonego adjudication.
 
-Najważniejsza zasada metodologiczna: **primary labeling pozostaje blind**. Komendy poniżej nie czytają `labels/prediction_reference/` i nie mają opcji „zaakceptuj predykcję”. Predykcje służą dopiero do adjudication i analizy błędów po zapisaniu niezależnej etykiety.
+Najważniejsza zasada metodologiczna: **primary labeling pozostaje blind**. `label-next` i `label-set` nie czytają `labels/prediction_reference/` i nie mają opcji „zaakceptuj predykcję”. Predykcja może zostać pokazana przez osobną komendę `label-reference` dopiero po zapisaniu niezależnej etykiety danego wiersza.
 
 ## Typy labelingu
 
@@ -119,6 +119,8 @@ W CSV zostanie zapisane:
 __exclude__
 ```
 
+`__exclude__` nie powinno być przekazywane przez `--value`; CLI wymaga jawnego `--exclude`. Dla kontaktów `--exclude` nie może być łączone z `--purpose`.
+
 Wykluczenie jest liczone przez `status` jako zakończony, ale audytowalny rekord i nie trafia do ewaluacji jakości.
 
 ## Ochrona przed przypadkowym nadpisaniem
@@ -139,6 +141,42 @@ agregator-benchmark label-set \
   --value review \
   --overwrite
 ```
+
+## Adjudication — pokazanie predykcji dopiero po truth
+
+Po zapisaniu niezależnej etykiety konkretnego wiersza można jawnie pobrać odpowiadający rekord z `prediction_reference/`:
+
+```bash
+agregator-benchmark label-reference \
+  --label-dir benchmark/run/labels \
+  --kind company_resolution \
+  --row 17
+```
+
+Komenda zwraca m.in.:
+
+```text
+kind
+row_number
+truth_value
+truth_purpose
+reference_path
+prediction
+```
+
+Jeżeli `truth_*` dla wskazanego wiersza jest jeszcze puste, dostęp jest blokowany. Dzięki temu normalny przebieg pozostaje:
+
+```text
+blind evidence
+    -> niezależna etykieta truth
+    -> zapis do *_truth.csv
+    -> dopiero wtedy label-reference
+    -> adjudication / analiza błędu
+```
+
+`label-reference` dodatkowo porównuje stabilne pola identyfikujące rekord pomiędzy primary CSV a prediction-reference. Dla Company Resolution są to `source + source_id`, dla Website Resolution `company_id`, a dla Contact Classification `contact_id`. Jeżeli pliki zostały niezależnie przestawione lub rozjechały się, komenda odmawia pokazania predykcji zamiast po cichu zwrócić niewłaściwy rekord.
+
+`label-reference` nie zmienia etykiety i nie kopiuje predykcji do truth. Ewentualna korekta po adjudication nadal wymaga osobnego `label-set --overwrite`.
 
 ## Kontrola postępu
 
@@ -168,4 +206,4 @@ agregator-benchmark evaluate \
   --fail-on-error
 ```
 
-Dopiero po zapisaniu niezależnych etykiet można otworzyć `labels/prediction_reference/` do adjudication, analizy FP/FN i kalibracji reguł.
+Predykcje należy wykorzystywać do adjudication, analizy FP/FN i kalibracji reguł dopiero po zapisaniu niezależnych etykiet primary.
