@@ -9,6 +9,14 @@ from .careerjet import CareerjetApiSource
 from .epraca import EPracaSource
 from .jooble import JoobleApiSource
 from .olx import OlxPublicSource
+from .public_sources import (
+    justjoinit_source,
+    karierawfinansach_source,
+    nofluffjobs_source,
+    pracuj_source,
+    rocketjobs_source,
+    skillshot_source,
+)
 from .registry import SourceRegistry
 
 
@@ -58,9 +66,7 @@ def _careerjet_from_env() -> CareerjetApiSource:
         if not value
     ]
     if missing:
-        raise ValueError(
-            "Ustaw wymagane zmienne Careerjet: " + ", ".join(missing)
-        )
+        raise ValueError("Ustaw wymagane zmienne Careerjet: " + ", ".join(missing))
 
     return CareerjetApiSource(
         api_key,
@@ -108,6 +114,66 @@ def default_registry() -> SourceRegistry:
         notes=(
             "Uses a public read endpoint outside the documented partner API contract; "
             "revalidate source terms/access before production use."
+        ),
+    )
+    registry.register(
+        "pracuj",
+        pracuj_source,
+        access_mode="public_sitemap_html",
+        experimental=True,
+        notes=(
+            "Current-offer sitemap is advertised in robots.txt; detail pages are fetched "
+            "only when robots allows them. Terms review remains required before production."
+        ),
+    )
+    registry.register(
+        "skillshot",
+        skillshot_source,
+        access_mode="public_html",
+        experimental=True,
+        notes=(
+            "Server-rendered public listing with numbered pagination; robots is checked "
+            "before listing and detail requests."
+        ),
+    )
+    registry.register(
+        "nofluffjobs",
+        nofluffjobs_source,
+        access_mode="public_html",
+        experimental=True,
+        notes=(
+            "Public HTML only. Hidden/API endpoints are not used; current adapter collects "
+            "the server-rendered listing batch and respects robots.txt."
+        ),
+    )
+    registry.register(
+        "justjoinit",
+        justjoinit_source,
+        access_mode="public_html",
+        experimental=True,
+        notes=(
+            "Public server-rendered listing/detail pages only; no private API or access-control "
+            "bypass. Pagination expansion is pending source-specific validation."
+        ),
+    )
+    registry.register(
+        "rocketjobs",
+        rocketjobs_source,
+        access_mode="public_html",
+        experimental=True,
+        notes=(
+            "Public server-rendered listing/detail pages only; pagination expansion and terms "
+            "review are pending."
+        ),
+    )
+    registry.register(
+        "karierawfinansach",
+        karierawfinansach_source,
+        access_mode="public_html",
+        experimental=True,
+        notes=(
+            "Public listing/detail pages only; current first batch is intentionally conservative "
+            "until pagination and terms are fully audited."
         ),
     )
     registry.register(
