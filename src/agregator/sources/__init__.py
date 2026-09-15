@@ -14,6 +14,7 @@ from .ngo import NgoPublicSource
 from .ofertypracy_edu import OfertyPracyEduPublicSource
 from .olx import OlxPublicSource
 from .public_sources import (
+    bulldogjob_source,
     justjoinit_source,
     karierawfinansach_source,
     nofluffjobs_source,
@@ -144,6 +145,17 @@ def default_registry() -> SourceRegistry:
         notes=(
             "Public theprotocol.it listing/detail pages only. Current adapter uses the visible "
             "HTML/JSON-LD path and does not call private APIs or bypass access controls."
+        ),
+    )
+    registry.register(
+        "bulldogjob",
+        bulldogjob_source,
+        access_mode="public_html",
+        experimental=True,
+        notes=(
+            "Public Bulldogjob listing/detail pages only. The initial adapter collects the "
+            "server-rendered batch; complete pagination/infinite-load coverage still needs "
+            "real-source validation."
         ),
     )
     registry.register(
