@@ -95,6 +95,27 @@ class SQLiteStore:
                     cursor TEXT,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS source_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'running',
+                    cursor_before TEXT,
+                    cursor_after TEXT,
+                    pages_requested INTEGER NOT NULL,
+                    pages_processed INTEGER NOT NULL DEFAULT 0,
+                    jobs_seen INTEGER NOT NULL DEFAULT 0,
+                    jobs_inserted INTEGER NOT NULL DEFAULT 0,
+                    jobs_updated INTEGER NOT NULL DEFAULT 0,
+                    companies_created INTEGER NOT NULL DEFAULT 0,
+                    error_type TEXT,
+                    error_message TEXT,
+                    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    finished_at TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_source_runs_source_started
+                    ON source_runs(source, started_at DESC);
                 """
             )
             self._ensure_column(connection, "companies", "identity_source", "TEXT")
@@ -126,6 +147,102 @@ class SQLiteStore:
                 """,
                 (source, cursor),
             )
+
+    def start_source_run(
+        self,
+        source: str,
+        *,
+        cursor_before: str | None,
+        pages_requested: int,
+    ) -> int:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO source_runs(source, cursor_before, pages_requested)
+                VALUES (?, ?, ?)
+                """,
+                (source, cursor_before, pages_requested),
+            )
+            return int(cursor.lastrowid)
+
+    def finish_source_run(
+        self,
+        run_id: int,
+        *,
+        status: str,
+        cursor_after: str | None,
+        pages_processed: int,
+        stats: UpsertStats,
+        error: Exception | None = None,
+    ) -> None:
+        error_type = type(error).__name__ if error is not None else None
+        error_message = str(error)[:1000] if error is not None else None
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE source_runs
+                SET status = ?,
+                    cursor_after = ?,
+                    pages_processed = ?,
+                    jobs_seen = ?,
+                    jobs_inserted = ?,
+                    jobs_updated = ?,
+                    companies_created = ?,
+                    error_type = ?,
+                    error_message = ?,
+                    finished_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    cursor_after,
+                    pages_processed,
+                    stats.jobs_seen,
+                    stats.jobs_inserted,
+                    stats.jobs_updated,
+                    stats.companies_created,
+                    error_type,
+                    error_message,
+                    run_id,
+                ),
+            )
+
+    def list_source_runs(
+        self,
+        *,
+        source: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        query = """
+            SELECT
+                id,
+                source,
+                status,
+                cursor_before,
+                cursor_after,
+                pages_requested,
+                pages_processed,
+                jobs_seen,
+                jobs_inserted,
+                jobs_updated,
+                companies_created,
+                error_type,
+                error_message,
+                started_at,
+                finished_at
+            FROM source_runs
+        """
+        params: tuple[object, ...]
+        if source:
+            query += " WHERE source = ?"
+            params = (source, limit)
+        else:
+            params = (limit,)
+        query += " ORDER BY id DESC LIMIT ?"
+
+        with self.connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
 
     def upsert_jobs(self, jobs: list[JobPosting]) -> UpsertStats:
         stats = UpsertStats()
