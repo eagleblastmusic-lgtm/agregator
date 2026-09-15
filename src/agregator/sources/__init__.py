@@ -20,6 +20,7 @@ from .public_sources import (
     pracuj_source,
     rocketjobs_source,
     skillshot_source,
+    theprotocol_source,
 )
 from .registry import SourceRegistry
 
@@ -133,6 +134,16 @@ def default_registry() -> SourceRegistry:
         notes=(
             "Public server-rendered /praca/strona-N listing and /oferta detail pages. "
             "Employer name, NIP when visible, and full source evidence are preserved."
+        ),
+    )
+    registry.register(
+        "theprotocol",
+        theprotocol_source,
+        access_mode="public_html",
+        experimental=True,
+        notes=(
+            "Public theprotocol.it listing/detail pages only. Current adapter uses the visible "
+            "HTML/JSON-LD path and does not call private APIs or bypass access controls."
         ),
     )
     registry.register(
