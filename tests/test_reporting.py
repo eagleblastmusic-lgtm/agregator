@@ -83,6 +83,10 @@ def test_benchmark_report_counts_pipeline_outputs(tmp_path: Path) -> None:
     assert report.high_confidence_companies == 1
     assert report.enriched_companies == 1
     assert report.websites_found == 1
+    assert report.company_identifiers_total == 0
+    assert report.companies_with_identifiers == 0
+    assert report.identifier_conflicts == 0
+    assert report.identifier_company_rate == 0.0
     assert report.green_channels == 1
     assert report.company_to_job_ratio == 0.5
     assert report.website_find_rate == 1.0
