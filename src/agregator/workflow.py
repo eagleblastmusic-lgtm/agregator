@@ -9,6 +9,7 @@ from .enrich import enrich_pending_companies
 from .ingest import ingest_source
 from .lead_export import export_company_leads_xlsx
 from .pipeline import EmployerDiscoveryPipeline
+from .source_health import build_source_health
 from .sources import default_registry
 from .sources.registry import SourceRegistry
 from .storage import SQLiteStore
@@ -25,6 +26,7 @@ class WorkflowResult:
     successful_sources: list[str] = field(default_factory=list)
     failed_sources: list[str] = field(default_factory=list)
     source_results: list[dict[str, Any]] = field(default_factory=list)
+    source_health: list[dict[str, Any]] = field(default_factory=list)
     enrichment: dict[str, Any] = field(default_factory=dict)
     export: dict[str, Any] = field(default_factory=dict)
 
@@ -153,6 +155,7 @@ async def run_end_to_end_workflow(
         refresh=refresh_enrichment,
     )
     export = export_company_leads_xlsx(store, output)
+    source_health = [item.to_dict() for item in build_source_health(store, requested)]
 
     return WorkflowResult(
         db=db,
@@ -164,6 +167,7 @@ async def run_end_to_end_workflow(
         successful_sources=successful,
         failed_sources=failed,
         source_results=source_results,
+        source_health=source_health,
         enrichment=asdict(enrichment),
         export=export.to_dict(),
     )
