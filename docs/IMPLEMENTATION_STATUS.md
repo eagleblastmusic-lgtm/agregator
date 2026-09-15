@@ -1,222 +1,178 @@
 # Faro Employer Discovery Engine — implementation status
 
-Aktualny zakres PR obejmuje M0–M3, fundamenty M4 oraz warstwę pomiarową potrzebną do kontrolowanego benchmarku: enrichment kontaktów, agregację ofert, Company Resolution, dwuetapową weryfikację oficjalnej strony WWW, audyt provenance i ręcznie etykietowane quality gates.
+Aktualny PR obejmuje M0–M3, fundamenty M4 oraz kompletną warstwę pomiarową do kontrolowanego benchmarku i ręcznego ground truth.
 
-Szczegółowy plan i checkpointy: [`PLAN.md`](PLAN.md).
+Szczegóły planu: [`PLAN.md`](PLAN.md). Uruchomienie benchmarku: [`BENCHMARK_RUN.md`](BENCHMARK_RUN.md).
 
 ## Gotowe baseline'y
 
-- M0: crawler + evidence + GREEN/REVIEW/IGNORE.
-- M1: OLX, Jooble, Adzuna, Careerjet Publisher API i oficjalny ePraca WebService, source registry, resumowalne runy, katalog 91 źródeł, pełny bundle eksportowy dla Faro oraz kontrolowany `benchmark-collect` round-robin.
-- M2: konserwatywny Company Resolution v1, aliasy/lokalizacje, metody/confidence, ground truth, pairwise precision/recall/F1, fuzzy REVIEW bez automatycznego merge oraz warstwa jawnych identyfikatorów pracodawcy.
-- M3: ranking wyników wyszukiwarki + first-party content verification z fallbackiem do kolejnych kandydatów, źródłowe kandydatury WWW weryfikowane przed search fallback, strukturalne provenance rozwiązania domeny, JSON-LD Organization oraz zapis każdej próby weryfikacji kandydata.
-- M4 foundations: `sitemap.xml`, priorytety podstron współpracy/B2B, typowe obfuskowane e-maile, formularze ze zgodą na informacje handlowe, append-only evidence snapshots z SHA-256.
-- Quality benchmark: osobne ground truth i ewaluatory dla Company Resolution, wyboru oficjalnej domeny oraz klasyfikacji kontaktów.
-- Employer Discovery Score: niezależny od confidence ranking firm na podstawie liczby ofert, liczby źródeł, zweryfikowanej WWW, strony biznesowej, GREEN channel i jakości identity.
+- **M0** — crawler first-party, evidence, GREEN/REVIEW/IGNORE, CLI i testy.
+- **M1** — OLX, Jooble, Adzuna, Careerjet Publisher API, ePraca WebService, source registry, resumowalne runy, katalog 91 źródeł, round-robin collector.
+- **M2** — konserwatywny Company Resolution, aliasy/lokalizacje, metody/confidence, jawne identyfikatory pracodawcy, konflikty NIP/REGON/KRS, fuzzy REVIEW-only, ground truth i pairwise precision/recall/F1.
+- **M3** — ranking wyników wyszukiwarki, źródłowe kandydatury WWW, first-party identity verification, search fallback, strukturalne provenance rozwiązania domeny, JSON-LD Organization i audit każdej próby.
+- **M4 foundations** — `sitemap.xml`, priorytety stron kontakt/B2B, obfuskowane e-maile, formularze, immutable contact/page evidence z SHA-256.
+- **Quality benchmark** — osobne ground truth i ewaluatory dla Company Resolution, domen i kontaktów, wspólny `quality-gate`.
+- **Employer Discovery Score** — niezależny biznesowy ranking 0–100.
+- **Controlled benchmark workspace** — end-to-end collection → enrichment → report → dataset → offline evidence → label templates.
 
-## Jawne identyfikatory pracodawcy
+## Źródła ofert
 
-`JobPosting` może przenosić źródłowe identyfikatory przedsiębiorstwa wraz z provenance i confidence. Są one zapisywane do `company_identifiers` po przypisaniu oferty do firmy.
-
-Aktualnie rozpoznawane i normalizowane są m.in.:
-
-- `nip` — 10 cyfr,
-- `regon` — 9 lub 14 cyfr,
-- `krs` — 10 cyfr,
-- inne identyfikatory mogą być przechowane jako jawne identyfikatory tekstowe.
-
-ePraca mapuje oficjalne pola `nip` i `regon` z confidence `0.995`. Jeśli ten sam identyfikator pojawi się pod więcej niż jednym aktualnym `company_id`, silnik zapisuje konflikt do warstwy pomiarowej/REVIEW i **nie wykonuje automatycznego merge**. Benchmark raportuje `company_identifiers_total`, `companies_with_identifiers`, `identifier_company_rate` oraz `identifier_conflicts`.
-
-## Źródłowe kandydatury oficjalnej WWW
-
-`JobPosting` może także przenosić jawnie podany przez źródło adres WWW pracodawcy jako `CompanyWebsiteCandidate`. Taki URL jest zapisywany do `company_website_candidates` razem z hostem, provenance, confidence, liczbą obserwacji i timestampami.
-
-Kandydat źródłowy **nie jest automatycznie uznawany za oficjalną stronę firmy**. Enrichment najpierw crawluje URL i przepuszcza go przez ten sam first-party identity verifier, który chroni wybór domeny z wyszukiwarki. Dopiero po pozytywnej weryfikacji URL może zostać użyty jako oficjalna strona firmy i do crawl kontaktów. Jeśli kandydat źródłowy nie potwierdzi tożsamości firmy, Faro przechodzi do normalnego search fallback.
-
-Rozstrzygnięcie WWW ma teraz jawne, strukturalne provenance:
-
-- `website_resolution_origin = source_candidate` — zweryfikowany URL pochodzący ze źródła oferty,
-- `website_resolution_origin = search` — domena znaleziona i zweryfikowana przez SearchProvider,
-- `website_resolution_origin = known_url` — URL podany jawnie do trybu `scan-url`,
-- `website_resolution_source` wskazuje konkretne źródło, np. `official_feed.adresWww`, `brave` albo `static` w testach.
-
-Takie same pola `origin` i `source` są zapisywane także na każdej `WebsiteVerificationAttempt`, więc można rozróżnić odrzuconą kandydaturę źródłową od późniejszego trafienia z wyszukiwarki bez parsowania tekstowych sygnałów.
-
-Benchmark raportuje:
-
-- `website_candidates_total`,
-- `companies_with_website_candidates`,
-- `source_verified_websites`,
-- `source_website_candidate_company_rate`,
-- `source_verified_website_rate`,
-- `source_verified_share_of_found` — udział znalezionych stron WWW, które udało się potwierdzić bez użycia wyszukiwarki,
-- `website_resolution_origin_counts` — liczba finalnych zweryfikowanych domen per origin,
-- `source_verified_website_counts` — liczba finalnych trafień źródłowych pogrupowana po provenance.
-
-## ePraca — oficjalny WebService integratorski
-
-Adapter `epraca` korzysta z oficjalnego WebService v2 i wymaga wartości `Partner` przypisanej podmiotowi przez MRPiPS. Nie ma żadnego fallbacku omijającego autoryzację.
-
-Wymagana konfiguracja:
+Zarejestrowane adaptery:
 
 ```text
-EPRACA_PARTNER=<wartość nadana przez MRPiPS>
-EPRACA_LANGUAGE=pl
+olx
+jooble
+adzuna
+careerjet
+epraca
 ```
 
-oraz dokładnie jedno kryterium:
+Careerjet i ePraca wymagają prawidłowej konfiguracji partnera/integratora. Repo nie tworzy sztucznych danych wymaganych przez te usługi i nie obchodzi uwierzytelniania.
+
+## Company Resolution
+
+Każda oferta zachowuje m.in. `company_resolution_method`, `company_resolution_confidence`, provenance i confidence źródła nazwy pracodawcy.
+
+Jawne `CompanyIdentifier` są normalizowane i zapisywane do `company_identifiers`. Rozpoznawane są m.in. NIP, REGON i KRS. Konflikt tego samego identyfikatora pomiędzy różnymi `company_id` trafia do REVIEW i nie powoduje automatycznego merge.
+
+Fuzzy similarity pozostaje warstwą REVIEW-only do czasu walidacji na rzeczywistym ground truth.
+
+## Oficjalna WWW i provenance
+
+`JobPosting` może zawierać `CompanyWebsiteCandidate`. Kandydat źródłowy nie jest przyjmowany w ciemno — przechodzi ten sam first-party identity verifier co wynik wyszukiwarki.
+
+Finalne rozwiązanie domeny zapisuje:
 
 ```text
-EPRACA_WOJEWODZTWO=22
+website_resolution_origin = source_candidate | search | known_url
+website_resolution_source = np. official_feed.adresWww | brave | scan_known_website
 ```
 
-albo:
+Każda `WebsiteVerificationAttempt` ma również `origin` i `source`, dlatego audit może odtworzyć sekwencję np.:
 
 ```text
-EPRACA_JEDNOSTKA=22000
+błędny URL ze źródła
+  -> rejected
+  -> Brave search
+  -> poprawna domena
+  -> accepted
 ```
 
-albo:
+Benchmark mierzy zarówno finalny origin/source, jak i acceptance/rejection źródłowych kandydatur oraz search fallback po odrzuceniu.
+
+## Audit trail
+
+`website_verification_runs` jest append-only i przechowuje:
+
+- finalny outcome,
+- `resolution_origin` / `resolution_source`,
+- search candidates,
+- wszystkie rzeczywiście sprawdzone `WebsiteVerificationAttempt`,
+- scanned pages,
+- `page_snapshots_json`.
+
+`contact_evidence_snapshots` przechowuje immutable evidence kontaktowe z SHA-256.
+
+Dodatkowy exporter spłaszcza page snapshots do `website_page_snapshots.csv`, obejmując również odrzucone kandydatury domen. Dzięki temu ręczny audyt nie wymaga późniejszego ponownego crawlowania strony.
+
+## Dataset Faro — schema v6
+
+`agregator export-dataset` generuje:
 
 ```text
-EPRACA_ALL=true
+companies.csv
+job_postings.csv
+company_identifiers.csv
+company_website_candidates.csv
+contact_channels.csv
+website_verification_runs.csv
+contact_evidence_snapshots.csv
+website_page_snapshots.csv
+manifest.json
 ```
 
-Adapter wysyła SOAP POST, rozpoznaje statusy usługi, odczytuje zwracane archiwum ZIP i parsuje pliki JSON z aktywnymi ofertami do wspólnego modelu `JobPosting`. Obsługiwany jest zarówno ZIP osadzony w odpowiedzi SOAP jako base64, jak i bezpośrednia odpowiedź ZIP. Pole `pracodawca` ma wysoki identity confidence, a `identyfikatorOferty`, `stanowisko`, `miejscowosc`, `link`, `dataDodaniaOferty`, `dataAktualizacji`, `nip` i `regon` są mapowane z oficjalnego feedu. Jeżeli feed zawiera `adresWww`, jest on zapisywany jako źródłowy kandydat WWW i nadal wymaga weryfikacji tożsamości strony.
+`website_page_snapshots.csv` zawiera URL, status HTTP, SHA-256, excerpt tekstu, attempt/final scope i provenance próby. `manifest.json` raportuje także liczbę snapshotów i parse errors.
 
-Ze względu na autoryzację, limit wywołań i okna dostępności ePraca nie jest dodawana automatycznie do domyślnego benchmarku. Można ją jawnie podać przez `--sources epraca,...` po uzyskaniu prawidłowej konfiguracji integratora.
+## Kontrolowany benchmark end-to-end
 
-## Careerjet Publisher API
-
-Adapter `careerjet` korzysta z oficjalnego endpointu Publisher API v4 i wymaga konfiguracji partnera. Nie wymyśla danych wymaganych przez Careerjet. Do uruchomienia potrzebne są:
-
-```text
-CAREERJET_API_KEY
-CAREERJET_REFERER
-CAREERJET_USER_IP
-CAREERJET_USER_AGENT
-```
-
-Dodatkowo można ustawić `CAREERJET_LOCALE`, `CAREERJET_KEYWORDS`, `CAREERJET_LOCATION`, `CAREERJET_PAGE_SIZE` i `CAREERJET_SORT`.
-
-Careerjet wymaga, aby `user_ip`, `user_agent` i `Referer` odpowiadały rzeczywistemu kontekstowi użycia Publisher API. Z tego powodu `careerjet` nie został dodany do domyślnej listy automatycznego benchmarku backendowego; powinien być używany tylko wtedy, gdy konkretny scenariusz integracji spełnia warunki konta Publisher.
-
-## Kontrolowany benchmark
+Po instalacji dostępny jest osobny entrypoint:
 
 ```bash
-agregator benchmark-collect \
-  --db agregator.sqlite3 \
+agregator-benchmark run \
+  --db benchmark/benchmark.sqlite3 \
+  --output-dir benchmark/run \
   --sources olx,jooble,adzuna \
   --target-jobs 1000 \
-  --max-rounds 100
-
-agregator benchmark --db agregator.sqlite3
+  --max-rounds 100 \
+  --enrichment-batch-size 25 \
+  --max-enrichment-companies 1000
 ```
 
-`benchmark-collect` działa round-robin i daje każdemu aktywnemu źródłu najwyżej jedną stronę na rundę. Źródła bez wymaganej konfiguracji są wyłączane, a powtarzające się błędy runtime mają limit. `benchmark` raportuje także `source_run_metrics`: success rate, strony, oferty, insert/update, utworzone firmy i czas per source, pokrycie i konflikty jawnych identyfikatorów pracodawcy oraz skuteczność źródłowych kandydatur WWW.
+Workflow tworzy `collection.json`, `enrichment.json`, `benchmark_report.json`, dataset schema v6, pakiet etykiet i `benchmark_run_manifest.json`.
 
-## Kluczowe komendy jakościowe
+Manifest zawiera `readiness`:
 
-```bash
-agregator resolution-review --db agregator.sqlite3 --min-score 0.82 --limit 100
+- `collection_target_reached`,
+- `enrichment_complete`,
+- `dataset_exported`,
+- `ground_truth_templates_generated`,
+- `ready_for_manual_labeling`,
+- `manual_ground_truth_required`,
+- `blockers`.
 
-agregator export-quality-labels \
-  --db agregator.sqlite3 \
-  --output-dir benchmark/labels \
-  --job-limit 1000 \
-  --company-limit 1000 \
-  --contact-limit 1000
+`--strict` zwraca kod wyjścia 2, jeśli target nie został osiągnięty albo enrichment nie został w pełni domknięty. Nie zastępuje to quality gate — oznacza tylko techniczną gotowość do ręcznego labelingu.
 
-agregator evaluate-resolution \
-  --db agregator.sqlite3 \
-  --path benchmark/labels/company_resolution_truth.csv
+## Ground truth
 
-agregator evaluate-website \
-  --db agregator.sqlite3 \
-  --path benchmark/labels/website_resolution_truth.csv
+Pakiet labelingu obejmuje:
 
-agregator evaluate-contacts \
-  --db agregator.sqlite3 \
-  --path benchmark/labels/contact_classification_truth.csv
-
-agregator quality-gate \
-  --db agregator.sqlite3 \
-  --resolution-truth benchmark/labels/company_resolution_truth.csv \
-  --website-truth benchmark/labels/website_resolution_truth.csv \
-  --contact-truth benchmark/labels/contact_classification_truth.csv \
-  --fail-on-error
-
-agregator export-dataset --db agregator.sqlite3 --output-dir export/faro
+```text
+company_resolution_truth.csv
+website_resolution_truth.csv
+contact_classification_truth.csv
 ```
 
-## Co mierzy quality gate
+Website ground truth zawiera dodatkowo `latest_verification_id`, outcome, predicted origin/source, liczbę source website candidates i verification signals. `latest_verification_id` można łączyć z `website_page_snapshots.csv` podczas ręcznego audytu.
 
-- Company Resolution: pairwise TP/FP/FN/TN oraz precision/recall/F1.
-- Oficjalna WWW: poprawny host, błędny host, false positive, false negative, precision/recall/F1 i accuracy. `__none__` oznacza ręcznie potwierdzony brak oficjalnej strony.
-- Kontakty: macierz pomyłek GREEN/REVIEW/IGNORE, accuracy, per-class precision/recall/F1, macro F1 oraz opcjonalną zgodność `purpose`.
+Quality gate mierzy:
 
-Domyślne progi `quality-gate` to:
+- Company Resolution: pairwise TP/FP/FN/TN, precision, recall, F1,
+- Website Resolution: TP/FP/FN/TN, wrong domain, precision, recall, F1, accuracy,
+- Contact classification: confusion matrix, per-class metrics i macro F1.
 
-- Company Resolution F1 >= 0.95,
-- Website Resolution F1 >= 0.95,
-- Contact decision macro F1 >= 0.90.
+Domyślne progi pozostają:
 
-Progi są parametrami CLI i przed zamrożeniem produkcyjnym powinny zostać potwierdzone na realnym, ręcznie oznaczonym benchmarku.
+```text
+Company Resolution F1 >= 0.95
+Website Resolution F1 >= 0.95
+Contact decision macro F1 >= 0.90
+```
 
-## Audit trail i eksport Faro
+## Najbliższy gate
 
-Każdy enrichment zapisuje append-only `website_verification_runs`, również gdy żaden kandydat nie został zaakceptowany. Rekord przechowuje finalne `resolution_origin` / `resolution_source`, ranking wyszukiwarki, wszystkie rzeczywiście sprawdzone kandydatury — również źródłowe — wraz z wynikiem weryfikacji, sygnały, odwiedzone strony i finalny confidence.
+Następny krok produktu to **realny benchmark 1000 ofert + ręczny ground truth**, a nie dalsze agresywne rozszerzanie reguł automatycznych.
 
-Migracja audit schema dodaje nowe kolumny do istniejącej bazy przed utworzeniem indeksu origin/source, dzięki czemu starsze pliki SQLite pozostają obsługiwane.
-
-Kontaktowe evidence jest snapshotowane do `contact_evidence_snapshots`. Każdy snapshot ma pełny tekst dowodu, URL, signal, timestamp i SHA-256; identyczny snapshot nie jest dublowany.
-
-`export-dataset` schema v5 eksportuje:
-
-- `companies.csv`,
-- `job_postings.csv`,
-- `company_identifiers.csv`,
-- `company_website_candidates.csv`,
-- `contact_channels.csv`,
-- `website_verification_runs.csv` — także `resolution_origin` i `resolution_source`,
-- `contact_evidence_snapshots.csv`,
-- `manifest.json`.
-
-## M4 — wdrożone fundamenty crawler/classifier v2
-
-- `sitemap.xml` i ograniczona obsługa sitemap index,
-- priorytety `/kontakt`, `/wspolpraca`, `/partnerzy`, `/b2b`, `/dla-firm`, `/dostawcy`, `/franczyza`,
-- rekonstrukcja publicznych adresów typu `wspolpraca [at] firma [dot] pl` i `partnerzy (małpa) firma.pl`,
-- wykrywanie formularzy z checkboxem/frazą zgody na informacje handlowe jako `SALES / REVIEW`, nigdy automatycznie GREEN,
-- JSON-LD `Organization`/`Corporation`/`LocalBusiness` jako dodatkowy sygnał tożsamości oficjalnej WWW,
-- trwały audit trail prób weryfikacji WWW,
-- immutable evidence hash dla znalezionych kanałów.
-
-M4 nie jest jeszcze zamknięte. Do dalszego rozwinięcia pozostają m.in. bogatsza semantyka formularzy, dodatkowe warianty obfuskacji, snapshot/hash całych stron oraz kalibracja classifiera na realnym ground truth.
-
-## Cel najbliższego benchmarku
-
-Próbka 1000 ofert ma dostarczyć danych do kalibracji:
+Należy zmierzyć:
 
 - precision/recall/F1 Company Resolution,
-- jakości fuzzy REVIEW,
-- pokrycia i konfliktów jawnych identyfikatorów firm,
+- jakość fuzzy REVIEW,
+- pokrycie i konflikty jawnych identyfikatorów,
 - precision/recall wyboru oficjalnej domeny,
-- udziału firm z poprawnym enrichmentem,
-- pokrycia źródłowych kandydatur WWW oraz odsetka stron znalezionych bez search fallback,
-- rozkładu origin/source finalnego rozwiązania domeny,
-- jakości GREEN/REVIEW/IGNORE,
-- rozkładu Employer Discovery Score,
-- kosztu/czasu per źródło i per firma.
+- acceptance/rejection source website candidates,
+- search fallback rate po odrzuconym URL źródłowym,
+- udział firm z poprawnym enrichmentem,
+- jakość GREEN/REVIEW/IGNORE,
+- rozkład Employer Discovery Score,
+- koszt/czas per source i per firma.
 
 ## Granice automatyzacji
 
-- fuzzy podobieństwo nazw nie scala firm automatycznie,
-- identyczny NIP/REGON znaleziony pod różnymi `company_id` trafia do konfliktu/REVIEW zamiast automatycznego merge,
-- źródłowy URL firmy jest kandydatem, a nie automatycznie zatwierdzoną oficjalną stroną,
-- domena WWW jest mocnym sygnałem REVIEW, ale auto-merge wymaga wcześniejszej walidacji na ground truth,
-- formularz ze zgodą marketingową jest sygnałem REVIEW, a nie zgodą na automatyczny outreach,
-- quality gate nie zastępuje ręcznego labelingu — mierzy jakość względem etykiet,
-- źródła partnerskie/API nie są zastępowane obchodzeniem uwierzytelniania lub zabezpieczeń,
-- adaptery partnerskie są uruchamiane tylko w kontekście zgodnym z wymaganiami danego partnera,
-- outreach pozostaje poza zakresem repo.
+- tylko publicznie dostępne dane,
+- brak obchodzenia logowania, CAPTCHA, paywalli i kontroli dostępu,
+- fuzzy Company Resolution bez auto-merge,
+- konflikt NIP/REGON/KRS bez auto-merge,
+- źródłowy URL jest kandydatem, nie automatycznie oficjalną domeną,
+- integracje partnerskie wymagają prawidłowej autoryzacji,
+- formularz/checkbox marketingowy jest sygnałem do REVIEW, nie zgodą na outreach,
+- quality gate wymaga ręcznie oznaczonego ground truth,
+- outreach i automatyczna wysyłka wiadomości pozostają poza zakresem repo.
