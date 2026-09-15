@@ -23,6 +23,13 @@ class FakeSource:
         raise AssertionError(f"unexpected cursor: {cursor}")
 
 
+class FailingSource:
+    name = "failing"
+
+    async def collect(self, cursor: str | None = None) -> SourceBatch:
+        raise RuntimeError("source unavailable")
+
+
 def _job(source_id: str) -> JobPosting:
     return JobPosting(
         source="fake",
@@ -42,8 +49,30 @@ async def test_ingest_resumes_from_saved_cursor(tmp_path: Path) -> None:
 
     first = await ingest_source(source, store, pages=1)
     second = await ingest_source(source, store, pages=1)
+    runs = store.list_source_runs(source="fake")
 
     assert first.next_cursor == "page-2"
     assert second.next_cursor is None
     assert source.cursors == [None, "page-2"]
     assert store.list_companies()[0]["job_count"] == 2
+    assert len(runs) == 2
+    assert runs[0]["status"] == "success"
+    assert runs[0]["jobs_inserted"] == 1
+    assert runs[0]["cursor_before"] == "page-2"
+    assert runs[0]["cursor_after"] is None
+    assert first.run_id != second.run_id
+
+
+@pytest.mark.asyncio
+async def test_ingest_records_failed_run(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "failed.sqlite3")
+
+    with pytest.raises(RuntimeError, match="source unavailable"):
+        await ingest_source(FailingSource(), store, pages=2)
+
+    run = store.list_source_runs(source="failing")[0]
+    assert run["status"] == "failed"
+    assert run["pages_requested"] == 2
+    assert run["pages_processed"] == 0
+    assert run["error_type"] == "RuntimeError"
+    assert run["error_message"] == "source unavailable"
