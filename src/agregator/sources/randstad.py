@@ -267,11 +267,12 @@ def _city_after_heading(title_node: Tag) -> str | None:
         "podsumowanie",
         "aplikuj",
     }
+    title_text = title_node.get_text(" ", strip=True).removesuffix(".").casefold()
     for raw in title_node.find_all_next(string=True, limit=20):
         text = str(raw).strip().removesuffix(".")
         if not text or text.casefold() in skip:
             continue
-        if text == title_node.get_text(" ", strip=True):
+        if text.casefold() == title_text:
             continue
         if text.casefold().startswith(("opublikowano", "ważna do")):
             continue
