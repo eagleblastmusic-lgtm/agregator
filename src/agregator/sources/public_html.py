@@ -91,10 +91,7 @@ class PublicHtmlJobSource:
             if owns_client:
                 await client.aclose()
 
-        if not self.config.paginated or not links:
-            next_cursor = None
-        else:
-            next_cursor = str(page + 1)
+        next_cursor = None if not self.config.paginated or not links else str(page + 1)
         return SourceBatch(jobs=jobs, next_cursor=next_cursor)
 
     def _parse_cursor(self, cursor: str | None) -> int:
