@@ -25,6 +25,7 @@ _PUBLIC_ACCESS_MODES = {
     "public_web_endpoint",
     "public_xml",
     "official_public_feed",
+    "official_public_html",
 }
 
 
