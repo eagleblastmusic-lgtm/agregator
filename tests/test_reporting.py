@@ -87,6 +87,14 @@ def test_benchmark_report_counts_pipeline_outputs(tmp_path: Path) -> None:
     assert report.company_to_job_ratio == 0.5
     assert report.website_find_rate == 1.0
     assert report.green_company_rate == 1.0
+    assert report.employer_score_average == 75.0
+    assert report.employer_score_ge_60 == 1
+    assert report.employer_score_distribution == {
+        "0-24": 0,
+        "25-49": 0,
+        "50-74": 0,
+        "75-100": 1,
+    }
     assert report.source_job_counts == {"source-a": 1, "source-b": 1}
     assert report.company_resolution_counts == {
         "exact_name_city": 1,
