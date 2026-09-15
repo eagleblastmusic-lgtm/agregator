@@ -26,6 +26,7 @@ def test_default_registry_contains_api_and_public_sources(
         "karierawfinansach",
         "kprm",
         "nofluffjobs",
+        "ofertypracyedu",
         "olx",
         "pracuj",
         "rocketjobs",
@@ -39,6 +40,7 @@ def test_default_registry_contains_api_and_public_sources(
     assert registry.create("ROCKETJOBS").name == "rocketjobs"
     assert registry.create("KARIERAWFINANSACH").name == "karierawfinansach"
     assert registry.create("KPRM").name == "kprm"
+    assert registry.create("OFERTYPRACYEDU").name == "ofertypracyedu"
     assert registry.create("JOOBLE").name == "jooble"
     assert registry.create("ADZUNA").name == "adzuna"
     assert registry.create("CAREERJET").name == "careerjet"
@@ -67,6 +69,11 @@ def test_default_registry_exposes_access_policy_metadata() -> None:
     assert kprm.access_mode == "official_public_html"
     assert kprm.experimental is True
     assert kprm.required_env == ()
+
+    education = registry.describe("ofertypracyedu")
+    assert education.access_mode == "official_public_html"
+    assert education.experimental is True
+    assert education.required_env == ()
 
     epraca = registry.describe("epraca")
     assert epraca.access_mode == "official_partner_feed"
