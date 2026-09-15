@@ -127,7 +127,7 @@ jobs:
           )"
           echo "${{ matrix.source }} state: $state"
           if [[ "$state" == "access_blocked" ]]; then
-            echo "Access is blocked by the source; preserving as P10 access_blocked, not parser failure."
+            echo "Access is blocked by the source; preserving as P10 access_blocked."
             exit 0
           fi
           if [[ "$code" != "0" ]]; then
@@ -196,13 +196,14 @@ jobs:
           payload = {
               "sources": rows,
               "healthy": [row["source"] for row in rows if row["state"] == "healthy"],
+              "empty": [row["source"] for row in rows if row["state"] == "empty"],
               "access_blocked": [
                   row["source"] for row in rows if row["state"] == "access_blocked"
               ],
               "failing": [
                   row["source"]
                   for row in rows
-                  if row["state"] not in {"healthy", "access_blocked"}
+                  if row["state"] not in {"healthy", "empty", "access_blocked"}
               ],
           }
           Path("p10-public-summary.json").write_text(
@@ -214,6 +215,7 @@ jobs:
               "## P10 public source matrix smoke",
               "",
               f"- Healthy: `{len(payload['healthy'])}`",
+              f"- Empty (run OK, 0 ofert): `{len(payload['empty'])}`",
               f"- Access blocked: `{len(payload['access_blocked'])}`",
               f"- Failing: `{len(payload['failing'])}`",
               "",
