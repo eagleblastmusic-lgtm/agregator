@@ -25,6 +25,23 @@ def test_default_registry_contains_api_and_public_sources(
     assert registry.create("EPRACA").name == "epraca"
 
 
+def test_default_registry_exposes_access_policy_metadata() -> None:
+    registry = default_registry()
+
+    olx = registry.describe("OLX")
+    assert olx.access_mode == "public_web_endpoint"
+    assert olx.experimental is True
+    assert olx.notes is not None
+
+    epraca = registry.describe("epraca")
+    assert epraca.access_mode == "official_partner_feed"
+    assert epraca.experimental is False
+
+    jooble = registry.describe("jooble")
+    assert jooble.access_mode == "partner_api"
+    assert jooble.experimental is False
+
+
 def test_jooble_registry_requires_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("JOOBLE_API_KEY", raising=False)
     registry = default_registry()
