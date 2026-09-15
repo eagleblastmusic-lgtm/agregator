@@ -133,6 +133,77 @@ def build_validation_report(
     )
 
 
+def render_validation_markdown(report: ValidationReport) -> str:
+    lines = [
+        "# Faro — P10 validation report",
+        "",
+        "## Podsumowanie",
+        "",
+        f"- Zaimplementowane źródła: **{report.implemented_sources}**",
+        f"- Źródła z historią uruchomień: **{report.exercised_sources}**",
+        f"- Źródła z rekordami w current state: **{report.sources_with_current_jobs}**",
+        f"- Oferty: **{report.jobs_total}**",
+        f"- Firmy: **{report.companies_total}**",
+        f"- Firmy wzbogacone: **{report.enriched_companies}**",
+        f"- Zweryfikowane WWW: **{report.websites_found}**",
+        f"- Kanały GREEN: **{report.green_channels}**",
+        f"- GREEN company rate: **{report.green_company_rate:.1%}**",
+        "",
+        "## Source health",
+        "",
+        f"- Healthy: `{', '.join(report.healthy_sources) or 'none'}`",
+        f"- Failing: `{', '.join(report.failing_sources) or 'none'}`",
+        f"- Unexercised: `{', '.join(report.unexercised_sources) or 'none'}`",
+        (
+            "- Bez rekordów w current state: `"
+            + (", ".join(report.sources_without_current_jobs) or "none")
+            + "`"
+        ),
+        "",
+        "## Źródła",
+        "",
+        (
+            "| Source | Health | Runs | Jobs | Companies | WWW linked | GREEN linked | "
+            "Name conf. | Resolution conf. | Access |"
+        ),
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+    ]
+
+    for item in report.sources:
+        health = item.source_health
+        identity = item.identity_metrics
+        lines.append(
+            "| {source} | {state} | {runs} | {jobs} | {companies} | "
+            "{websites} ({website_rate:.1%}) | {green} ({green_rate:.1%}) | "
+            "{name_conf:.3f} | {resolution_conf:.3f} | {access} |".format(
+                source=item.source,
+                state=health.get("state", "unexercised"),
+                runs=int(health.get("runs", 0) or 0),
+                jobs=item.current_jobs,
+                companies=item.current_companies,
+                websites=item.linked_companies_with_website,
+                website_rate=item.linked_company_website_rate,
+                green=item.linked_companies_with_green,
+                green_rate=item.linked_green_company_rate,
+                name_conf=float(identity.get("avg_company_name_confidence", 0.0) or 0.0),
+                resolution_conf=float(
+                    identity.get("avg_company_resolution_confidence", 0.0) or 0.0
+                ),
+                access=item.access_mode,
+            )
+        )
+
+    lines.extend(
+        [
+            "",
+            "> Per-source WWW/GREEN to diagnostyka powiązanych firm. Ta sama firma może być "
+            "obecna w kilku źródłach, więc wartości między wierszami mogą się nakładać.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _downstream_by_source(store: SQLiteStore) -> dict[str, dict[str, int]]:
     with store.connect() as connection:
         rows = connection.execute(
