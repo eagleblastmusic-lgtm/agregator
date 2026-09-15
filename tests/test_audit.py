@@ -112,8 +112,12 @@ def test_discovery_audit_records_website_run_and_deduplicates_same_evidence(tmp_
 
     assert first.website_runs_recorded == 1
     assert first.evidence_snapshots_recorded == 1
+    assert first.evidence_observations_recorded == 1
+    assert first.evidence_changes_recorded == 0
     assert second.website_runs_recorded == 1
     assert second.evidence_snapshots_recorded == 0
+    assert second.evidence_observations_recorded == 1
+    assert second.evidence_changes_recorded == 0
 
     with store.connect() as connection:
         runs = connection.execute(
@@ -121,6 +125,9 @@ def test_discovery_audit_records_website_run_and_deduplicates_same_evidence(tmp_
         ).fetchall()
         snapshots = connection.execute(
             "SELECT * FROM contact_evidence_snapshots ORDER BY id"
+        ).fetchall()
+        observations = connection.execute(
+            "SELECT * FROM contact_evidence_observations ORDER BY id"
         ).fetchall()
 
     assert len(runs) == 2
@@ -141,6 +148,12 @@ def test_discovery_audit_records_website_run_and_deduplicates_same_evidence(tmp_
     assert attempts[0]["page_snapshots"][0]["content_sha256"] == "a" * 64
     assert len(snapshots) == 1
     assert len(snapshots[0]["content_sha256"]) == 64
+    assert len(observations) == 2
+    assert observations[0]["snapshot_id"] == observations[1]["snapshot_id"]
+    assert observations[0]["snapshot_changed"] == 0
+    assert observations[1]["snapshot_changed"] == 0
+    assert observations[0]["website_verification_run_id"] == runs[0]["id"]
+    assert observations[1]["website_verification_run_id"] == runs[1]["id"]
 
 
 def test_audit_schema_migrates_legacy_website_runs_before_creating_origin_index(
@@ -183,27 +196,49 @@ def test_audit_schema_migrates_legacy_website_runs_before_creating_origin_index(
                 "PRAGMA index_list(website_verification_runs)"
             ).fetchall()
         }
+        observation_columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(contact_evidence_observations)"
+            ).fetchall()
+        }
 
     assert "resolution_origin" in columns
     assert "resolution_source" in columns
     assert "idx_website_verification_runs_origin" in indexes
+    assert "website_verification_run_id" in observation_columns
+    assert "snapshot_changed" in observation_columns
 
 
-def test_changed_evidence_creates_new_snapshot(tmp_path: Path) -> None:
+def test_changed_evidence_creates_new_snapshot_and_change_observation(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "changed.sqlite3")
     company_id = _seed_company(store)
 
     first_result = _result("Kontakt dla partnerów: partnerzy@firma.test")
     store.save_discovery_result(company_id, first_result)
-    record_discovery_audit(store, company_id, first_result)
+    first_audit = record_discovery_audit(store, company_id, first_result)
 
     changed_result = _result("Nowy kontakt dla partnerów: partnerzy@firma.test")
     store.save_discovery_result(company_id, changed_result)
     audit = record_discovery_audit(store, company_id, changed_result)
 
+    assert first_audit.evidence_changes_recorded == 0
     assert audit.evidence_snapshots_recorded == 1
+    assert audit.evidence_observations_recorded == 1
+    assert audit.evidence_changes_recorded == 1
     with store.connect() as connection:
         count = connection.execute(
             "SELECT COUNT(*) FROM contact_evidence_snapshots"
         ).fetchone()[0]
+        observations = connection.execute(
+            """
+            SELECT snapshot_id, snapshot_changed
+            FROM contact_evidence_observations
+            ORDER BY id
+            """
+        ).fetchall()
     assert count == 2
+    assert len(observations) == 2
+    assert observations[0]["snapshot_id"] != observations[1]["snapshot_id"]
+    assert observations[0]["snapshot_changed"] == 0
+    assert observations[1]["snapshot_changed"] == 1
