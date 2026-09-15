@@ -6,8 +6,13 @@ on:
       sources:
         description: "Comma-separated job sources"
         required: true
-        default: "olx,jooble,adzuna"
+        default: "jooble,adzuna"
         type: string
+      allow_experimental_sources:
+        description: "Allow sources marked experimental (for example OLX public-web adapter)"
+        required: true
+        default: false
+        type: boolean
       target_jobs:
         description: "Target number of jobs in the benchmark database"
         required: true
@@ -75,8 +80,13 @@ jobs:
         shell: bash
         run: |
           set +e
+          experimental_args=()
+          if [ "${{ inputs.allow_experimental_sources }}" = "true" ]; then
+            experimental_args+=(--allow-experimental-sources)
+          fi
           agregator-benchmark preflight \
             --sources "${{ inputs.sources }}" \
+            "${experimental_args[@]}" \
             --strict \
             > benchmark/preflight.json
           code=$?
@@ -89,6 +99,10 @@ jobs:
         shell: bash
         run: |
           set +e
+          experimental_args=()
+          if [ "${{ inputs.allow_experimental_sources }}" = "true" ]; then
+            experimental_args+=(--allow-experimental-sources)
+          fi
           agregator-benchmark run \
             --db benchmark/benchmark.sqlite3 \
             --output-dir benchmark/run \
@@ -98,6 +112,7 @@ jobs:
             --enrichment-batch-size 25 \
             --max-enrichment-companies "${{ inputs.max_enrichment_companies }}" \
             --label-sampling-seed "${{ inputs.label_sampling_seed }}" \
+            "${experimental_args[@]}" \
             --strict \
             > benchmark/run_result.json
           code=$?
