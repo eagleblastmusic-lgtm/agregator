@@ -37,6 +37,7 @@ def init_audit_schema(store: SQLiteStore) -> None:
                 search_candidates_json TEXT NOT NULL,
                 website_attempts_json TEXT NOT NULL DEFAULT '[]',
                 scanned_pages_json TEXT NOT NULL,
+                page_snapshots_json TEXT NOT NULL DEFAULT '[]',
                 captured_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(company_id) REFERENCES companies(id)
             );
@@ -68,6 +69,12 @@ def init_audit_schema(store: SQLiteStore) -> None:
             "website_attempts_json",
             "TEXT NOT NULL DEFAULT '[]'",
         )
+        _ensure_column(
+            connection,
+            "website_verification_runs",
+            "page_snapshots_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
 
 
 def record_discovery_audit(
@@ -83,6 +90,7 @@ def record_discovery_audit(
 
     candidates = [candidate.model_dump(mode="json") for candidate in result.search_candidates]
     attempts = [attempt.model_dump(mode="json") for attempt in result.website_attempts]
+    page_snapshots = [snapshot.model_dump(mode="json") for snapshot in result.page_snapshots]
     outcome = "verified" if result.company.website_url else "not_verified"
 
     with store.connect() as connection:
@@ -96,8 +104,9 @@ def record_discovery_audit(
                 verification_signals_json,
                 search_candidates_json,
                 website_attempts_json,
-                scanned_pages_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                scanned_pages_json,
+                page_snapshots_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 company_id,
@@ -112,6 +121,7 @@ def record_discovery_audit(
                 json.dumps(candidates, ensure_ascii=False, separators=(",", ":")),
                 json.dumps(attempts, ensure_ascii=False, separators=(",", ":")),
                 json.dumps(result.scanned_pages, ensure_ascii=False, separators=(",", ":")),
+                json.dumps(page_snapshots, ensure_ascii=False, separators=(",", ":")),
             ),
         )
         website_run = 1
