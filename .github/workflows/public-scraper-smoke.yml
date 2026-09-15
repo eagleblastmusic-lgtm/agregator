@@ -6,7 +6,7 @@ on:
       sources:
         description: "Comma-separated public scraper sources or all"
         required: true
-        default: "kprm"
+        default: "kprm,ofertypracyedu,ngo"
         type: string
       pages_per_source:
         description: "Pages/chunks per source"
