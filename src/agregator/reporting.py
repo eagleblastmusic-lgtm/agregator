@@ -25,6 +25,7 @@ class BenchmarkReport:
     website_find_rate: float
     green_company_rate: float
     source_job_counts: dict[str, int]
+    company_resolution_counts: dict[str, int]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -88,8 +89,21 @@ def build_benchmark_report(
             ORDER BY jobs DESC, source ASC
             """
         ).fetchall()
+        resolution_rows = connection.execute(
+            """
+            SELECT
+                COALESCE(company_resolution_method, 'legacy') AS method,
+                COUNT(*) AS jobs
+            FROM job_postings
+            GROUP BY COALESCE(company_resolution_method, 'legacy')
+            ORDER BY jobs DESC, method ASC
+            """
+        ).fetchall()
 
     source_job_counts = {str(row["source"]): int(row["jobs"]) for row in source_rows}
+    company_resolution_counts = {
+        str(row["method"]): int(row["jobs"]) for row in resolution_rows
+    }
     return BenchmarkReport(
         jobs_total=jobs_total,
         companies_total=companies_total,
@@ -105,6 +119,7 @@ def build_benchmark_report(
         website_find_rate=_ratio(websites_found, enriched_companies),
         green_company_rate=_ratio(green_companies, enriched_companies),
         source_job_counts=source_job_counts,
+        company_resolution_counts=company_resolution_counts,
     )
 
 
