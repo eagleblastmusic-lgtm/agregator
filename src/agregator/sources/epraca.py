@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import io
 import json
 import re
@@ -80,7 +81,7 @@ class EPracaSource:
         client = self._client or httpx.AsyncClient(
             timeout=60,
             follow_redirects=True,
-            headers={"Accept": "text/xml, application/soap+xml"},
+            headers={"Accept": "text/xml, application/soap+xml, application/zip"},
         )
 
         body = build_epraca_soap_request(
@@ -98,7 +99,7 @@ class EPracaSource:
                 headers={"Content-Type": "text/xml; charset=utf-8"},
             )
             response.raise_for_status()
-            jobs = parse_epraca_soap_response(response.content)
+            jobs = parse_epraca_response(response.content)
         finally:
             if owns_client:
                 await client.aclose()
@@ -151,6 +152,14 @@ def build_epraca_soap_request(
         "</soapenv:Body>"
         "</soapenv:Envelope>"
     )
+
+
+def parse_epraca_response(content: bytes) -> list[JobPosting]:
+    """Parse either a direct ZIP body or the normal SOAP envelope response."""
+
+    if content.startswith(b"PK\x03\x04"):
+        return parse_epraca_zip(content)
+    return parse_epraca_soap_response(content)
 
 
 def parse_epraca_soap_response(content: bytes) -> list[JobPosting]:
@@ -292,7 +301,7 @@ def _find_zip_payload(texts: list[str]) -> bytes | None:
             continue
         try:
             decoded = base64.b64decode(compact, validate=True)
-        except (ValueError, base64.binascii.Error):
+        except (ValueError, binascii.Error):
             continue
         if decoded.startswith(b"PK\x03\x04"):
             return decoded
