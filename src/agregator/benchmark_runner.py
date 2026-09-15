@@ -17,6 +17,7 @@ class BenchmarkSourceStats:
     companies_created: int = 0
     errors: int = 0
     exhausted: bool = False
+    disabled: bool = False
     last_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -56,6 +57,7 @@ async def collect_benchmark(
     *,
     target_jobs: int = 1000,
     max_rounds: int = 100,
+    max_errors_per_source: int = 3,
     fresh: bool = False,
     fail_fast: bool = False,
 ) -> BenchmarkCollectionResult:
@@ -64,6 +66,7 @@ async def collect_benchmark(
     Each active source receives at most one page per round. This avoids letting one
     high-volume source dominate the benchmark before the remaining adapters are
     exercised. Existing source cursors are honored unless ``fresh`` is requested.
+    Persistently unavailable sources are disabled after a bounded number of errors.
     """
 
     store.init_schema()
@@ -74,6 +77,8 @@ async def collect_benchmark(
         raise ValueError("target_jobs must be >= 1")
     if max_rounds < 1:
         raise ValueError("max_rounds must be >= 1")
+    if max_errors_per_source < 1:
+        raise ValueError("max_errors_per_source must be >= 1")
 
     if fresh:
         for name in names:
@@ -102,16 +107,27 @@ async def collect_benchmark(
 
         for name in names:
             source_stats = stats[name]
-            if source_stats.exhausted:
+            if source_stats.exhausted or source_stats.disabled:
                 continue
             active_this_round += 1
 
             try:
                 source = registry.create(name)
+            except (KeyError, ValueError) as exc:
+                source_stats.errors += 1
+                source_stats.disabled = True
+                source_stats.last_error = f"{type(exc).__name__}: {exc}"[:1000]
+                if fail_fast:
+                    raise
+                continue
+
+            try:
                 result = await ingest_source(source, store, pages=1, resume=True)
             except Exception as exc:
                 source_stats.errors += 1
                 source_stats.last_error = f"{type(exc).__name__}: {exc}"[:1000]
+                if source_stats.errors >= max_errors_per_source:
+                    source_stats.disabled = True
                 if fail_fast:
                     raise
                 continue
@@ -132,8 +148,10 @@ async def collect_benchmark(
         if jobs_after_round >= target_jobs:
             stopped_reason = "target_reached"
             break
-        if active_this_round == 0 or all(item.exhausted for item in stats.values()):
-            stopped_reason = "sources_exhausted"
+        if active_this_round == 0 or all(
+            item.exhausted or item.disabled for item in stats.values()
+        ):
+            stopped_reason = "sources_exhausted_or_disabled"
             break
 
     jobs_after = _count(store, "job_postings")
