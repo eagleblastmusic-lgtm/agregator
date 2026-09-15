@@ -28,6 +28,7 @@ def _offer(index: int = 1) -> dict[str, object]:
         "link": f"https://oferty.praca.gov.pl/portal/lista-ofert/szczegoly-oferty/hash-{index}",
         "nip": "1234567890",
         "regon": "123456789",
+        "adresWww": "https://www.przykladowa-firma.pl",
     }
 
 
@@ -68,6 +69,11 @@ def test_parse_epraca_json_maps_official_fields() -> None:
         ("regon", "123456789"),
     ]
     assert all(item.confidence == 0.995 for item in job.company_identifiers)
+    assert len(job.company_website_candidates) == 1
+    website = job.company_website_candidates[0]
+    assert website.url == "https://www.przykladowa-firma.pl"
+    assert website.source == "official_feed.adresWww"
+    assert website.confidence == 0.98
 
 
 def test_parse_epraca_soap_response_extracts_zip_json() -> None:
