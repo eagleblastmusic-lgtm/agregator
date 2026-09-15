@@ -10,7 +10,7 @@ import typer
 from .catalog import catalog_summary, filter_catalog, load_source_catalog
 from .crawler import WebsiteCrawler
 from .enrich import enrich_pending_companies
-from .ground_truth import evaluate_company_resolution_csv
+from .ground_truth import evaluate_company_resolution_csv, export_ground_truth_template
 from .importers import load_jobs_csv
 from .ingest import IngestResult, ingest_source
 from .pipeline import EmployerDiscoveryPipeline
@@ -316,6 +316,17 @@ def benchmark(
         high_confidence_threshold=high_confidence_threshold,
     )
     typer.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+
+
+@app.command("export-ground-truth")
+def export_ground_truth(
+    output: str = typer.Option(..., "--output"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    limit: int = typer.Option(1000, "--limit", min=1, max=100_000),
+) -> None:
+    store = SQLiteStore(db)
+    path = export_ground_truth_template(store, output, limit=limit)
+    typer.echo(str(path))
 
 
 @app.command("evaluate-resolution")
