@@ -39,6 +39,13 @@ class ExplodingSource:
         raise RuntimeError("temporary upstream failure")
 
 
+class EmptySource:
+    name = "empty"
+
+    async def collect(self, cursor: str | None = None) -> SourceBatch:
+        return SourceBatch(jobs=[], next_cursor=None)
+
+
 async def test_collection_workspace_runs_without_search_provider(tmp_path: Path) -> None:
     registry = SourceRegistry()
     registry.register("fixture", FakeSource, access_mode="fixture")
@@ -67,6 +74,7 @@ async def test_collection_workspace_runs_without_search_provider(tmp_path: Path)
     assert result.collection.source_health_ready is True
     assert result.collection.unexercised_sources == ()
     assert result.collection.disabled_sources == ()
+    assert result.collection.sources_without_jobs == ()
     assert result.ready_for_full_enrichment_benchmark is True
     assert result.benchmark.jobs_total == 1
     assert result.benchmark.source_identity_metrics["fixture"]["jobs"] == 1
@@ -85,6 +93,7 @@ async def test_collection_workspace_runs_without_search_provider(tmp_path: Path)
     assert manifest["dataset"]["schema_version"] == "8"
     assert manifest["readiness"]["ready_for_full_enrichment_benchmark"] is True
     assert manifest["readiness"]["source_health_ready"] is True
+    assert manifest["readiness"]["sources_without_jobs"] == []
     assert manifest["readiness"]["blockers"] == []
     assert manifest["readiness"]["manual_ground_truth_ready"] is False
 
@@ -127,3 +136,38 @@ async def test_collection_workspace_blocks_readiness_when_requested_source_fails
     assert manifest["readiness"]["ready_for_full_enrichment_benchmark"] is False
     assert "unexercised_sources:broken" in manifest["readiness"]["blockers"]
     assert "disabled_sources:broken" in manifest["readiness"]["blockers"]
+
+
+async def test_collection_workspace_blocks_readiness_when_source_returns_no_jobs(
+    tmp_path: Path,
+) -> None:
+    registry = SourceRegistry()
+    registry.register("fixture", FakeSource, access_mode="fixture")
+    registry.register("empty", EmptySource, access_mode="fixture")
+    preflight = build_benchmark_preflight(
+        registry,
+        ["fixture", "empty"],
+        search_provider_ready=False,
+        require_search_provider=False,
+    )
+    assert preflight.ready is True
+
+    result = await run_collection_workspace(
+        SQLiteStore(tmp_path / "empty.sqlite3"),
+        registry,
+        ["fixture", "empty"],
+        tmp_path / "workspace-empty",
+        preflight=preflight,
+        target_jobs=1,
+        max_rounds=2,
+    )
+
+    assert result.collection.target_reached is True
+    assert result.collection.unexercised_sources == ()
+    assert result.collection.sources_without_jobs == ("empty",)
+    assert result.collection.source_health_ready is False
+    assert result.ready_for_full_enrichment_benchmark is False
+
+    manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["readiness"]["sources_without_jobs"] == ["empty"]
+    assert "sources_without_jobs:empty" in manifest["readiness"]["blockers"]
