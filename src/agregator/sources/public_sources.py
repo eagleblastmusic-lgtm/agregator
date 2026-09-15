@@ -49,6 +49,27 @@ def nofluffjobs_source() -> PublicHtmlJobSource:
     )
 
 
+def bulldogjob_source() -> PublicHtmlJobSource:
+    return PublicHtmlJobSource(
+        HtmlJobSourceConfig(
+            name="bulldogjob",
+            base_url="https://bulldogjob.pl",
+            listing_url_template="https://bulldogjob.pl/companies/jobs",
+            offer_path_patterns=(r"^/companies/jobs/\d+-",),
+            paginated=False,
+            max_offer_links=100,
+            company_selectors=(
+                "a[href*='/companies/profiles/']",
+                "[class*='company-name']",
+            ),
+            city_selectors=("[class*='location']",),
+            description_selectors=("main", "article"),
+        ),
+        user_agent=_user_agent(),
+        request_delay=_delay(),
+    )
+
+
 def justjoinit_source() -> PublicHtmlJobSource:
     return PublicHtmlJobSource(
         HtmlJobSourceConfig(
@@ -151,6 +172,7 @@ def pracuj_source() -> SitemapHtmlJobSource:
 
 
 __all__ = [
+    "bulldogjob_source",
     "justjoinit_source",
     "karierawfinansach_source",
     "nofluffjobs_source",
