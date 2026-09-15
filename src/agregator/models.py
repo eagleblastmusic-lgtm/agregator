@@ -79,6 +79,13 @@ class CompanyIdentity(BaseModel):
     website_verification_signals: list[str] = Field(default_factory=list)
 
 
+class CompanyIdentifier(BaseModel):
+    kind: str
+    value: str
+    source: str | None = None
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
 class JobPosting(BaseModel):
     source: str
     source_id: str | None = None
@@ -87,6 +94,7 @@ class JobPosting(BaseModel):
     company_name: str
     company_name_source: str | None = None
     company_name_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    company_identifiers: list[CompanyIdentifier] = Field(default_factory=list)
     city: str | None = None
     description: str | None = None
     published_at: str | None = None
