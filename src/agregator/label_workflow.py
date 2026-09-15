@@ -55,23 +55,51 @@ class LabelUpdate:
 
 
 @dataclass(frozen=True, slots=True)
+class LabelReference:
+    kind: LabelKind
+    row_number: int
+    truth_value: str
+    truth_purpose: str | None
+    reference_path: Path
+    prediction: dict[str, str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind.value,
+            "row_number": self.row_number,
+            "truth_value": self.truth_value,
+            "truth_purpose": self.truth_purpose,
+            "reference_path": str(self.reference_path),
+            "prediction": self.prediction,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class _LabelSpec:
     filename: str
     label_field: str
+    reference_filename: str
+    alignment_fields: tuple[str, ...]
 
 
 _SPECS = {
     LabelKind.COMPANY_RESOLUTION: _LabelSpec(
         filename="company_resolution_truth.csv",
         label_field="truth_company_id",
+        reference_filename="company_resolution_reference.csv",
+        alignment_fields=("source", "source_id"),
     ),
     LabelKind.WEBSITE_RESOLUTION: _LabelSpec(
         filename="website_resolution_truth.csv",
         label_field="truth_domain",
+        reference_filename="website_resolution_reference.csv",
+        alignment_fields=("company_id",),
     ),
     LabelKind.CONTACT_CLASSIFICATION: _LabelSpec(
         filename="contact_classification_truth.csv",
         label_field="truth_decision",
+        reference_filename="contact_classification_reference.csv",
+        alignment_fields=("contact_id",),
     ),
 }
 
@@ -93,6 +121,64 @@ def next_unlabeled_row(label_dir: str | Path, kind: LabelKind | str) -> LabelRow
                 row=dict(row),
             )
     return None
+
+
+def prediction_reference_row(
+    label_dir: str | Path,
+    kind: LabelKind | str,
+    row_number: int,
+) -> LabelReference:
+    """Expose prediction-rich context only after independent truth is recorded."""
+
+    label_kind = LabelKind(kind)
+    if row_number < 1:
+        raise ValueError("row_number must be >= 1")
+
+    directory = Path(label_dir)
+    primary_path, _, primary_rows = _read_rows(directory, label_kind)
+    if row_number > len(primary_rows):
+        raise ValueError(f"row_number out of range: {row_number} > {len(primary_rows)}")
+
+    spec = _SPECS[label_kind]
+    primary = primary_rows[row_number - 1]
+    truth_value = (primary.get(spec.label_field) or "").strip()
+    if not truth_value:
+        raise ValueError(
+            f"row {row_number} must be independently labeled before prediction reference access"
+        )
+
+    reference_path = directory / "prediction_reference" / spec.reference_filename
+    if not reference_path.exists():
+        raise ValueError(f"prediction reference file does not exist: {reference_path}")
+    with reference_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        reference_rows = [dict(row) for row in reader]
+    if row_number > len(reference_rows):
+        raise ValueError(
+            f"prediction reference row out of range: {row_number} > {len(reference_rows)}"
+        )
+
+    prediction = reference_rows[row_number - 1]
+    for field in spec.alignment_fields:
+        primary_value = (primary.get(field) or "").strip()
+        prediction_value = (prediction.get(field) or "").strip()
+        if primary_value != prediction_value:
+            raise ValueError(
+                f"prediction reference misalignment at row {row_number}: {field}"
+            )
+
+    truth_purpose = None
+    if label_kind == LabelKind.CONTACT_CLASSIFICATION:
+        truth_purpose = (primary.get("truth_purpose") or "").strip() or None
+
+    return LabelReference(
+        kind=label_kind,
+        row_number=row_number,
+        truth_value=truth_value,
+        truth_purpose=truth_purpose,
+        reference_path=reference_path,
+        prediction=prediction,
+    )
 
 
 def set_row_label(
