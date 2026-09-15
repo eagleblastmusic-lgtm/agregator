@@ -17,7 +17,9 @@ Projekt **nie wysyła wiadomości**, nie omija logowania ani zabezpieczeń porta
 - adapter `AdzunaApiSource` oparty o oficjalne REST API,
 - katalog 91 źródeł z master-listy w `config/source_catalog.tsv`,
 - resumowalne pobieranie przez cursor/offset/page,
+- kontrolowany `benchmark-collect` w trybie round-robin do zadanej liczby ofert,
 - historia każdego uruchomienia źródła i metryki błędów,
+- per-source benchmark health: success rate, strony, oferty, insert/update i czas,
 - SQLite: `companies`, `company_aliases`, `company_locations`, `job_postings`,
   `contact_channels`, `source_state`, `source_runs`,
 - Company Resolution v1 z konserwatywnym łączeniem między źródłami i lokalizacjami,
@@ -26,7 +28,10 @@ Projekt **nie wysyła wiadomości**, nie omija logowania ani zabezpieczeń porta
 - zweryfikowana domena WWW jako mocny sygnał do ręcznego review,
 - provenance i confidence źródła nazwy firmy,
 - importer CSV do benchmarków wieloźródłowych,
-- eksport szablonu ground truth i evaluator precision/recall/F1 dla Company Resolution,
+- ground truth i precision/recall/F1 dla Company Resolution,
+- ground truth i precision/recall/F1 dla wyboru oficjalnej domeny,
+- ground truth, confusion matrix i macro F1 dla GREEN/REVIEW/IGNORE,
+- wspólny `quality-gate` dla wszystkich ręcznie oznaczonych warstw,
 - wyszukiwanie oficjalnej strony przez wymienny `SearchProvider`,
 - opcjonalny provider Brave Search API,
 - dwuetapowy wybór oficjalnej strony: search ranking + first-party content verification,
@@ -106,7 +111,26 @@ agregator collect --source jooble --pages 1
 agregator collect --source adzuna --pages 1
 ```
 
-### 7. Historia runów
+### 7. Kontrolowany benchmark 1000 ofert
+
+```bash
+agregator benchmark-collect \
+  --db agregator.sqlite3 \
+  --sources olx,jooble,adzuna \
+  --target-jobs 1000 \
+  --max-rounds 100
+```
+
+Collector działa round-robin: każde aktywne źródło dostaje najwyżej jedną stronę w rundzie. Dzięki temu jeden portal nie zapełnia całej próbki zanim pozostałe adaptery zostaną sprawdzone.
+
+- kursory są resumowalne,
+- `--fresh` resetuje kursory wybranych źródeł, ale nie kasuje rekordów z bazy,
+- źródło bez wymaganej konfiguracji/API key zostaje oznaczone jako `disabled`,
+- błędy runtime są limitowane przez `--max-errors-per-source`,
+- `--fail-fast` przerywa run przy pierwszym błędzie,
+- liczba ofert może nieznacznie przekroczyć target, ponieważ granicą pobierania jest pełna strona źródła.
+
+### 8. Historia runów
 
 ```bash
 agregator runs --source olx --limit 20
@@ -114,7 +138,7 @@ agregator runs --source olx --limit 20
 
 Każdy run zapisuje status, kursory, liczbę stron, liczbę ofert, insert/update, nowe firmy i skrócony błąd.
 
-### 8. Import benchmarku CSV
+### 9. Import benchmarku CSV
 
 Minimalne kolumny: `url,title,company_name`.
 
@@ -122,7 +146,7 @@ Minimalne kolumny: `url,title,company_name`.
 agregator import-csv --path jobs.csv --db agregator.sqlite3
 ```
 
-### 9. Podgląd wykrytych firm
+### 10. Podgląd wykrytych firm
 
 ```bash
 agregator companies --db agregator.sqlite3 --limit 50
@@ -130,7 +154,7 @@ agregator companies --db agregator.sqlite3 --limit 50
 
 Wynik zawiera także aliasy i wszystkie zaobserwowane lokalizacje firmy.
 
-### 10. Company Resolution v1
+### 11. Company Resolution v1
 
 Resolver nie wykonuje automatycznego fuzzy-merge. Automatyczne łączenie między różnymi miastami jest dopuszczane tylko wtedy, gdy:
 
@@ -143,7 +167,7 @@ Krótkie lub ogólne nazwy, niskie confidence oraz niejednoznaczne klastry pozos
 
 Każda oferta zapisuje metodę resolution, np. `new_company`, `exact_name_city`, `exact_name_cross_city`, `exact_name_partial_location` albo informację o niewystarczających przesłankach.
 
-### 11. Kolejka fuzzy do ręcznej weryfikacji
+### 12. Kolejka fuzzy do ręcznej weryfikacji
 
 ```bash
 agregator resolution-review \
@@ -154,15 +178,15 @@ agregator resolution-review \
 
 Ta komenda **niczego nie scala**. Zwraca potencjalne duplikaty wraz z punktacją i sygnałami, np. podobieństwem nazw, wspólną lokalizacją albo zgodnością wysoko zweryfikowanego hosta WWW. Jest to warstwa REVIEW przed ewentualnym rozszerzeniem automatycznych reguł.
 
-### 12. Benchmark techniczny
+### 13. Benchmark techniczny
 
 ```bash
 agregator benchmark --db agregator.sqlite3
 ```
 
-Raport zawiera m.in. liczbę ofert, firm, źródeł, skuteczność enrichmentu, GREEN/REVIEW/IGNORE oraz rozkład `company_resolution_method`.
+Raport zawiera m.in. liczbę ofert, firm, źródeł, skuteczność enrichmentu, GREEN/REVIEW/IGNORE, rozkład `company_resolution_method` oraz `source_run_metrics` z success rate, liczbą stron/ofert i czasem per source.
 
-### 13. Ground truth dla Company Resolution
+### 14. Ground truth dla Company Resolution
 
 Najpierw można wygenerować arkusz roboczy z realnych rekordów bazy:
 
@@ -184,17 +208,79 @@ jooble,ABC-7,company-001
 adzuna,987,company-002
 ```
 
-Ocena jest wykonywana pairwise i zwraca precision, recall oraz F1:
-
 ```bash
 agregator evaluate-resolution \
   --path company_ground_truth.csv \
   --db agregator.sqlite3
 ```
 
-Dzięki temu benchmark 1000 ofert może mierzyć jakość deduplikacji, a nie tylko liczbę utworzonych rekordów.
+Ocena jest wykonywana pairwise i zwraca TP/FP/FN/TN, precision, recall i F1.
 
-### 14. Znalezienie oficjalnych stron i kanałów B2B
+### 15. Ground truth oficjalnej domeny
+
+```bash
+agregator export-website-ground-truth \
+  --db agregator.sqlite3 \
+  --output website_ground_truth.csv \
+  --limit 1000
+```
+
+W kolumnie `truth_domain` wpisuje się poprawny host, np. `firma.pl`. Wartość `__none__` oznacza ręcznie potwierdzony brak oficjalnej strony. Puste wiersze są pomijane przez evaluator, dzięki czemu labeling może być wykonywany etapami.
+
+```bash
+agregator evaluate-website \
+  --db agregator.sqlite3 \
+  --path website_ground_truth.csv
+```
+
+Raport rozróżnia poprawny host, błędny host, false positive, false negative i true negative oraz liczy precision/recall/F1 i accuracy.
+
+### 16. Ground truth klasyfikacji kontaktów
+
+```bash
+agregator export-contact-ground-truth \
+  --db agregator.sqlite3 \
+  --output contact_ground_truth.csv \
+  --limit 1000
+```
+
+Ręcznie uzupełnia się `truth_decision` (`green`, `review`, `ignore`) oraz opcjonalnie `truth_purpose`.
+
+```bash
+agregator evaluate-contacts \
+  --db agregator.sqlite3 \
+  --path contact_ground_truth.csv
+```
+
+Evaluator zwraca confusion matrix, accuracy, precision/recall/F1 dla każdej klasy, macro F1 i opcjonalną accuracy `purpose`.
+
+### 17. Wspólny pakiet etykiet i quality gate
+
+Trzy szablony można wygenerować jednym poleceniem:
+
+```bash
+agregator export-quality-labels \
+  --db agregator.sqlite3 \
+  --output-dir benchmark/labels \
+  --job-limit 1000 \
+  --company-limit 1000 \
+  --contact-limit 1000
+```
+
+Po ręcznym oznaczeniu:
+
+```bash
+agregator quality-gate \
+  --db agregator.sqlite3 \
+  --resolution-truth benchmark/labels/company_resolution_truth.csv \
+  --website-truth benchmark/labels/website_resolution_truth.csv \
+  --contact-truth benchmark/labels/contact_classification_truth.csv \
+  --fail-on-error
+```
+
+Domyślne progi to Company Resolution F1 >= 0.95, Website Resolution F1 >= 0.95 i Contact decision macro F1 >= 0.90. Progi można zmieniać opcjami CLI. `--fail-on-error` ustawia kod wyjścia 2, jeżeli którykolwiek dostarczony check nie przejdzie.
+
+### 18. Znalezienie oficjalnych stron i kanałów B2B
 
 Wymaga `BRAVE_SEARCH_API_KEY`:
 
@@ -208,7 +294,7 @@ Automatyczne `discover` nie uznaje już samego wysokiego miejsca w wyszukiwarce 
 
 Ręczny `scan-url` pozostaje trybem dla domeny podanej jawnie przez użytkownika/integratora.
 
-### 15. Wyniki GREEN i eksport
+### 19. Wyniki GREEN i eksport
 
 ```bash
 agregator green --db agregator.sqlite3 --limit 100
@@ -217,7 +303,7 @@ agregator export-green --db agregator.sqlite3 --output green.csv
 
 Każdy wynik zawiera źródło dowodu i tekst kontekstu, w którym kontakt został znaleziony.
 
-### 16. Pełny eksport dla Faro
+### 20. Pełny eksport dla Faro
 
 ```bash
 agregator export-dataset \
@@ -268,6 +354,7 @@ Dzięki temu imię rekrutera typu „Kazimierz” nie jest automatycznie traktow
 ## Dokumentacja
 
 Pełny plan: [`docs/PLAN.md`](docs/PLAN.md).
+Status wdrożenia: [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
 
 ## Zasady projektu
 
@@ -278,4 +365,5 @@ Pełny plan: [`docs/PLAN.md`](docs/PLAN.md).
 5. Adaptery portali pracy są oddzielone od silnika enrichmentu.
 6. Każde źródło przed wdrożeniem produkcyjnym przechodzi przegląd regulaminu i sposobu dostępu.
 7. Fuzzy Company Resolution pozostaje warstwą REVIEW, nie automatycznym merge.
-8. Outreach i automatyczna wysyłka wiadomości są poza zakresem tego repo.
+8. Quality gate opiera się na ręcznie oznaczonym ground truth, nie na samym confidence modelu.
+9. Outreach i automatyczna wysyłka wiadomości są poza zakresem tego repo.
