@@ -30,11 +30,11 @@ portal C: oferta X ─┘
 
 Master catalog: **91 źródeł**.
 
-Po pierwszym scraper batchu:
+Aktualnie:
 
 ```text
-adaptery zaimplementowane: 11
-pozostałe:                80
+adaptery zaimplementowane: 12
+pozostałe:                79
 ```
 
 Zaimplementowane adaptery:
@@ -47,6 +47,7 @@ Zaimplementowane adaptery:
 | No Fluff Jobs | `nofluffjobs` | public HTML | experimental |
 | RocketJobs | `rocketjobs` | public HTML | experimental |
 | ePraca / CBOP | `epraca` | official partner feed | implemented |
+| Nabory KPRM | `kprm` | official public HTML | experimental |
 | Jooble Polska | `jooble` | partner API | implemented, optional source method |
 | Careerjet Polska | `careerjet` | publisher API | implemented, optional source method |
 | Kariera w Finansach | `karierawfinansach` | public HTML | experimental |
@@ -57,12 +58,11 @@ Zaimplementowane adaptery:
 
 ## A0 — aktualny priorytet
 
-W katalogu jest 14 źródeł A0. Po pierwszym batchu scraperów **5 A0 pozostaje bez aktywnego adaptera**:
+W katalogu jest 14 źródeł A0. Po wdrożeniu KPRM **4 A0 pozostają bez aktywnego adaptera**:
 
 | Źródło | Decyzja bieżąca |
 |---|---|
 | Praca.pl | HOLD — przed scraperem wymagana pozytywna weryfikacja uprawnienia/warunków; publiczna stopka obecnie zawiera zakaz powielania/kopiowania/rozpowszechniania materiałów |
-| Nabory KPRM | NEXT — oficjalny serwis udostępnia jawny link `XML`; kandydat do adaptera official public feed |
 | LinkedIn Jobs | HOLD — nie opieramy Faro na obchodzeniu ograniczeń LinkedIn; wymaga dozwolonej ścieżki/partnerstwa/publicznego dostępu zgodnego z zasadami |
 | Indeed Polska | HOLD — nie obchodzimy anty-bot/login; preferowana dozwolona ścieżka partnerska/feed albo publiczna ścieżka po audycie |
 | OfertyPracy.edu.pl | NEXT — publiczny serwis MEN/SIO dla osób szukających pracy; potrzebna walidacja robots, listingu i paginacji |
@@ -81,12 +81,12 @@ W katalogu jest 14 źródeł A0. Po pierwszym batchu scraperów **5 A0 pozostaje
 - sitemap walker z resumowalnym cursorem,
 - Pracuj / Skillshot / NFJ / JustJoinIT / RocketJobs / Kariera w Finansach.
 
-### Batch S2 — następny
+### Batch S2 — IN PROGRESS
 
-1. Nabory KPRM przez jawny XML/publiczny format.
-2. OfertyPracy.edu.pl po technicznym audycie publicznego listingu.
-3. Praca.pl tylko jeśli warunki/uprawnienie pozwolą na taki sposób wykorzystania.
-4. Pozostałe A1 zaczynając od stron server-rendered i źródeł oficjalnych/agencji z czytelną strukturą.
+- Nabory KPRM: adapter publicznego HTML wdrożony; zachowuje pełny widoczny tekst ogłoszenia, numer ogłoszenia, datę, urząd i source-specific payload. Publiczny serwis sam pokazuje w stopce eksport `XML`; XML pozostaje kandydatem do późniejszego porównania/uzupełnienia danych.
+- OfertyPracy.edu.pl: następny A0 po technicznym audycie listingu/robots/paginacji.
+- Praca.pl pozostaje HOLD, dopóki warunki/uprawnienie nie pozwolą na taki sposób wykorzystania.
+- Potem A1 zaczynając od stron server-rendered i źródeł oficjalnych/agencji z czytelną strukturą.
 
 ### Batch S3+
 
@@ -111,7 +111,7 @@ Pobranie jednego źródła:
 
 ```bash
 agregator-scrape run \
-  --sources skillshot \
+  --sources kprm \
   --pages-per-source 5 \
   --db agregator.sqlite3 \
   --strict
@@ -127,6 +127,8 @@ agregator-scrape run \
 ```
 
 `agregator-scrape` celowo nie wybiera `partner_api`. Dzięki temu publiczny scraping nie jest uzależniony od JOOBLE/ADZUNA/CAREERJET credentials.
+
+Manualny GitHub Actions workflow `.github/workflows/public-scraper-smoke.yml` pozwala wykonać kontrolowany realny smoke publicznych adapterów bez sekretów. Domyślnie wskazuje oficjalny serwis KPRM i zapisuje bazę oraz wynik jako artifact.
 
 ## Definition of Done dla pojedynczego źródła
 
