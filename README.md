@@ -22,9 +22,11 @@ Projekt **nie wysyła wiadomości**, nie omija logowania ani zabezpieczeń porta
   `contact_channels`, `source_state`, `source_runs`,
 - Company Resolution v1 z konserwatywnym łączeniem między źródłami i lokalizacjami,
 - jawny `company_resolution_method` i `company_resolution_confidence` na ofercie,
+- nieinwazyjna kolejka `resolution-review` dla fuzzy-kandydatów — bez automatycznego merge,
+- zweryfikowana domena WWW jako mocny sygnał do ręcznego review,
 - provenance i confidence źródła nazwy firmy,
 - importer CSV do benchmarków wieloźródłowych,
-- ground-truth evaluator precision/recall/F1 dla Company Resolution,
+- eksport szablonu ground truth i evaluator precision/recall/F1 dla Company Resolution,
 - wyszukiwanie oficjalnej strony przez wymienny `SearchProvider`,
 - opcjonalny provider Brave Search API,
 - resolver domeny z oceną dopasowania,
@@ -34,6 +36,7 @@ Projekt **nie wysyła wiadomości**, nie omija logowania ani zabezpieczeń porta
 - zachowywanie `evidence_url`, `evidence_text` i confidence,
 - kolejka firm do enrichmentu z minimalnym confidence tożsamości,
 - benchmark snapshot i eksport GREEN do JSON/CSV,
+- pełny bundle eksportowy Faro: firmy, oferty, kontakty + manifest,
 - testy jednostkowe i GitHub Actions CI.
 
 ## Instalacja
@@ -127,7 +130,7 @@ Wynik zawiera także aliasy i wszystkie zaobserwowane lokalizacje firmy.
 
 ### 10. Company Resolution v1
 
-Resolver nie wykonuje jeszcze fuzzy-matchingu nazw. Automatyczne łączenie między różnymi miastami jest dopuszczane tylko wtedy, gdy:
+Resolver nie wykonuje automatycznego fuzzy-merge. Automatyczne łączenie między różnymi miastami jest dopuszczane tylko wtedy, gdy:
 
 - znormalizowana nazwa jest identyczna,
 - nazwa jest wystarczająco charakterystyczna,
@@ -138,7 +141,18 @@ Krótkie lub ogólne nazwy, niskie confidence oraz niejednoznaczne klastry pozos
 
 Każda oferta zapisuje metodę resolution, np. `new_company`, `exact_name_city`, `exact_name_cross_city`, `exact_name_partial_location` albo informację o niewystarczających przesłankach.
 
-### 11. Benchmark techniczny
+### 11. Kolejka fuzzy do ręcznej weryfikacji
+
+```bash
+agregator resolution-review \
+  --db agregator.sqlite3 \
+  --min-score 0.82 \
+  --limit 100
+```
+
+Ta komenda **niczego nie scala**. Zwraca potencjalne duplikaty wraz z punktacją i sygnałami, np. podobieństwem nazw, wspólną lokalizacją albo zgodnością wysoko zweryfikowanego hosta WWW. Jest to warstwa REVIEW przed ewentualnym rozszerzeniem automatycznych reguł.
+
+### 12. Benchmark techniczny
 
 ```bash
 agregator benchmark --db agregator.sqlite3
@@ -146,9 +160,20 @@ agregator benchmark --db agregator.sqlite3
 
 Raport zawiera m.in. liczbę ofert, firm, źródeł, skuteczność enrichmentu, GREEN/REVIEW/IGNORE oraz rozkład `company_resolution_method`.
 
-### 12. Ground truth dla Company Resolution
+### 13. Ground truth dla Company Resolution
 
-Plik CSV ma format:
+Najpierw można wygenerować arkusz roboczy z realnych rekordów bazy:
+
+```bash
+agregator export-ground-truth \
+  --db agregator.sqlite3 \
+  --output company_ground_truth.csv \
+  --limit 1000
+```
+
+Eksport zawiera aktualny `predicted_company_id`, metodę i confidence. Kolumnę `truth_company_id` należy uzupełnić ręcznie tak, aby oferty tej samej rzeczywistej firmy dostały ten sam identyfikator.
+
+Minimalny format wejścia do ewaluatora:
 
 ```csv
 source,source_id,truth_company_id
@@ -157,7 +182,7 @@ jooble,ABC-7,company-001
 adzuna,987,company-002
 ```
 
-`truth_company_id` jest ręcznie nadanym identyfikatorem rzeczywistej firmy. Ocena jest wykonywana pairwise i zwraca precision, recall oraz F1:
+Ocena jest wykonywana pairwise i zwraca precision, recall oraz F1:
 
 ```bash
 agregator evaluate-resolution \
@@ -167,7 +192,7 @@ agregator evaluate-resolution \
 
 Dzięki temu benchmark 1000 ofert może mierzyć jakość deduplikacji, a nie tylko liczbę utworzonych rekordów.
 
-### 13. Znalezienie oficjalnych stron i kanałów B2B
+### 14. Znalezienie oficjalnych stron i kanałów B2B
 
 Wymaga `BRAVE_SEARCH_API_KEY`:
 
@@ -177,7 +202,7 @@ agregator enrich-db --db agregator.sqlite3 --limit 20
 
 Domyślnie przetwarzane są firmy z `identity_confidence >= 0.7`.
 
-### 14. Wyniki GREEN i eksport
+### 15. Wyniki GREEN i eksport
 
 ```bash
 agregator green --db agregator.sqlite3 --limit 100
@@ -185,6 +210,23 @@ agregator export-green --db agregator.sqlite3 --output green.csv
 ```
 
 Każdy wynik zawiera źródło dowodu i tekst kontekstu, w którym kontakt został znaleziony.
+
+### 16. Pełny eksport dla Faro
+
+```bash
+agregator export-dataset \
+  --db agregator.sqlite3 \
+  --output-dir export/faro
+```
+
+Powstają:
+
+- `companies.csv` — kanoniczne firmy, aliasy, lokalizacje, WWW, confidence i źródła ofert,
+- `job_postings.csv` — oferty wraz z `company_id`, provenance i danymi Company Resolution,
+- `contact_channels.csv` — GREEN/REVIEW/IGNORE razem z evidence,
+- `manifest.json` — wersja schematu, nazwy plików i liczności.
+
+To jest stabilny punkt integracyjny przed przejściem z SQLite do docelowego API/PostgreSQL.
 
 ### Pojedyncza znana firma
 
