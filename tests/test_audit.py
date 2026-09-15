@@ -11,7 +11,9 @@ from agregator.models import (
     DiscoveryResult,
     Evidence,
     JobPosting,
+    PageSnapshot,
     SearchCandidate,
+    WebsiteVerificationAttempt,
 )
 from agregator.storage import SQLiteStore
 
@@ -36,6 +38,24 @@ def _seed_company(store: SQLiteStore) -> int:
 
 
 def _result(text: str = "Kontakt dla partnerów: partnerzy@firma.test") -> DiscoveryResult:
+    snapshot = PageSnapshot(
+        url="https://firma.test/partnerzy",
+        status_code=200,
+        content_sha256="a" * 64,
+        text_excerpt=text,
+    )
+    attempt = WebsiteVerificationAttempt(
+        url="https://firma.test",
+        resolved_url="https://firma.test",
+        accepted=True,
+        score=0.93,
+        search_score=0.88,
+        content_score=0.96,
+        name_coverage=1.0,
+        signals=["exact_normalized_company_name", "accepted"],
+        scanned_pages=["https://firma.test/partnerzy"],
+        page_snapshots=[snapshot],
+    )
     return DiscoveryResult(
         company=CompanyIdentity(
             name="Firma Testowa",
@@ -63,6 +83,7 @@ def _result(text: str = "Kontakt dla partnerów: partnerzy@firma.test") -> Disco
             )
         ],
         scanned_pages=["https://firma.test", "https://firma.test/partnerzy"],
+        page_snapshots=[snapshot],
         search_candidates=[
             SearchCandidate(
                 title="Firma Testowa",
@@ -71,6 +92,7 @@ def _result(text: str = "Kontakt dla partnerów: partnerzy@firma.test") -> Disco
                 score=0.88,
             )
         ],
+        website_attempts=[attempt],
     )
 
 
@@ -103,6 +125,11 @@ def test_discovery_audit_records_website_run_and_deduplicates_same_evidence(tmp_
         "accepted",
     ]
     assert json.loads(runs[0]["scanned_pages_json"])[1].endswith("/partnerzy")
+    page_snapshots = json.loads(runs[0]["page_snapshots_json"])
+    assert page_snapshots[0]["content_sha256"] == "a" * 64
+    attempts = json.loads(runs[0]["website_attempts_json"])
+    assert attempts[0]["accepted"] is True
+    assert attempts[0]["page_snapshots"][0]["content_sha256"] == "a" * 64
     assert len(snapshots) == 1
     assert len(snapshots[0]["content_sha256"]) == 64
 
