@@ -116,24 +116,24 @@ SUPPORT_SIGNALS = [
     "helpdesk",
 ]
 
-GREEN_LOCAL_PARTS = {
-    "wspolpraca",
-    "partnerzy",
-    "partner",
-    "partnership",
-    "partnerships",
-    "b2b",
-    "handel",
-    "handlowy",
-    "sprzedaz",
-    "sales",
-    "dostawcy",
-    "supplier",
-    "suppliers",
-    "vendor",
-    "vendors",
-    "franczyza",
-    "franchise",
+LOCAL_PART_PURPOSES = {
+    "wspolpraca": ChannelPurpose.BUSINESS_PARTNERSHIP,
+    "partnerzy": ChannelPurpose.BUSINESS_PARTNERSHIP,
+    "partner": ChannelPurpose.BUSINESS_PARTNERSHIP,
+    "partnership": ChannelPurpose.BUSINESS_PARTNERSHIP,
+    "partnerships": ChannelPurpose.BUSINESS_PARTNERSHIP,
+    "b2b": ChannelPurpose.BUSINESS_PARTNERSHIP,
+    "handel": ChannelPurpose.SALES,
+    "handlowy": ChannelPurpose.SALES,
+    "sprzedaz": ChannelPurpose.SALES,
+    "sales": ChannelPurpose.SALES,
+    "dostawcy": ChannelPurpose.SUPPLIER,
+    "supplier": ChannelPurpose.SUPPLIER,
+    "suppliers": ChannelPurpose.SUPPLIER,
+    "vendor": ChannelPurpose.SUPPLIER,
+    "vendors": ChannelPurpose.SUPPLIER,
+    "franczyza": ChannelPurpose.FRANCHISE,
+    "franchise": ChannelPurpose.FRANCHISE,
 }
 
 
@@ -156,8 +156,9 @@ def classify_context(context: str, value: str = "") -> tuple[ChannelPurpose, Dec
             return ChannelPurpose.SALES, Decision.REVIEW, 0.78, phrase
 
     local_part = value.split("@", 1)[0].lower() if "@" in value else ""
-    if local_part in GREEN_LOCAL_PARTS:
-        return ChannelPurpose.BUSINESS_PARTNERSHIP, Decision.REVIEW, 0.82, f"localpart:{local_part}"
+    local_part_purpose = LOCAL_PART_PURPOSES.get(local_part)
+    if local_part_purpose is not None:
+        return local_part_purpose, Decision.REVIEW, 0.82, f"localpart:{local_part}"
 
     if any(signal in normalized for signal in RECRUITMENT_SIGNALS):
         return ChannelPurpose.RECRUITMENT, Decision.IGNORE, 0.94, "recruitment"
