@@ -70,7 +70,7 @@ async def test_discover_rejects_false_top_search_result_and_uses_verified_candid
     assert result.company.website_url == official_url
     assert result.company.website_confidence >= 0.55
     assert result.company.website_resolution_origin == WebsiteResolutionOrigin.SEARCH
-    assert result.company.website_resolution_source == "search_provider"
+    assert result.company.website_resolution_source == "static"
     assert "accepted" in result.company.website_verification_signals
     assert crawler.calls == [false_url, official_url]
     assert result.scanned_pages == [official_url]
@@ -82,12 +82,13 @@ async def test_discover_rejects_false_top_search_result_and_uses_verified_candid
     assert result.website_attempts[0].url == false_url
     assert result.website_attempts[0].accepted is False
     assert result.website_attempts[0].origin == WebsiteResolutionOrigin.SEARCH
-    assert result.website_attempts[0].source == "search_provider"
+    assert result.website_attempts[0].source == "static"
     assert "identity_not_confirmed" in result.website_attempts[0].signals
     assert len(result.website_attempts[0].page_snapshots[0].content_sha256) == 64
     assert result.website_attempts[1].url == official_url
     assert result.website_attempts[1].accepted is True
     assert result.website_attempts[1].origin == WebsiteResolutionOrigin.SEARCH
+    assert result.website_attempts[1].source == "static"
     assert result.website_attempts[1].scanned_pages == [official_url]
 
 
@@ -131,6 +132,7 @@ async def test_discover_returns_no_website_when_identity_cannot_be_confirmed() -
     assert len(result.website_attempts) == 1
     assert result.website_attempts[0].accepted is False
     assert result.website_attempts[0].origin == WebsiteResolutionOrigin.SEARCH
+    assert result.website_attempts[0].source == "static"
     assert result.website_attempts[0].resolved_url == candidate_url
     assert len(result.website_attempts[0].page_snapshots) == 1
 
