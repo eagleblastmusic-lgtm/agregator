@@ -1,10 +1,10 @@
-# Faro — diagnostyczny overlap ofert między źródłami
+# Faro — diagnostyczny overlap i jakość źródeł ofert
 
-Benchmark raportuje heurystyczny overlap ofert pomiędzy źródłami. Celem jest odpowiedź na pytanie, czy kolejne integracje wnoszą nowe oferty, czy głównie powielają rynek już pokryty przez inne źródła.
+Benchmark raportuje heurystyczny overlap ofert pomiędzy źródłami oraz job-level identity quality. Celem jest odpowiedź na dwa osobne pytania: czy kolejne integracje wnoszą nowe oferty oraz jak dobre dane o firmie dostarczają.
 
 ## Ważne ograniczenie
 
-Ta metryka **nie jest produkcyjnym deduplikatorem ofert** i nie powinna być używana do automatycznego scalania rekordów.
+Metryka overlapu **nie jest produkcyjnym deduplikatorem ofert** i nie powinna być używana do automatycznego scalania rekordów.
 
 Fingerprint diagnostyczny powstaje z:
 
@@ -33,6 +33,7 @@ unique_job_fingerprints
 cross_source_shared_fingerprints
 cross_source_shared_fingerprint_rate
 by_source
+identity_quality
 pairwise
 ```
 
@@ -40,9 +41,9 @@ pairwise
 
 `cross_source_shared_fingerprint_rate` to ich udział w całej puli unikalnych fingerprintów.
 
-## Wartość pojedynczego źródła
+## Wartość pokrycia pojedynczego źródła
 
-`by_source` pokazuje, ile treści danego źródła jest rzeczywiście ekskluzywne względem wszystkich pozostałych źródeł w benchmarku:
+`by_source` pokazuje, ile treści danego źródła jest ekskluzywne względem wszystkich pozostałych źródeł w benchmarku:
 
 ```text
 source
@@ -55,7 +56,28 @@ shared_rate
 
 `exclusive_fingerprints` to fingerprinty obserwowane tylko w tym jednym źródle. `exclusive_rate` jest więc prostą diagnostyką marginalnej wartości pokrycia źródła. `shared_rate` pokazuje odwrotnie, jaka część jego fingerprintów pojawia się także gdzie indziej.
 
-To nie jest jeszcze miara biznesowej wartości źródła — unikalna oferta bez wiarygodnej identity może być mniej użyteczna niż powielona oferta zawierająca NIP, REGON lub oficjalny URL firmy.
+## Job-level identity quality per source
+
+`identity_quality` jest liczona wyłącznie z pól zapisanych wraz z ofertą, dzięki czemu późniejszy enrichment firmy nie jest błędnie przypisywany portalowi źródłowemu.
+
+Dla każdego źródła raport obejmuje:
+
+```text
+jobs
+companies
+company_to_job_ratio
+avg_company_name_confidence
+avg_company_resolution_confidence
+company_name_confidence_ge_070_rate
+resolution_confidence_ge_070_rate
+city_coverage_rate
+description_coverage_rate
+resolution_methods
+```
+
+To pozwala odróżnić źródło, które daje dużo unikalnych ofert, ale słabą identity, od źródła o mniejszym wolumenie, lecz stabilnej nazwie firmy/lokalizacji i wysokim resolution confidence.
+
+Te metryki nie próbują przypisywać źródłu później znalezionych NIP/REGON/WWW, jeśli nie ma jednoznacznego job-level provenance. Dzięki temu raport nie zawyża jakości źródła na skutek enrichmentu wykonanego z innego kanału.
 
 ## Metryki par źródeł
 
@@ -90,19 +112,22 @@ Asymetryczne overlap rates są szczególnie użyteczne. Przykładowo, jeśli mni
 
 ## Zastosowanie w M1
 
-Po benchmarku 1000 realnych ofert metryka ma pomóc ocenić wartość źródeł razem z:
+Po benchmarku 1000 realnych ofert źródła można porównywać razem z:
 
 ```text
 source_job_counts
 source_run_metrics
-identity quality
+source_overlap.by_source
+source_overlap.identity_quality
 company identifiers coverage
 website candidate coverage
 error rate
 request/runtime cost
 ```
 
-Źródło o dużej liczbie ofert, ale bardzo wysokim overlapie i słabej jakości identity może mieć mniejszą wartość dla Faro niż mniejsze źródło dostarczające unikalne oferty, NIP/REGON lub oficjalny URL firmy.
+Źródło o dużej liczbie ofert, ale bardzo wysokim overlapie i słabej jakości identity może mieć mniejszą wartość dla Faro niż mniejsze źródło dostarczające unikalne oferty albo lepszą tożsamość pracodawców.
+
+Nie wprowadzamy jeszcze arbitralnego „Source Value Score”. Wagi takiego score powinny wynikać z realnego benchmarku i potrzeb produktu, a nie z założeń przed pomiarem.
 
 ## Czego jeszcze nie robimy
 
