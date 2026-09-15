@@ -41,6 +41,7 @@ class ValidationReport:
     exercised_sources: int
     sources_with_current_jobs: int
     healthy_sources: list[str]
+    empty_sources: list[str]
     failing_sources: list[str]
     access_blocked_sources: list[str]
     not_configured_sources: list[str]
@@ -124,6 +125,7 @@ def build_validation_report(
         )
 
     healthy = [item.source for item in source_rows if item.state == "healthy"]
+    empty = [item.source for item in source_rows if item.state == "empty"]
     failing = [item.source for item in source_rows if item.state == "failing"]
     access_blocked = [
         item.source for item in source_rows if item.state == "access_blocked"
@@ -144,6 +146,7 @@ def build_validation_report(
         exercised_sources=exercised,
         sources_with_current_jobs=len(names) - len(without_jobs),
         healthy_sources=healthy,
+        empty_sources=empty,
         failing_sources=failing,
         access_blocked_sources=access_blocked,
         not_configured_sources=not_configured,
@@ -178,6 +181,7 @@ def render_validation_markdown(report: ValidationReport) -> str:
         "## Source health",
         "",
         f"- Healthy: `{', '.join(report.healthy_sources) or 'none'}`",
+        f"- Empty (run OK, 0 ofert): `{', '.join(report.empty_sources) or 'none'}`",
         f"- Failing: `{', '.join(report.failing_sources) or 'none'}`",
         f"- Access blocked: `{', '.join(report.access_blocked_sources) or 'none'}`",
         f"- Not configured: `{', '.join(report.not_configured_sources) or 'none'}`",
@@ -223,6 +227,9 @@ def render_validation_markdown(report: ValidationReport) -> str:
 
     lines.extend(
         [
+            "",
+            "> `empty` oznacza udany technicznie przebieg z 0 ofertami; nie przesądza, "
+            "czy źródło faktycznie było puste, czy parser wymaga ponownej walidacji.",
             "",
             "> Per-source WWW/GREEN to diagnostyka powiązanych firm. Ta sama firma może być "
             "obecna w kilku źródłach, więc wartości między wierszami mogą się nakładać.",
