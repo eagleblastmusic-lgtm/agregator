@@ -10,7 +10,11 @@ from .search import SearchProvider
 
 
 class EmployerDiscoveryPipeline:
-    def __init__(self, crawler: WebsiteCrawler, search_provider: SearchProvider | None = None) -> None:
+    def __init__(
+        self,
+        crawler: WebsiteCrawler,
+        search_provider: SearchProvider | None = None,
+    ) -> None:
         self.crawler = crawler
         self.search_provider = search_provider
 
@@ -57,7 +61,12 @@ class EmployerDiscoveryPipeline:
             raise RuntimeError("Search provider is required for automatic website discovery")
 
         candidates = await self.search_provider.search_company(company_name, city)
-        ranked = [candidate.model_copy(update={"score": score_candidate(candidate, company_name, city)}) for candidate in candidates]
+        ranked = [
+            candidate.model_copy(
+                update={"score": score_candidate(candidate, company_name, city)}
+            )
+            for candidate in candidates
+        ]
         ranked.sort(key=lambda item: item.score, reverse=True)
         chosen = choose_official_website(candidates, company_name, city)
 
