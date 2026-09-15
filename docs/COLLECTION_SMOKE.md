@@ -4,7 +4,25 @@ Collection smoke służy do sprawdzenia realnego pobierania ofert i jakości dan
 
 To jest etap pośredni pomiędzy unit/integration tests a pełnym benchmarkiem 1000 ofert.
 
+Szczegółowa konfiguracja sekretów i źródeł: [`CREDENTIAL_SETUP.md`](CREDENTIAL_SETUP.md).
+
 ## CLI
+
+Najpierw można zobaczyć politykę dostępu i wymagane nazwy zmiennych bez odczytywania ich wartości:
+
+```bash
+agregator-collect sources
+```
+
+Następnie sprawdzamy, czy wymagane dane konfiguracyjne są obecne:
+
+```bash
+agregator-collect credentials \
+  --sources jooble,adzuna \
+  --strict
+```
+
+`credentials` pokazuje wyłącznie nazwy zmiennych i status `configured=true/false`; nie wypisuje sekretów.
 
 Preflight:
 
@@ -119,7 +137,7 @@ Run nie tworzy ground truth dla WWW/kontaktów, ponieważ collection smoke nie w
 
 ## Source access policy
 
-Źródła mają metadane `access_mode` i `experimental` w `SourceRegistry`.
+Źródła mają metadane `access_mode`, `experimental`, `required_env` i `configuration_env` w `SourceRegistry`.
 
 Aktualny adapter OLX jest oznaczony jako `public_web_endpoint + experimental`, więc nie może wejść do smoke testu bez jawnego:
 
@@ -129,7 +147,7 @@ Aktualny adapter OLX jest oznaczony jako `public_web_endpoint + experimental`, w
 
 W workflow odpowiada temu boolean `allow_experimental_sources` domyślnie ustawiony na `false`.
 
-Partner/API-first źródła pozostają preferowanym baseline'em. Brak konfiguracji partnera/API ma zakończyć się czytelnym błędem preflight, a nie fallbackiem omijającym autoryzację.
+Partner/API-first źródła pozostają preferowanym baseline'em. Brak konfiguracji partnera/API ma zakończyć się czytelnym błędem credential check/preflight, a nie fallbackiem omijającym autoryzację.
 
 Dla ePraca workflow może korzystać z `EPRACA_PARTNER` jako secret oraz z repozytoryjnych variables `EPRACA_WOJEWODZTWO`, `EPRACA_JEDNOSTKA` lub `EPRACA_ALL` do jawnego określenia zakresu integracji.
 
