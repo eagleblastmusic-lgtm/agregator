@@ -12,27 +12,24 @@ async def test_kprm_source_collects_public_notice_from_official_xml() -> None:
       https://nabory.kprm.gov.pl/mazowieckie/warszawa/specjalista,167999,v8
     ]]></root>
     """
-    detail = """
-    <html><head>
-      <title>specjalista/specjalistka | Ministerstwo Testów w Warszawie | Warszawa | Praca w służbie cywilnej</title>
-    </head><body>
-      <nav>Ogłoszenia o naborach</nav>
-      <div class="institution">Ministerstwo Testów w Warszawie</div>
-      <div>Ogłoszenie nr 167999 / 15.09.2026</div>
-      <div>Poszukujemy osoby na stanowisko:</div>
-      <h1>specjalista/specjalistka</h1>
-      <section>
-        <h2>Miejsce pracy</h2>
-        <p>ul. Testowa 1, 00-001 Warszawa</p>
-      </section>
-      <section>
-        <h2>Czym będziesz się zajmować</h2>
-        <p>Analiza dokumentów i obsługa procesów.</p>
-      </section>
-      <div>Zapraszamy również do kontaktu telefonicznego:</div>
-      <div>22 123 45 67</div>
-    </body></html>
-    """
+    detail = (
+        "<html><head>"
+        "<title>specjalista/specjalistka | Ministerstwo Testów w Warszawie | "
+        "Warszawa | Praca w służbie cywilnej</title>"
+        "</head><body>"
+        "<nav>Ogłoszenia o naborach</nav>"
+        '<div class="institution">Ministerstwo Testów w Warszawie</div>'
+        "<div>Ogłoszenie nr 167999 / 15.09.2026</div>"
+        "<div>Poszukujemy osoby na stanowisko:</div>"
+        "<h1>specjalista/specjalistka</h1>"
+        "<section><h2>Miejsce pracy</h2>"
+        "<p>ul. Testowa 1, 00-001 Warszawa</p></section>"
+        "<section><h2>Czym będziesz się zajmować</h2>"
+        "<p>Analiza dokumentów i obsługa procesów.</p></section>"
+        "<div>Zapraszamy również do kontaktu telefonicznego:</div>"
+        "<div>22 123 45 67</div>"
+        "</body></html>"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
@@ -113,14 +110,15 @@ def test_extract_kprm_offer_links_handles_html_and_xml() -> None:
 
 
 def test_parse_kprm_detail_uses_document_title_company_fallback() -> None:
-    html = """
-    <html><head>
-      <title>referent/referentka | Urząd Testowy w Gdańsku | Gdańsk | Praca w służbie cywilnej</title>
-    </head><body>
-      <h1>referent/referentka</h1>
-      <p>Opis bez standardowej linii daty.</p>
-    </body></html>
-    """
+    html = (
+        "<html><head>"
+        "<title>referent/referentka | Urząd Testowy w Gdańsku | Gdańsk | "
+        "Praca w służbie cywilnej</title>"
+        "</head><body>"
+        "<h1>referent/referentka</h1>"
+        "<p>Opis bez standardowej linii daty.</p>"
+        "</body></html>"
+    )
 
     job = parse_kprm_detail(
         "https://nabory.kprm.gov.pl/pomorskie/gdansk/referent,123123,v7",
