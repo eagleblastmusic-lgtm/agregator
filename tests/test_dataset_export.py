@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from agregator.audit import record_discovery_audit
 from agregator.dataset_export import export_dataset_bundle
 from agregator.models import (
     ChannelKind,
@@ -33,46 +34,53 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
         ]
     )
     company_id = int(store.list_companies()[0]["id"])
-    store.save_discovery_result(
-        company_id,
-        DiscoveryResult(
-            company=CompanyIdentity(
-                name="ACME Sp. z o.o.",
-                city="Gdańsk",
-                website_url="https://acme.test",
-                domain="acme.test",
-                website_confidence=0.99,
-            ),
-            channels=[
-                ContactChannel(
-                    kind=ChannelKind.EMAIL,
-                    value="partnerzy@acme.test",
-                    purpose=ChannelPurpose.BUSINESS_PARTNERSHIP,
-                    decision=Decision.GREEN,
-                    confidence=0.97,
-                    evidence=Evidence(
-                        url="https://acme.test/partnerzy",
-                        text="Współpraca: partnerzy@acme.test",
-                        signal="współpraca",
-                    ),
-                )
-            ],
+    discovery = DiscoveryResult(
+        company=CompanyIdentity(
+            name="ACME Sp. z o.o.",
+            city="Gdańsk",
+            website_url="https://acme.test",
+            domain="acme.test",
+            website_confidence=0.99,
+            website_verification_signals=["exact_normalized_company_name", "accepted"],
         ),
+        channels=[
+            ContactChannel(
+                kind=ChannelKind.EMAIL,
+                value="partnerzy@acme.test",
+                purpose=ChannelPurpose.BUSINESS_PARTNERSHIP,
+                decision=Decision.GREEN,
+                confidence=0.97,
+                evidence=Evidence(
+                    url="https://acme.test/partnerzy",
+                    text="Współpraca: partnerzy@acme.test",
+                    signal="współpraca",
+                ),
+            )
+        ],
+        scanned_pages=["https://acme.test", "https://acme.test/partnerzy"],
     )
+    store.save_discovery_result(company_id, discovery)
+    record_discovery_audit(store, company_id, discovery)
 
     result = export_dataset_bundle(store, tmp_path / "export")
 
     assert result.companies == 1
     assert result.jobs == 1
     assert result.contacts == 1
+    assert result.website_verifications == 1
+    assert result.evidence_snapshots == 1
     assert result.companies_path.exists()
     assert result.jobs_path.exists()
     assert result.contacts_path.exists()
+    assert result.website_verifications_path.exists()
+    assert result.evidence_snapshots_path.exists()
     assert result.manifest_path.exists()
 
     companies = result.companies_path.read_text(encoding="utf-8-sig")
     jobs = result.jobs_path.read_text(encoding="utf-8-sig")
     contacts = result.contacts_path.read_text(encoding="utf-8-sig")
+    website_runs = result.website_verifications_path.read_text(encoding="utf-8-sig")
+    snapshots = result.evidence_snapshots_path.read_text(encoding="utf-8-sig")
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
 
     assert "ACME Sp. z o.o." in companies
@@ -80,9 +88,13 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     assert "company_resolution_confidence" in jobs
     assert "partnerzy@acme.test" in contacts
     assert "evidence_url" in contacts
-    assert manifest["schema_version"] == "1"
+    assert "exact_normalized_company_name" in website_runs
+    assert "content_sha256" in snapshots
+    assert manifest["schema_version"] == "2"
     assert manifest["counts"] == {
         "companies": 1,
         "job_postings": 1,
         "contact_channels": 1,
+        "website_verification_runs": 1,
+        "contact_evidence_snapshots": 1,
     }
