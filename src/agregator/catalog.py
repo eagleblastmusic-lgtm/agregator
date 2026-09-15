@@ -7,10 +7,16 @@ from pathlib import Path
 DEFAULT_CATALOG_PATH = Path(__file__).resolve().parents[2] / "config" / "source_catalog.tsv"
 
 IMPLEMENTED_ADAPTERS: dict[int, str] = {
+    1: "pracuj",
     7: "olx",
+    10: "justjoinit",
+    11: "nofluffjobs",
+    16: "rocketjobs",
     20: "epraca",
     30: "jooble",
     32: "careerjet",
+    50: "karierawfinansach",
+    53: "skillshot",
     79: "adzuna",
 }
 
