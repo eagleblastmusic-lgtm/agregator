@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from agregator.benchmark_pipeline import run_benchmark_pipeline
 from agregator.crawler import CrawlPage
 from agregator.models import JobPosting, SearchCandidate
@@ -92,6 +94,7 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
         max_rounds=5,
         enrichment_batch_size=10,
         max_enrichment_companies=10,
+        label_sampling_seed="benchmark-test-seed",
     )
 
     assert result.collection.target_reached is True
@@ -125,9 +128,17 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert result.quality_labels.company_resolution_path.exists()
     assert result.quality_labels.website_resolution_path.exists()
     assert result.quality_labels.contact_classification_path.exists()
+    assert result.quality_labels.sampling_manifest_path.exists()
+
+    sampling_manifest = json.loads(
+        result.quality_labels.sampling_manifest_path.read_text(encoding="utf-8")
+    )
+    assert sampling_manifest["seed"] == "benchmark-test-seed"
+    assert sampling_manifest["files"][0]["population_rows"] == 2
 
     manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "3"
+    assert manifest["schema_version"] == "4"
+    assert manifest["configuration"]["label_sampling_seed"] == "benchmark-test-seed"
     assert manifest["collection"]["target_reached"] is True
     assert manifest["enrichment"]["enriched"] == 1
     assert manifest["enrichment"]["evidence_observations"] == 1
@@ -142,6 +153,9 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
         "dataset/website_page_snapshots.csv"
     )
     assert manifest["files"]["labels_dir"] == "labels"
+    assert manifest["files"]["label_sampling_manifest"] == (
+        "labels/sampling_manifest.json"
+    )
 
 
 async def test_benchmark_pipeline_stops_after_all_failed_enrichment_batch(tmp_path: Path) -> None:
@@ -189,3 +203,19 @@ async def test_benchmark_pipeline_stops_after_all_failed_enrichment_batch(tmp_pa
     assert result.readiness.ready_for_manual_labeling is False
     assert result.readiness.blockers == ("enrichment_incomplete:batch_all_failed",)
     assert result.run_manifest_path.exists()
+
+
+async def test_benchmark_pipeline_rejects_empty_label_sampling_seed(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "seed.sqlite3")
+    registry = SourceRegistry()
+    registry.register("fixture", FakeSource)
+
+    with pytest.raises(ValueError, match="label_sampling_seed"):
+        await run_benchmark_pipeline(
+            store,
+            registry,
+            ExplodingPipeline(),  # type: ignore[arg-type]
+            ["fixture"],
+            tmp_path / "workspace-seed",
+            label_sampling_seed="   ",
+        )
