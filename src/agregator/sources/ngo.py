@@ -232,7 +232,10 @@ def _value_after_label(soup: BeautifulSoup, label: str) -> str | None:
 
 
 def _website_after_label(soup: BeautifulSoup, label: str) -> str | None:
-    marker = soup.find(string=lambda value: bool(value and value.strip().casefold() == label.casefold()))
+    target = label.casefold()
+    marker = soup.find(
+        string=lambda value: bool(value and value.strip().casefold() == target)
+    )
     if marker is not None:
         parent = marker.parent
         if isinstance(parent, Tag):
