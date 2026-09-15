@@ -79,6 +79,11 @@ def run(
         min=1,
         max=100_000,
     ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Kod wyjścia 2, jeśli target lub pełny enrichment nie są domknięte",
+    ),
 ) -> None:
     source_names = [item.strip() for item in sources.split(",") if item.strip()]
     store = SQLiteStore(db)
@@ -112,6 +117,8 @@ def run(
         raise typer.BadParameter(str(exc)) from exc
 
     typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    if strict and not result.readiness.ready_for_manual_labeling:
+        raise typer.Exit(code=2)
 
 
 if __name__ == "__main__":
