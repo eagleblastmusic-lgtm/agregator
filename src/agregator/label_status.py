@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .ground_truth_common import EXCLUDE_LABEL
+
 
 @dataclass(frozen=True, slots=True)
 class LabelFileStatus:
@@ -15,6 +17,7 @@ class LabelFileStatus:
     exists: bool
     total_rows: int
     labeled_rows: int
+    excluded_rows: int
     remaining_rows: int
     completion_rate: float
     error: str | None = None
@@ -54,6 +57,7 @@ class LabelBundleStatus:
     ready_for_quality_gate: bool
     total_rows: int
     labeled_rows: int
+    excluded_rows: int
     remaining_rows: int
     completion_rate: float
     blockers: tuple[str, ...]
@@ -67,6 +71,7 @@ class LabelBundleStatus:
             "ready_for_quality_gate": self.ready_for_quality_gate,
             "total_rows": self.total_rows,
             "labeled_rows": self.labeled_rows,
+            "excluded_rows": self.excluded_rows,
             "remaining_rows": self.remaining_rows,
             "completion_rate": self.completion_rate,
             "blockers": list(self.blockers),
@@ -93,6 +98,7 @@ def build_label_bundle_status(label_dir: str | Path) -> LabelBundleStatus:
 
     total_rows = sum(item.total_rows for item in files)
     labeled_rows = sum(item.labeled_rows for item in files)
+    excluded_rows = sum(item.excluded_rows for item in files)
     remaining_rows = sum(item.remaining_rows for item in files)
     blockers: list[str] = []
 
@@ -119,6 +125,9 @@ def build_label_bundle_status(label_dir: str | Path) -> LabelBundleStatus:
             for item in sampling_manifest.mismatches
         )
 
+    if excluded_rows > 0:
+        audit_warnings.append(f"ground_truth_rows_excluded:{excluded_rows}")
+
     return LabelBundleStatus(
         label_dir=directory,
         files=files,
@@ -126,6 +135,7 @@ def build_label_bundle_status(label_dir: str | Path) -> LabelBundleStatus:
         ready_for_quality_gate=not blockers,
         total_rows=total_rows,
         labeled_rows=labeled_rows,
+        excluded_rows=excluded_rows,
         remaining_rows=remaining_rows,
         completion_rate=_ratio(labeled_rows, total_rows),
         blockers=tuple(blockers),
@@ -147,6 +157,7 @@ def _inspect_label_file(
             exists=False,
             total_rows=0,
             labeled_rows=0,
+            excluded_rows=0,
             remaining_rows=0,
             completion_rate=0.0,
         )
@@ -163,6 +174,7 @@ def _inspect_label_file(
                     exists=True,
                     total_rows=0,
                     labeled_rows=0,
+                    excluded_rows=0,
                     remaining_rows=0,
                     completion_rate=0.0,
                     error=f"missing_column:{label_field}",
@@ -176,13 +188,16 @@ def _inspect_label_file(
             exists=True,
             total_rows=0,
             labeled_rows=0,
+            excluded_rows=0,
             remaining_rows=0,
             completion_rate=0.0,
             error=type(exc).__name__,
         )
 
     total_rows = len(rows)
-    labeled_rows = sum(1 for row in rows if (row.get(label_field) or "").strip())
+    values = [(row.get(label_field) or "").strip() for row in rows]
+    labeled_rows = sum(1 for value in values if value)
+    excluded_rows = sum(1 for value in values if value.lower() == EXCLUDE_LABEL)
     remaining_rows = total_rows - labeled_rows
     return LabelFileStatus(
         name=name,
@@ -191,6 +206,7 @@ def _inspect_label_file(
         exists=True,
         total_rows=total_rows,
         labeled_rows=labeled_rows,
+        excluded_rows=excluded_rows,
         remaining_rows=remaining_rows,
         completion_rate=_ratio(labeled_rows, total_rows),
     )
