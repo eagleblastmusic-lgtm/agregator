@@ -21,6 +21,7 @@ class SourcePreflight:
 
 @dataclass(frozen=True, slots=True)
 class BenchmarkPreflight:
+    search_provider_required: bool
     search_provider_ready: bool
     sources: tuple[SourcePreflight, ...]
     ready: bool
@@ -29,6 +30,7 @@ class BenchmarkPreflight:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "search_provider_required": self.search_provider_required,
             "search_provider_ready": self.search_provider_ready,
             "sources": [item.to_dict() for item in self.sources],
             "ready": self.ready,
@@ -42,6 +44,7 @@ def build_benchmark_preflight(
     source_names: list[str],
     *,
     search_provider_ready: bool,
+    require_search_provider: bool = True,
     allow_experimental_sources: bool = False,
 ) -> BenchmarkPreflight:
     normalized: list[str] = []
@@ -56,7 +59,7 @@ def build_benchmark_preflight(
     source_results: list[SourcePreflight] = []
     blockers: list[str] = []
     warnings: list[str] = []
-    if not search_provider_ready:
+    if require_search_provider and not search_provider_ready:
         blockers.append("missing_search_provider_configuration")
 
     if not normalized:
@@ -123,6 +126,7 @@ def build_benchmark_preflight(
             warnings.append(f"{name}:{warning}")
 
     return BenchmarkPreflight(
+        search_provider_required=require_search_provider,
         search_provider_ready=search_provider_ready,
         sources=tuple(source_results),
         ready=not blockers,
