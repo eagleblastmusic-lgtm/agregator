@@ -6,11 +6,12 @@ def test_source_catalog_matches_master_list() -> None:
     summary = catalog_summary(entries)
 
     assert summary["total"] == 91
-    assert summary["implemented"] == 14
-    assert summary["remaining"] == 77
+    assert summary["implemented"] == 15
+    assert summary["remaining"] == 76
     assert summary["priorities"] == {"A0": 14, "A1": 36, "B": 24, "C": 17}
     assert summary["implemented_adapters"] == [
         "pracuj",
+        "aplikuj",
         "olx",
         "justjoinit",
         "nofluffjobs",
