@@ -97,6 +97,14 @@ class SQLiteStore:
                 );
                 """
             )
+            self._ensure_column(connection, "companies", "identity_source", "TEXT")
+            self._ensure_column(
+                connection,
+                "companies",
+                "identity_confidence",
+                "REAL NOT NULL DEFAULT 0",
+            )
+            self._ensure_column(connection, "companies", "enriched_at", "TEXT")
 
     def get_source_cursor(self, source: str) -> str | None:
         with self.connect() as connection:
@@ -197,9 +205,11 @@ class SQLiteStore:
                     c.identity_confidence,
                     c.website_url,
                     c.website_confidence,
-                    COUNT(j.id) AS job_count,
+                    COUNT(DISTINCT j.id) AS job_count,
                     GROUP_CONCAT(DISTINCT j.source) AS sources,
-                    SUM(CASE WHEN cc.decision = 'green' THEN 1 ELSE 0 END) AS green_channels
+                    COUNT(
+                        DISTINCT CASE WHEN cc.decision = 'green' THEN cc.id END
+                    ) AS green_channels
                 FROM companies c
                 LEFT JOIN job_postings j ON j.company_id = c.id
                 LEFT JOIN contact_channels cc ON cc.company_id = c.id
@@ -218,7 +228,7 @@ class SQLiteStore:
         min_identity_confidence: float = 0.7,
         refresh: bool = False,
     ) -> list[dict[str, object]]:
-        where_website = "1 = 1" if refresh else "c.website_url IS NULL"
+        where_status = "1 = 1" if refresh else "c.enriched_at IS NULL"
         with self.connect() as connection:
             rows = connection.execute(
                 f"""
@@ -230,7 +240,7 @@ class SQLiteStore:
                     COUNT(j.id) AS job_count
                 FROM companies c
                 LEFT JOIN job_postings j ON j.company_id = c.id
-                WHERE {where_website}
+                WHERE {where_status}
                   AND c.identity_confidence >= ?
                 GROUP BY c.id
                 ORDER BY job_count DESC, c.identity_confidence DESC
@@ -389,3 +399,17 @@ class SQLiteStore:
                 company_id,
             ),
         )
+
+    @staticmethod
+    def _ensure_column(
+        connection: sqlite3.Connection,
+        table: str,
+        column: str,
+        declaration: str,
+    ) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
