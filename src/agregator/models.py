@@ -64,8 +64,12 @@ class JobPosting(BaseModel):
     url: str
     title: str
     company_name: str
+    company_name_source: str | None = None
+    company_name_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     city: str | None = None
     description: str | None = None
+    published_at: str | None = None
+    refreshed_at: str | None = None
 
 
 class DiscoveryResult(BaseModel):
