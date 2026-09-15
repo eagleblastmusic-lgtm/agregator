@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .employer_score import rank_companies
 from .storage import SQLiteStore
 
 
@@ -24,6 +25,9 @@ class BenchmarkReport:
     company_to_job_ratio: float
     website_find_rate: float
     green_company_rate: float
+    employer_score_average: float
+    employer_score_ge_60: int
+    employer_score_distribution: dict[str, int]
     source_job_counts: dict[str, int]
     company_resolution_counts: dict[str, int]
     source_run_metrics: dict[str, dict[str, int | float]]
@@ -134,6 +138,8 @@ def build_benchmark_report(
         str(row["method"]): int(row["jobs"]) for row in resolution_rows
     }
     source_run_metrics = _source_run_metrics(run_rows)
+    employer_scores = rank_companies(store, min_score=0, limit=max(1, companies_total))
+    score_values = [item.score for item in employer_scores]
 
     return BenchmarkReport(
         jobs_total=jobs_total,
@@ -149,6 +155,9 @@ def build_benchmark_report(
         company_to_job_ratio=_ratio(companies_total, jobs_total),
         website_find_rate=_ratio(websites_found, enriched_companies),
         green_company_rate=_ratio(green_companies, enriched_companies),
+        employer_score_average=_average(score_values),
+        employer_score_ge_60=sum(1 for score in score_values if score >= 60),
+        employer_score_distribution=_score_distribution(score_values),
         source_job_counts=source_job_counts,
         company_resolution_counts=company_resolution_counts,
         source_run_metrics=source_run_metrics,
@@ -220,6 +229,31 @@ def _source_run_metrics(rows: list[Any]) -> dict[str, dict[str, int | float]]:
             "seconds_per_job_seen": _ratio_float(total_seconds, jobs_seen),
         }
     return metrics
+
+
+def _score_distribution(values: list[int]) -> dict[str, int]:
+    buckets = {
+        "0-24": 0,
+        "25-49": 0,
+        "50-74": 0,
+        "75-100": 0,
+    }
+    for value in values:
+        if value < 25:
+            buckets["0-24"] += 1
+        elif value < 50:
+            buckets["25-49"] += 1
+        elif value < 75:
+            buckets["50-74"] += 1
+        else:
+            buckets["75-100"] += 1
+    return buckets
+
+
+def _average(values: list[int]) -> float:
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 4)
 
 
 def _scalar(connection: Any, query: str, params: tuple[object, ...] = ()) -> int:
