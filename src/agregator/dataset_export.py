@@ -13,7 +13,7 @@ from .company_websites import init_company_website_candidate_schema
 from .employer_score import rank_companies
 from .storage import SQLiteStore
 
-EXPORT_SCHEMA_VERSION = "7"
+EXPORT_SCHEMA_VERSION = "8"
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,7 +22,9 @@ class DatasetExportResult:
     companies_path: Path
     jobs_path: Path
     identifiers_path: Path
+    identifier_observations_path: Path
     website_candidates_path: Path
+    website_candidate_observations_path: Path
     contacts_path: Path
     website_verifications_path: Path
     evidence_snapshots_path: Path
@@ -32,7 +34,9 @@ class DatasetExportResult:
     companies: int
     jobs: int
     identifiers: int
+    identifier_observations: int
     website_candidates: int
+    website_candidate_observations: int
     contacts: int
     website_verifications: int
     evidence_snapshots: int
@@ -44,7 +48,11 @@ class DatasetExportResult:
             "companies_path": str(self.companies_path),
             "jobs_path": str(self.jobs_path),
             "identifiers_path": str(self.identifiers_path),
+            "identifier_observations_path": str(self.identifier_observations_path),
             "website_candidates_path": str(self.website_candidates_path),
+            "website_candidate_observations_path": str(
+                self.website_candidate_observations_path
+            ),
             "contacts_path": str(self.contacts_path),
             "website_verifications_path": str(self.website_verifications_path),
             "evidence_snapshots_path": str(self.evidence_snapshots_path),
@@ -54,7 +62,9 @@ class DatasetExportResult:
             "companies": self.companies,
             "jobs": self.jobs,
             "identifiers": self.identifiers,
+            "identifier_observations": self.identifier_observations,
             "website_candidates": self.website_candidates,
+            "website_candidate_observations": self.website_candidate_observations,
             "contacts": self.contacts,
             "website_verifications": self.website_verifications,
             "evidence_snapshots": self.evidence_snapshots,
@@ -79,7 +89,11 @@ def export_dataset_bundle(
     companies_path = directory / "companies.csv"
     jobs_path = directory / "job_postings.csv"
     identifiers_path = directory / "company_identifiers.csv"
+    identifier_observations_path = directory / "company_identifier_observations.csv"
     website_candidates_path = directory / "company_website_candidates.csv"
+    website_candidate_observations_path = (
+        directory / "company_website_candidate_observations.csv"
+    )
     contacts_path = directory / "contact_channels.csv"
     website_verifications_path = directory / "website_verification_runs.csv"
     evidence_snapshots_path = directory / "contact_evidence_snapshots.csv"
@@ -176,6 +190,28 @@ def export_dataset_bundle(
                 """
             ).fetchall()
         ]
+        identifier_observations = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT
+                    cio.id AS identifier_observation_id,
+                    cio.company_id,
+                    c.canonical_name,
+                    cio.kind,
+                    cio.value,
+                    cio.job_source,
+                    cio.evidence_source,
+                    cio.confidence,
+                    cio.observation_count,
+                    cio.first_seen_at,
+                    cio.last_seen_at
+                FROM company_identifier_observations cio
+                JOIN companies c ON c.id = cio.company_id
+                ORDER BY cio.id ASC
+                """
+            ).fetchall()
+        ]
         website_candidates = [
             dict(row)
             for row in connection.execute(
@@ -194,6 +230,28 @@ def export_dataset_bundle(
                 FROM company_website_candidates cwc
                 JOIN companies c ON c.id = cwc.company_id
                 ORDER BY cwc.id ASC
+                """
+            ).fetchall()
+        ]
+        website_candidate_observations = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT
+                    cwco.id AS website_candidate_observation_id,
+                    cwco.company_id,
+                    c.canonical_name,
+                    cwco.url,
+                    cwco.host,
+                    cwco.job_source,
+                    cwco.evidence_source,
+                    cwco.confidence,
+                    cwco.observation_count,
+                    cwco.first_seen_at,
+                    cwco.last_seen_at
+                FROM company_website_candidate_observations cwco
+                JOIN companies c ON c.id = cwco.company_id
+                ORDER BY cwco.id ASC
                 """
             ).fetchall()
         ]
@@ -302,9 +360,19 @@ def export_dataset_bundle(
     _write_csv(jobs_path, jobs, _job_fields())
     _write_csv(identifiers_path, identifiers, _identifier_fields())
     _write_csv(
+        identifier_observations_path,
+        identifier_observations,
+        _identifier_observation_fields(),
+    )
+    _write_csv(
         website_candidates_path,
         website_candidates,
         _website_candidate_fields(),
+    )
+    _write_csv(
+        website_candidate_observations_path,
+        website_candidate_observations,
+        _website_candidate_observation_fields(),
     )
     _write_csv(contacts_path, contacts, _contact_fields())
     _write_csv(
@@ -330,7 +398,11 @@ def export_dataset_bundle(
             "companies": companies_path.name,
             "job_postings": jobs_path.name,
             "company_identifiers": identifiers_path.name,
+            "company_identifier_observations": identifier_observations_path.name,
             "company_website_candidates": website_candidates_path.name,
+            "company_website_candidate_observations": (
+                website_candidate_observations_path.name
+            ),
             "contact_channels": contacts_path.name,
             "website_verification_runs": website_verifications_path.name,
             "contact_evidence_snapshots": evidence_snapshots_path.name,
@@ -341,7 +413,11 @@ def export_dataset_bundle(
             "companies": len(companies),
             "job_postings": len(jobs),
             "company_identifiers": len(identifiers),
+            "company_identifier_observations": len(identifier_observations),
             "company_website_candidates": len(website_candidates),
+            "company_website_candidate_observations": len(
+                website_candidate_observations
+            ),
             "contact_channels": len(contacts),
             "website_verification_runs": len(website_verifications),
             "contact_evidence_snapshots": len(evidence_snapshots),
@@ -356,8 +432,14 @@ def export_dataset_bundle(
             "company_identifiers": (
                 "explicit source-provided business identifiers; conflicts never auto-merge"
             ),
+            "company_identifier_observations": (
+                "source-specific identifier provenance preserving job_source and evidence_source"
+            ),
             "company_website_candidates": (
                 "source-provided website leads with provenance; each requires identity verification"
+            ),
+            "company_website_candidate_observations": (
+                "source-specific website-lead provenance preserving job_source and evidence_source"
             ),
             "website_resolution_origin": (
                 "structured final origin: source_candidate, search or known_url with provenance"
@@ -391,7 +473,9 @@ def export_dataset_bundle(
         companies_path=companies_path,
         jobs_path=jobs_path,
         identifiers_path=identifiers_path,
+        identifier_observations_path=identifier_observations_path,
         website_candidates_path=website_candidates_path,
+        website_candidate_observations_path=website_candidate_observations_path,
         contacts_path=contacts_path,
         website_verifications_path=website_verifications_path,
         evidence_snapshots_path=evidence_snapshots_path,
@@ -401,7 +485,9 @@ def export_dataset_bundle(
         companies=len(companies),
         jobs=len(jobs),
         identifiers=len(identifiers),
+        identifier_observations=len(identifier_observations),
         website_candidates=len(website_candidates),
+        website_candidate_observations=len(website_candidate_observations),
         contacts=len(contacts),
         website_verifications=len(website_verifications),
         evidence_snapshots=len(evidence_snapshots),
@@ -476,6 +562,22 @@ def _identifier_fields() -> list[str]:
     ]
 
 
+def _identifier_observation_fields() -> list[str]:
+    return [
+        "identifier_observation_id",
+        "company_id",
+        "canonical_name",
+        "kind",
+        "value",
+        "job_source",
+        "evidence_source",
+        "confidence",
+        "observation_count",
+        "first_seen_at",
+        "last_seen_at",
+    ]
+
+
 def _website_candidate_fields() -> list[str]:
     return [
         "website_candidate_id",
@@ -484,6 +586,22 @@ def _website_candidate_fields() -> list[str]:
         "url",
         "host",
         "source",
+        "confidence",
+        "observation_count",
+        "first_seen_at",
+        "last_seen_at",
+    ]
+
+
+def _website_candidate_observation_fields() -> list[str]:
+    return [
+        "website_candidate_observation_id",
+        "company_id",
+        "canonical_name",
+        "url",
+        "host",
+        "job_source",
+        "evidence_source",
         "confidence",
         "observation_count",
         "first_seen_at",
