@@ -28,6 +28,23 @@ agregator-collect run \
 
 Collection-only preflight celowo ustawia `search_provider_required=false`, dlatego `BRAVE_SEARCH_API_KEY` nie jest potrzebny.
 
+Collector kończy **całą rundę round-robin** zanim sprawdzi warunek `target_jobs`. Oznacza to, że końcowa liczba ofert może lekko przekroczyć target, ale jedno źródło o dużym wolumenie nie zakończy rundy zanim pozostałe skonfigurowane adaptery zostaną sprawdzone.
+
+W trybie `--strict` samo osiągnięcie łącznego targetu nie wystarcza. Run jest uznawany za gotowy do pełnego benchmarku dopiero, gdy:
+
+```text
+collection_target_reached = true
+source_health_ready = true
+```
+
+`source_health_ready=false`, jeżeli którekolwiek żądane źródło:
+
+- nie wykonało ani jednego udanego runu,
+- zostało wyłączone po błędach,
+- wykonało run, ale nie zwróciło żadnej oferty.
+
+Przejściowe błędy, po których źródło później działa, pozostają widoczne w `sources_with_errors`, ale nie blokują automatycznie readiness.
+
 ## GitHub Actions
 
 Manualny workflow:
@@ -85,6 +102,19 @@ run/collection_run_manifest.json
 run/dataset/*
 ```
 
+`collection_run_manifest.json` schema v2 zawiera m.in.:
+
+```text
+collection_target_reached
+source_health_ready
+unexercised_sources
+disabled_sources
+sources_without_jobs
+sources_with_errors
+ready_for_full_enrichment_benchmark
+blockers
+```
+
 Run nie tworzy ground truth dla WWW/kontaktów, ponieważ collection smoke nie wykonuje enrichmentu.
 
 ## Source access policy
@@ -101,11 +131,14 @@ W workflow odpowiada temu boolean `allow_experimental_sources` domyślnie ustawi
 
 Partner/API-first źródła pozostają preferowanym baseline'em. Brak konfiguracji partnera/API ma zakończyć się czytelnym błędem preflight, a nie fallbackiem omijającym autoryzację.
 
+Dla ePraca workflow może korzystać z `EPRACA_PARTNER` jako secret oraz z repozytoryjnych variables `EPRACA_WOJEWODZTWO`, `EPRACA_JEDNOSTKA` lub `EPRACA_ALL` do jawnego określenia zakresu integracji.
+
 ## Po co ten etap
 
 Smoke test odpowiada przede wszystkim na pytania:
 
 - czy realne API działa z aktualną konfiguracją,
+- czy każde wybrane źródło faktycznie zwraca oferty,
 - czy paginacja/cursor działają,
 - ile ofert realnie wraca,
 - jaka jest jakość nazwy pracodawcy, miasta i opisu,
