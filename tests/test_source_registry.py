@@ -1,9 +1,20 @@
+import pytest
+
 from agregator.sources import default_registry
 
 
-def test_default_registry_contains_olx() -> None:
+def test_default_registry_contains_olx_and_jooble(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JOOBLE_API_KEY", "test-key")
     registry = default_registry()
 
-    assert registry.names() == ["olx"]
-    source = registry.create("OLX")
-    assert source.name == "olx"
+    assert registry.names() == ["jooble", "olx"]
+    assert registry.create("OLX").name == "olx"
+    assert registry.create("JOOBLE").name == "jooble"
+
+
+def test_jooble_registry_requires_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("JOOBLE_API_KEY", raising=False)
+    registry = default_registry()
+
+    with pytest.raises(ValueError, match="JOOBLE_API_KEY"):
+        registry.create("jooble")
