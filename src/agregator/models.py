@@ -50,6 +50,18 @@ class SearchCandidate(BaseModel):
     score: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class WebsiteVerificationAttempt(BaseModel):
+    url: str
+    resolved_url: str
+    accepted: bool
+    score: float = Field(ge=0.0, le=1.0)
+    search_score: float = Field(ge=0.0, le=1.0)
+    content_score: float = Field(ge=0.0, le=1.0)
+    name_coverage: float = Field(ge=0.0, le=1.0)
+    signals: list[str] = Field(default_factory=list)
+    scanned_pages: list[str] = Field(default_factory=list)
+
+
 class CompanyIdentity(BaseModel):
     name: str
     city: str | None = None
@@ -78,3 +90,4 @@ class DiscoveryResult(BaseModel):
     channels: list[ContactChannel] = Field(default_factory=list)
     scanned_pages: list[str] = Field(default_factory=list)
     search_candidates: list[SearchCandidate] = Field(default_factory=list)
+    website_attempts: list[WebsiteVerificationAttempt] = Field(default_factory=list)
