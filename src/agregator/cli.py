@@ -13,6 +13,7 @@ from .enrich import enrich_pending_companies
 from .importers import load_jobs_csv
 from .ingest import IngestResult, ingest_source
 from .pipeline import EmployerDiscoveryPipeline
+from .reporting import build_benchmark_report, export_green_channels
 from .search import BraveSearchProvider
 from .sources import default_registry
 from .sources.adzuna import AdzunaApiSource
@@ -301,6 +302,33 @@ def green(
     store = SQLiteStore(db)
     store.init_schema()
     typer.echo(json.dumps(store.list_green_channels(limit), ensure_ascii=False, indent=2))
+
+
+@app.command("benchmark")
+def benchmark(
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    high_confidence_threshold: float = typer.Option(0.7, "--high-confidence-threshold"),
+) -> None:
+    store = SQLiteStore(db)
+    report = build_benchmark_report(
+        store,
+        high_confidence_threshold=high_confidence_threshold,
+    )
+    typer.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+
+
+@app.command("export-green")
+def export_green(
+    output: str = typer.Option(..., "--output"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    format: str | None = typer.Option(None, "--format"),
+) -> None:
+    store = SQLiteStore(db)
+    try:
+        path = export_green_channels(store, output, format=format)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(str(path))
 
 
 if __name__ == "__main__":
