@@ -7,6 +7,7 @@ from dataclasses import asdict
 
 import typer
 
+from .benchmark_runner import collect_benchmark
 from .catalog import catalog_summary, filter_catalog, load_source_catalog
 from .contact_ground_truth import (
     evaluate_contact_classification_csv,
@@ -240,6 +241,41 @@ def collect_adzuna(
         typer.echo(json.dumps(_source_result(result, db), ensure_ascii=False, indent=2))
 
     asyncio.run(run())
+
+
+@app.command("benchmark-collect")
+def benchmark_collect(
+    sources: str = typer.Option("olx,jooble,adzuna", "--sources"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    target_jobs: int = typer.Option(1000, "--target-jobs", min=1, max=1_000_000),
+    max_rounds: int = typer.Option(100, "--max-rounds", min=1, max=10_000),
+    max_errors_per_source: int = typer.Option(
+        3,
+        "--max-errors-per-source",
+        min=1,
+        max=100,
+    ),
+    fresh: bool = typer.Option(False, "--fresh"),
+    fail_fast: bool = typer.Option(False, "--fail-fast"),
+) -> None:
+    source_names = [item.strip() for item in sources.split(",") if item.strip()]
+    store = SQLiteStore(db)
+    try:
+        result = asyncio.run(
+            collect_benchmark(
+                store,
+                default_registry(),
+                source_names,
+                target_jobs=target_jobs,
+                max_rounds=max_rounds,
+                max_errors_per_source=max_errors_per_source,
+                fresh=fresh,
+                fail_fast=fail_fast,
+            )
+        )
+    except (KeyError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
 
 
 @app.command("runs")
