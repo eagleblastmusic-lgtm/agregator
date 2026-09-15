@@ -60,6 +60,25 @@ def test_source_health_aggregates_persisted_runs(tmp_path: Path) -> None:
     assert beta.latest_status is None
 
 
+def test_source_health_distinguishes_success_with_zero_records(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "empty.sqlite3")
+    store.init_schema()
+    run_id = store.start_source_run("empty", cursor_before=None, pages_requested=1)
+    store.finish_source_run(
+        run_id,
+        status="success",
+        cursor_after=None,
+        pages_processed=1,
+        stats=UpsertStats(),
+    )
+
+    health = build_source_health(store, ["empty"])[0]
+
+    assert health.state == "empty"
+    assert health.successful_runs == 1
+    assert health.jobs_seen == 0
+
+
 def test_source_health_distinguishes_http_access_block(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "blocked.sqlite3")
     store.init_schema()
