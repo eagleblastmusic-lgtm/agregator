@@ -24,6 +24,7 @@ dev = [
 
 [project.scripts]
 agregator = "agregator.cli:app"
+agregator-benchmark = "agregator.benchmark_cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agregator"]
