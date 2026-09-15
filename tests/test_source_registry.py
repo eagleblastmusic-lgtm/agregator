@@ -32,6 +32,7 @@ def test_default_registry_contains_api_and_public_sources(
         "ofertypracyedu",
         "olx",
         "pracuj",
+        "randstad",
         "rocketjobs",
         "skillshot",
         "theprotocol",
@@ -41,6 +42,7 @@ def test_default_registry_contains_api_and_public_sources(
     assert registry.create("APLIKUJ").name == "aplikuj"
     assert registry.create("THEPROTOCOL").name == "theprotocol"
     assert registry.create("BULLDOGJOB").name == "bulldogjob"
+    assert registry.create("RANDSTAD").name == "randstad"
     assert registry.create("SKILLSHOT").name == "skillshot"
     assert registry.create("NOFLUFFJOBS").name == "nofluffjobs"
     assert registry.create("JUSTJOINIT").name == "justjoinit"
@@ -83,6 +85,11 @@ def test_default_registry_exposes_access_policy_metadata() -> None:
     assert bulldogjob.access_mode == "public_html"
     assert bulldogjob.experimental is True
     assert bulldogjob.required_env == ()
+
+    randstad = registry.describe("randstad")
+    assert randstad.access_mode == "public_html"
+    assert randstad.experimental is True
+    assert randstad.required_env == ()
 
     skillshot = registry.describe("skillshot")
     assert skillshot.access_mode == "public_html"
