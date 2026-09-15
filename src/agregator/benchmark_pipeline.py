@@ -26,6 +26,8 @@ class BenchmarkEnrichmentSummary:
     channels_found: int = 0
     green_channels: int = 0
     evidence_snapshots: int = 0
+    evidence_observations: int = 0
+    evidence_changes: int = 0
     source_website_candidates_checked: int = 0
     source_website_candidates_verified: int = 0
     search_fallbacks: int = 0
@@ -40,6 +42,8 @@ class BenchmarkEnrichmentSummary:
         self.channels_found += stats.channels_found
         self.green_channels += stats.green_channels
         self.evidence_snapshots += stats.evidence_snapshots
+        self.evidence_observations += stats.evidence_observations
+        self.evidence_changes += stats.evidence_changes
         self.source_website_candidates_checked += stats.source_website_candidates_checked
         self.source_website_candidates_verified += stats.source_website_candidates_verified
         self.search_fallbacks += stats.search_fallbacks
