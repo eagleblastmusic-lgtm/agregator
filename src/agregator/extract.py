@@ -127,13 +127,30 @@ def _form_semantics(form: Tag) -> str:
             if value:
                 parts.append(value)
         control_type = _attribute_text(control, "type").lower()
-        if control.name == "input" and control_type in {"submit", "button"}:
+        if control.name == "input" and control_type in {"submit", "button", "checkbox", "radio"}:
             value = _attribute_text(control, "value")
             if value:
                 parts.append(value)
 
     deduplicated = list(dict.fromkeys(part.strip() for part in parts if part.strip()))
     return " ".join(deduplicated)[:4000]
+
+
+def _clickable_semantics(control: Tag) -> str:
+    parts = [" ".join(control.stripped_strings).strip()]
+    for attribute in (
+        "id",
+        "name",
+        "aria-label",
+        "title",
+        "data-purpose",
+        "data-target",
+        "data-action",
+    ):
+        value = _attribute_text(control, attribute)
+        if value:
+            parts.append(value)
+    return " ".join(dict.fromkeys(part for part in parts if part))[:2000]
 
 
 def _channel_url(raw: str, page_url: str) -> str | None:
@@ -162,7 +179,12 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
 
     for email, needle in email_needles.items():
         context = _context(text, needle)
-        purpose, decision, confidence, signal = classify_context(context, email)
+        # The page path is useful evidence: /wspolpraca or /partnerzy should make an
+        # otherwise generic mailbox review-worthy, while /kariera can suppress it.
+        purpose, decision, confidence, signal = classify_context(
+            f"{context} {page_url}",
+            email,
+        )
         channel = ContactChannel(
             kind=ChannelKind.EMAIL,
             value=email,
@@ -203,7 +225,9 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
         if href.lower().startswith("mailto:"):
             continue
         value = _channel_url(href, page_url)
-        if value is None and href.startswith("#"):
+        if value is None and (
+            href.startswith("#") or href.lower().startswith("javascript:")
+        ):
             value = _page_channel_url(page_url)
         if value is None:
             continue
@@ -220,5 +244,32 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
                 evidence=Evidence(url=page_url, text=combined[:500], signal=signal),
             ),
         )
+
+    # Some modern sites open a partnership/contact modal from a button instead of a
+    # literal <form> or navigable <a>. Preserve the page URL as the stable endpoint.
+    for control in soup.find_all(("button", "div", "span")):
+        if not isinstance(control, Tag):
+            continue
+        if control.find_parent("form") is not None:
+            continue
+        if control.name in {"div", "span"} and _attribute_text(control, "role").lower() != "button":
+            continue
+        semantics = _clickable_semantics(control)
+        if not contains_discovery_signal(semantics):
+            continue
+        value = _page_channel_url(page_url)
+        purpose, decision, confidence, signal = classify_context(semantics, value)
+        key = (ChannelKind.FORM.value, value)
+        candidate = ContactChannel(
+            kind=ChannelKind.FORM,
+            value=value,
+            purpose=purpose,
+            decision=decision,
+            confidence=min(confidence, 0.84),
+            evidence=Evidence(url=page_url, text=semantics[:500], signal=signal),
+        )
+        previous = found.get(key)
+        if previous is None or candidate.confidence > previous.confidence:
+            found[key] = candidate
 
     return sorted(found.values(), key=lambda item: item.confidence, reverse=True)
