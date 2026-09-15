@@ -7,6 +7,7 @@ import os
 import typer
 
 from .crawler import WebsiteCrawler
+from .enrich import enrich_pending_companies
 from .ingest import ingest_source
 from .pipeline import EmployerDiscoveryPipeline
 from .search import BraveSearchProvider
@@ -22,6 +23,13 @@ def _crawler() -> WebsiteCrawler:
         max_pages=int(os.getenv("AGREGATOR_MAX_PAGES", "12")),
         request_delay=float(os.getenv("AGREGATOR_REQUEST_DELAY", "0.8")),
     )
+
+
+def _search_provider() -> BraveSearchProvider:
+    api_key = os.getenv("BRAVE_SEARCH_API_KEY", "")
+    if not api_key:
+        raise typer.BadParameter("Ustaw BRAVE_SEARCH_API_KEY przed użyciem wyszukiwania")
+    return BraveSearchProvider(api_key)
 
 
 @app.command("scan-url")
@@ -43,13 +51,11 @@ def discover(
     company: str = typer.Option(..., "--company"),
     city: str | None = typer.Option(None, "--city"),
 ) -> None:
-    api_key = os.getenv("BRAVE_SEARCH_API_KEY", "")
-    if not api_key:
-        raise typer.BadParameter("Ustaw BRAVE_SEARCH_API_KEY przed użyciem discover")
-
     async def run() -> None:
-        provider = BraveSearchProvider(api_key)
-        pipeline = EmployerDiscoveryPipeline(crawler=_crawler(), search_provider=provider)
+        pipeline = EmployerDiscoveryPipeline(
+            crawler=_crawler(),
+            search_provider=_search_provider(),
+        )
         result = await pipeline.discover(company, city)
         typer.echo(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
 
@@ -95,6 +101,31 @@ def collect_olx(
     asyncio.run(run())
 
 
+@app.command("enrich-db")
+def enrich_db(
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    limit: int = typer.Option(20, "--limit", min=1, max=500),
+    min_identity_confidence: float = typer.Option(0.7, "--min-identity-confidence"),
+    refresh: bool = typer.Option(False, "--refresh"),
+) -> None:
+    async def run() -> None:
+        store = SQLiteStore(db)
+        pipeline = EmployerDiscoveryPipeline(
+            crawler=_crawler(),
+            search_provider=_search_provider(),
+        )
+        stats = await enrich_pending_companies(
+            store,
+            pipeline,
+            limit=limit,
+            min_identity_confidence=min_identity_confidence,
+            refresh=refresh,
+        )
+        typer.echo(json.dumps(vars(stats), ensure_ascii=False, indent=2))
+
+    asyncio.run(run())
+
+
 @app.command("companies")
 def companies(
     db: str = typer.Option("agregator.sqlite3", "--db"),
@@ -103,6 +134,16 @@ def companies(
     store = SQLiteStore(db)
     store.init_schema()
     typer.echo(json.dumps(store.list_companies(limit), ensure_ascii=False, indent=2))
+
+
+@app.command("green")
+def green(
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    limit: int = typer.Option(100, "--limit", min=1, max=5000),
+) -> None:
+    store = SQLiteStore(db)
+    store.init_schema()
+    typer.echo(json.dumps(store.list_green_channels(limit), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
