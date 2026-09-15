@@ -9,6 +9,7 @@ from .careerjet import CareerjetApiSource
 from .epraca import EPracaSource
 from .jooble import JoobleApiSource
 from .kprm import KprmPublicSource
+from .ofertypracy_edu import OfertyPracyEduPublicSource
 from .olx import OlxPublicSource
 from .public_sources import (
     justjoinit_source,
@@ -189,6 +190,16 @@ def default_registry() -> SourceRegistry:
         ),
     )
     registry.register(
+        "ofertypracyedu",
+        OfertyPracyEduPublicSource,
+        access_mode="official_public_html",
+        experimental=True,
+        notes=(
+            "Official MEN/SIO public vacancy listing. Public listing/detail pages only; "
+            "recruitment contacts remain raw evidence and are not treated as GREEN outreach."
+        ),
+    )
+    registry.register(
         "jooble",
         _jooble_from_env,
         access_mode="partner_api",
@@ -251,6 +262,7 @@ __all__ = [
     "EPracaSource",
     "JoobleApiSource",
     "KprmPublicSource",
+    "OfertyPracyEduPublicSource",
     "OlxPublicSource",
     "SourceRegistry",
     "default_registry",
