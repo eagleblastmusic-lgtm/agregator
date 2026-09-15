@@ -75,20 +75,27 @@ Zaimplementowano:
 
 ## M1 — agregacja ofert pracy
 
-Status: **w realizacji**.
+Status: **zaawansowany fundament w realizacji**.
 
-Zaimplementowano fundament:
+Zaimplementowano:
 
 - wspólny kontrakt `JobSource`,
 - `SourceRegistry` pod kolejne portale,
-- pierwszy adapter `OlxPublicSource`,
-- cursor/offset i resumowalne pobieranie,
-- SQLite z tabelami `companies`, `job_postings`, `contact_channels`, `source_state`,
-- podstawową normalizację i deduplikację firm,
+- adapter publicznego źródła OLX,
+- adapter Jooble oparty o REST API,
+- adapter Adzuna oparty o REST API,
+- cursor/offset/page i resumowalne pobieranie,
+- SQLite z tabelami `companies`, `job_postings`, `contact_channels`, `source_state`, `source_runs`,
+- podstawową normalizację i konserwatywną deduplikację firm,
 - provenance nazwy pracodawcy oraz `identity_confidence`,
+- historię runów: success/failure, kursory, strony, insert/update i skrócony błąd,
 - kolejkę firm do enrichmentu,
-- trwały zapis wyników i dowodów,
-- CLI `collect`, `collect-olx`, `companies`, `enrich-db`, `green`.
+- trwały zapis oficjalnej strony, kanałów i evidence,
+- importer CSV do benchmarków wieloźródłowych,
+- katalog 91 źródeł z master-listy i raport pokrycia adapterami,
+- benchmark snapshot: oferty, firmy, źródła, enrichment, GREEN/REVIEW/IGNORE, rate domen,
+- eksport wyników GREEN do JSON/CSV,
+- CLI do całego przepływu.
 
 ### Interfejs adaptera źródła
 
@@ -110,26 +117,36 @@ Minimalne dane:
 - opis,
 - data publikacji / odświeżenia, jeśli dostępna.
 
-### Kolejność wdrażania kolejnych źródeł
+### Strategia integracji źródeł
 
 1. źródła z oficjalnym API/feedem,
-2. strony firmowe / careers,
-3. publiczne portale bez logowania, po przeglądzie sposobu dostępu i regulaminu,
-4. źródła dynamiczne przez Playwright tylko tam, gdzie jest to konieczne i zgodne z zasadami dostępu.
+2. źródła publiczne/oficjalne,
+3. publiczne portale bez logowania po przeglądzie sposobu dostępu i regulaminu,
+4. strony dynamiczne przez Playwright tylko tam, gdzie jest to konieczne i zgodne z zasadami dostępu,
+5. źródła partnerskie/ograniczone nie są zastępowane obchodzeniem zabezpieczeń.
 
 Każdy adapter jest izolowany w `src/agregator/sources/<source>.py` i może zostać wyłączony bez wpływu na pozostałe.
 
+### Stan katalogu źródeł
+
+- 91 pozycji w `config/source_catalog.tsv`,
+- 14 źródeł A0,
+- 36 źródeł A1,
+- 24 źródła B,
+- 17 źródeł C,
+- obecnie zaimplementowane: OLX, Jooble, Adzuna.
+
 ### Następne checkpointy M1
 
-- M1-01: potwierdzić adapter OLX na realnej próbce i dodać fixture z aktualnym payloadem,
-- M1-02: dodać import benchmarku CSV/JSONL,
-- M1-03: dodać drugi portal i sprawdzić kontrakt wieloźródłowy,
-- M1-04: dodać historię runów i metryki błędów,
-- M1-05: benchmark 1000 ofert.
+- M1-06: dodać kolejne źródło API-first lub oficjalne A0/A1,
+- M1-07: przygotować fixture z realnego publicznego payloadu OLX i test kontraktowy,
+- M1-08: uruchomić kontrolowany benchmark 1000 ofert,
+- M1-09: mierzyć błędy per source oraz koszt/czas na firmę,
+- M1-10: eksport pełnego datasetu firm i ofert do późniejszej integracji z Faro.
 
 ## M2 — Company Resolution
 
-Cel: jedna firma = jeden rekord niezależnie od liczby ofert i źródeł.
+Cel: jedna firma = jeden rekord niezależnie od liczby ofert, źródeł i lokalizacji.
 
 Sygnały:
 
@@ -139,7 +156,8 @@ Sygnały:
 - domena,
 - telefon publiczny,
 - NIP/KRS, jeśli jawnie występują,
-- profile i identyfikatory źródłowe.
+- profile i identyfikatory źródłowe,
+- zgodność danych między portalami.
 
 Wynik:
 
@@ -168,7 +186,7 @@ Scoring domeny bierze pod uwagę:
 - zgodność danych na stronie,
 - wykluczenie social mediów, katalogów i portali pracy.
 
-Plan: po znalezieniu kandydata odwiedzić stronę i zrobić drugi etap weryfikacji na podstawie treści i danych kontaktowych.
+Następny etap: po znalezieniu kandydata odwiedzić stronę i wykonać drugi etap weryfikacji na podstawie treści i danych kontaktowych.
 
 ## M4 — crawler i classifier v2
 
@@ -233,14 +251,18 @@ Score biznesowy jest osobny od `contact_confidence`.
 
 ## Benchmark przed skalowaniem
 
-Pierwszy test produkcyjny:
+Pierwszy test produkcyjny: 1000 realnych ofert.
 
-- 1000 realnych ofert,
-- liczba unikalnych firm,
-- precision Company Resolution,
+Mierzymy:
+
+- liczbę unikalnych firm,
+- company/job ratio,
+- precision Company Resolution na ręcznie oznaczonej próbce,
 - % firm z poprawnie znalezioną domeną,
-- % firm z kanałem GREEN/REVIEW,
-- precision klasyfikacji na ręcznie oznaczonej próbce,
+- % wzbogaconych firm z kanałem GREEN/REVIEW,
+- precision klasyfikacji kanałów,
+- rozkład wyników per źródło,
+- liczbę błędów i retry per źródło,
 - średni koszt i czas na firmę.
 
-Dopiero po benchmarku zwiększamy skalę i liczbę źródeł.
+CLI `benchmark` zapewnia automatyczny snapshot metryk technicznych. Precision/recall wymagają osobnego ręcznie oznaczonego ground truth i zostaną dodane przed właściwym testem 1000 ofert.
