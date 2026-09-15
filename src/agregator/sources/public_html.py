@@ -7,7 +7,7 @@ import urllib.robotparser
 from dataclasses import dataclass
 from html import unescape
 from typing import Any
-from urllib.parse import unquote, urljoin, urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -29,15 +29,10 @@ class HtmlJobSourceConfig:
     company_selectors: tuple[str, ...] = ()
     city_selectors: tuple[str, ...] = ()
     description_selectors: tuple[str, ...] = ("main", "article")
-    additional_hosts: tuple[str, ...] = ()
 
 
 class PublicHtmlJobSource:
-    """Collect public job pages without bypassing access controls.
-
-    The adapter checks robots.txt before fetching listing and detail URLs. It does
-    not log in, solve CAPTCHAs, rotate identities, or call hidden/private APIs.
-    """
+    """Reusable public HTML collector with robots, rate limiting and bounded retries."""
 
     def __init__(
         self,
@@ -45,7 +40,7 @@ class PublicHtmlJobSource:
         *,
         client: httpx.AsyncClient | None = None,
         user_agent: str = "FaroEmployerDiscovery/0.2",
-        request_delay: float = 0.5,
+        request_delay: float = 0.8,
         max_retries: int = 2,
     ) -> None:
         self.config = config
@@ -65,19 +60,19 @@ class PublicHtmlJobSource:
             follow_redirects=True,
             headers={
                 "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.7",
+                "Accept-Language": "pl-PL,pl;q=0.9",
                 "User-Agent": self.user_agent,
             },
         )
         try:
-            await self._assert_robots_allowed(client, listing_url)
+            await self._assert_allowed(client, listing_url)
             listing_html = await self._get_text(client, listing_url)
             links = extract_offer_links(listing_url, listing_html, self.config)
             links = links[: self.config.max_offer_links]
 
             jobs: list[JobPosting] = []
             for index, url in enumerate(links):
-                await self._assert_robots_allowed(client, url)
+                await self._assert_allowed(client, url)
                 if index and self.request_delay:
                     await asyncio.sleep(self.request_delay)
                 try:
@@ -91,28 +86,24 @@ class PublicHtmlJobSource:
             if owns_client:
                 await client.aclose()
 
-        next_cursor = None if not self.config.paginated or not links else str(page + 1)
+        next_cursor = str(page + 1) if self.config.paginated and links else None
         return SourceBatch(jobs=jobs, next_cursor=next_cursor)
 
     def _parse_cursor(self, cursor: str | None) -> int:
-        if cursor is None or cursor == "":
+        if cursor is None:
             return self.config.start_page
         try:
             page = int(cursor)
         except ValueError as exc:
             raise ValueError(f"invalid {self.name} page cursor: {cursor}") from exc
         if page < self.config.start_page:
-            raise ValueError(f"{self.name} page cursor is below start page")
+            raise ValueError(f"{self.name} page cursor must be >= {self.config.start_page}")
         return page
 
-    async def _assert_robots_allowed(
-        self,
-        client: httpx.AsyncClient,
-        url: str,
-    ) -> None:
+    async def _assert_allowed(self, client: httpx.AsyncClient, url: str) -> None:
         if self._robots is None:
             parsed = urlparse(self.config.base_url)
-            robots_url = urlunparse((parsed.scheme, parsed.netloc, "/robots.txt", "", "", ""))
+            robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
             response = await client.get(robots_url)
             parser = urllib.robotparser.RobotFileParser()
             parser.set_url(robots_url)
@@ -124,7 +115,6 @@ class PublicHtmlJobSource:
                 response.raise_for_status()
                 parser.parse(response.text.splitlines())
             self._robots = parser
-
         if not self._robots.can_fetch(self.user_agent, url):
             raise PermissionError(f"robots.txt disallows {self.name} URL: {url}")
 
@@ -133,8 +123,6 @@ class PublicHtmlJobSource:
         for attempt in range(self.max_retries + 1):
             try:
                 response = await client.get(url)
-                if response.status_code == 429 or response.status_code >= 500:
-                    response.raise_for_status()
                 response.raise_for_status()
                 return response.text
             except httpx.HTTPError as exc:
@@ -152,27 +140,28 @@ def extract_offer_links(
     config: HtmlJobSourceConfig,
 ) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
-    base_host = urlparse(config.base_url).netloc.lower()
-    allowed_hosts = {base_host, *(host.lower() for host in config.additional_hosts)}
+    expected_host = urlparse(config.base_url).netloc.lower()
     patterns = [re.compile(pattern, re.IGNORECASE) for pattern in config.offer_path_patterns]
     output: list[str] = []
     seen: set[str] = set()
 
     for anchor in soup.select("a[href]"):
-        raw_href = str(anchor.get("href") or "").strip()
-        if not raw_href:
+        raw = str(anchor.get("href") or "").strip()
+        if not raw:
             continue
-        absolute = _normalize_url(urljoin(listing_url, raw_href))
+        absolute = urljoin(listing_url, raw)
         parsed = urlparse(absolute)
-        if parsed.netloc.lower() not in allowed_hosts:
+        if parsed.netloc.lower() != expected_host:
             continue
-        decoded_path = unquote(parsed.path)
-        if not any(pattern.search(decoded_path) for pattern in patterns):
+        if not any(pattern.search(parsed.path) for pattern in patterns):
             continue
-        if absolute in seen:
+        normalized = _normalize_url(
+            urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+        )
+        if normalized in seen:
             continue
-        seen.add(absolute)
-        output.append(absolute)
+        seen.add(normalized)
+        output.append(normalized)
     return output
 
 
@@ -375,17 +364,44 @@ def _job_city(payload: dict[str, Any]) -> str | None:
     locations = payload.get("jobLocation")
     if not isinstance(locations, list):
         locations = [locations]
+
+    region_fallback: str | None = None
+    country_fallback: str | None = None
     for location in locations:
         if not isinstance(location, dict):
             continue
         address = location.get("address")
-        if isinstance(address, dict):
-            city = _text(address.get("addressLocality"))
-            if city:
-                return city
+        if not isinstance(address, dict):
+            continue
+        city = _text(address.get("addressLocality"))
+        if city:
+            return city
+        if region_fallback is None:
+            region_fallback = _text(address.get("addressRegion"))
+        if country_fallback is None:
+            country_fallback = _structured_location_name(address.get("addressCountry"))
+
     if str(payload.get("jobLocationType") or "").upper() == "TELECOMMUTE":
         return "Remote"
+    if region_fallback:
+        return region_fallback
+    if country_fallback:
+        return country_fallback
+
+    requirements = payload.get("applicantLocationRequirements")
+    if not isinstance(requirements, list):
+        requirements = [requirements]
+    for requirement in requirements:
+        location_name = _structured_location_name(requirement)
+        if location_name:
+            return location_name
     return None
+
+
+def _structured_location_name(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return _text(value.get("name")) or _text(value.get("addressCountry"))
+    return _text(value)
 
 
 def _job_identifier(payload: dict[str, Any]) -> str | None:
