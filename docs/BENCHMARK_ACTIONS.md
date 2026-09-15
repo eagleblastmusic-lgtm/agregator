@@ -64,6 +64,9 @@ preflight --strict
 controlled benchmark --strict
           │
           ▼
+export source identity diagnostics
+          │
+          ▼
 upload workspace artifact
           │
           ▼
@@ -73,6 +76,8 @@ enforce exit code
 Workspace jest inicjalizowany **przed** preflightem. Dzięki temu nawet błąd konfiguracji pozostawia audytowalny artifact z `preflight.json`, `preflight_exit_code.txt` i informacją, że właściwy run został pominięty.
 
 Sam run benchmarku zapisuje swój kod wyjścia do `benchmark/exit_code.txt`. Standardowy JSON zwracany przez CLI trafia do `benchmark/run_result.json`; właściwe dane benchmarku są nadal zapisywane w `benchmark/run/` przez samą aplikację.
+
+Po runie workflow generuje również `benchmark/source_identity_metrics.json` z diagnostyką jakości rekordów per źródło: liczba ofert i firm, company-to-job ratio, średnie confidence nazwy firmy i Company Resolution, coverage miasta/opisu oraz rozkład metod resolution. To raport diagnostyczny do oceny wartości źródeł; nie jest automatycznym rankingiem ani quality gate.
 
 ## Artifact
 
@@ -90,6 +95,7 @@ preflight_exit_code.txt
 exit_code.txt
 run_result.json
 run_skipped.txt
+source_identity_metrics.json
 benchmark.sqlite3
 run/collection.json
 run/enrichment.json
@@ -99,7 +105,7 @@ run/dataset/*
 run/labels/*
 ```
 
-`run_skipped.txt` występuje tylko wtedy, gdy preflight nie przeszedł. `run_result.json` i katalog `run/` powstają dopiero po wejściu we właściwy benchmark.
+`run_skipped.txt` występuje tylko wtedy, gdy preflight nie przeszedł. `run_result.json`, `source_identity_metrics.json` i katalog `run/` powstają dopiero po wejściu we właściwy benchmark.
 
 Baza i eksport zawierają dane pozyskane podczas benchmarku, dlatego artefaktu nie należy traktować jako pliku do publicznego rozpowszechniania bez wcześniejszego przeglądu danych i warunków źródeł.
 
