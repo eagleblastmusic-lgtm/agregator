@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .audit import init_audit_schema
-from .models import ChannelPurpose, Decision
+from .models import ChannelKind, ChannelPurpose, Decision
 from .storage import SQLiteStore
 
 
@@ -29,6 +29,26 @@ class ClassMetrics:
 
 
 @dataclass(frozen=True, slots=True)
+class DecisionSliceMetrics:
+    matched_rows: int
+    decision_accuracy: float
+    decision_macro_f1: float
+    decision_confusion: dict[str, dict[str, int]]
+    decision_by_class: dict[str, ClassMetrics]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "matched_rows": self.matched_rows,
+            "decision_accuracy": self.decision_accuracy,
+            "decision_macro_f1": self.decision_macro_f1,
+            "decision_confusion": self.decision_confusion,
+            "decision_by_class": {
+                key: value.to_dict() for key, value in self.decision_by_class.items()
+            },
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ContactEvaluation:
     labeled_rows: int
     matched_rows: int
@@ -37,6 +57,7 @@ class ContactEvaluation:
     decision_macro_f1: float
     decision_confusion: dict[str, dict[str, int]]
     decision_by_class: dict[str, ClassMetrics]
+    decision_by_kind: dict[str, DecisionSliceMetrics]
     purpose_labeled_rows: int
     purpose_accuracy: float
 
@@ -50,6 +71,9 @@ class ContactEvaluation:
             "decision_confusion": self.decision_confusion,
             "decision_by_class": {
                 key: value.to_dict() for key, value in self.decision_by_class.items()
+            },
+            "decision_by_kind": {
+                key: value.to_dict() for key, value in self.decision_by_kind.items()
             },
             "purpose_labeled_rows": self.purpose_labeled_rows,
             "purpose_accuracy": self.purpose_accuracy,
@@ -212,25 +236,22 @@ def evaluate_contact_classification(
     labels: list[ContactGroundTruthLabel],
 ) -> ContactEvaluation:
     store.init_schema()
-    predictions: dict[int, tuple[Decision, ChannelPurpose]] = {}
+    predictions: dict[int, tuple[Decision, ChannelPurpose, ChannelKind]] = {}
     with store.connect() as connection:
         for label in labels:
             row = connection.execute(
-                "SELECT decision, purpose FROM contact_channels WHERE id = ?",
+                "SELECT decision, purpose, kind FROM contact_channels WHERE id = ?",
                 (label.contact_id,),
             ).fetchone()
             if row is not None:
                 predictions[label.contact_id] = (
                     Decision(str(row["decision"])),
                     ChannelPurpose(str(row["purpose"])),
+                    ChannelKind(str(row["kind"])),
                 )
 
-    classes = [item.value for item in Decision]
-    confusion = {
-        truth: {predicted: 0 for predicted in classes}
-        for truth in classes
-    }
-    correct = 0
+    decision_rows: list[tuple[Decision, Decision]] = []
+    decision_rows_by_kind: dict[ChannelKind, list[tuple[Decision, Decision]]] = {}
     purpose_labeled_rows = 0
     purpose_correct = 0
 
@@ -238,16 +259,58 @@ def evaluate_contact_classification(
         predicted = predictions.get(label.contact_id)
         if predicted is None:
             continue
-        predicted_decision, predicted_purpose = predicted
-        confusion[label.truth_decision.value][predicted_decision.value] += 1
-        if predicted_decision == label.truth_decision:
-            correct += 1
+        predicted_decision, predicted_purpose, channel_kind = predicted
+        decision_row = (label.truth_decision, predicted_decision)
+        decision_rows.append(decision_row)
+        decision_rows_by_kind.setdefault(channel_kind, []).append(decision_row)
+
         if label.truth_purpose is not None:
             purpose_labeled_rows += 1
             if predicted_purpose == label.truth_purpose:
                 purpose_correct += 1
 
+    overall = _decision_slice_metrics(decision_rows)
+    by_kind = {
+        kind.value: _decision_slice_metrics(rows)
+        for kind, rows in sorted(decision_rows_by_kind.items(), key=lambda item: item[0].value)
+    }
+
     matched_rows = len(predictions)
+    return ContactEvaluation(
+        labeled_rows=len(labels),
+        matched_rows=matched_rows,
+        missing_rows=len(labels) - matched_rows,
+        decision_accuracy=overall.decision_accuracy,
+        decision_macro_f1=overall.decision_macro_f1,
+        decision_confusion=overall.decision_confusion,
+        decision_by_class=overall.decision_by_class,
+        decision_by_kind=by_kind,
+        purpose_labeled_rows=purpose_labeled_rows,
+        purpose_accuracy=_safe_ratio(purpose_correct, purpose_labeled_rows),
+    )
+
+
+def evaluate_contact_classification_csv(
+    store: SQLiteStore,
+    path: str | Path,
+) -> ContactEvaluation:
+    return evaluate_contact_classification(store, load_contact_ground_truth_csv(path))
+
+
+def _decision_slice_metrics(
+    rows: list[tuple[Decision, Decision]],
+) -> DecisionSliceMetrics:
+    classes = [item.value for item in Decision]
+    confusion = {
+        truth: {predicted: 0 for predicted in classes}
+        for truth in classes
+    }
+    correct = 0
+    for truth, predicted in rows:
+        confusion[truth.value][predicted.value] += 1
+        if truth == predicted:
+            correct += 1
+
     by_class: dict[str, ClassMetrics] = {}
     for class_name in classes:
         tp = confusion[class_name][class_name]
@@ -274,25 +337,13 @@ def evaluate_contact_classification(
 
     active_f1 = [metrics.f1 for metrics in by_class.values() if metrics.support > 0]
     macro_f1 = round(sum(active_f1) / len(active_f1), 4) if active_f1 else 0.0
-
-    return ContactEvaluation(
-        labeled_rows=len(labels),
-        matched_rows=matched_rows,
-        missing_rows=len(labels) - matched_rows,
-        decision_accuracy=_safe_ratio(correct, matched_rows),
+    return DecisionSliceMetrics(
+        matched_rows=len(rows),
+        decision_accuracy=_safe_ratio(correct, len(rows)),
         decision_macro_f1=macro_f1,
         decision_confusion=confusion,
         decision_by_class=by_class,
-        purpose_labeled_rows=purpose_labeled_rows,
-        purpose_accuracy=_safe_ratio(purpose_correct, purpose_labeled_rows),
     )
-
-
-def evaluate_contact_classification_csv(
-    store: SQLiteStore,
-    path: str | Path,
-) -> ContactEvaluation:
-    return evaluate_contact_classification(store, load_contact_ground_truth_csv(path))
 
 
 def _safe_ratio(numerator: float, denominator: float) -> float:
