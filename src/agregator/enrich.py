@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .audit import record_discovery_audit
+from .company_websites import list_company_website_candidates
+from .models import DiscoveryResult, WebsiteVerificationAttempt
 from .pipeline import EmployerDiscoveryPipeline
 from .storage import SQLiteStore
 
@@ -15,6 +17,9 @@ class EnrichmentStats:
     channels_found: int = 0
     green_channels: int = 0
     evidence_snapshots: int = 0
+    source_website_candidates_checked: int = 0
+    source_website_candidates_verified: int = 0
+    search_fallbacks: int = 0
     failed: int = 0
 
 
@@ -36,11 +41,17 @@ async def enrich_pending_companies(
 
     for company in candidates:
         try:
-            result = await pipeline.discover(
-                str(company["canonical_name"]),
-                str(company["city"]) if company["city"] else None,
-            )
             company_id = int(company["id"])
+            company_name = str(company["canonical_name"])
+            city = str(company["city"]) if company["city"] else None
+            result = await _discover_company(
+                store,
+                pipeline,
+                company_id,
+                company_name,
+                city,
+                stats,
+            )
             store.save_discovery_result(company_id, result)
             audit_stats = record_discovery_audit(store, company_id, result)
         except Exception:
@@ -57,3 +68,43 @@ async def enrich_pending_companies(
         )
 
     return stats
+
+
+async def _discover_company(
+    store: SQLiteStore,
+    pipeline: EmployerDiscoveryPipeline,
+    company_id: int,
+    company_name: str,
+    city: str | None,
+    stats: EnrichmentStats,
+) -> DiscoveryResult:
+    source_attempts: list[WebsiteVerificationAttempt] = []
+    source_candidates = list_company_website_candidates(store, company_id, limit=3)
+
+    for candidate in source_candidates:
+        stats.source_website_candidates_checked += 1
+        source = str(candidate.get("source") or "source")
+        try:
+            result = await pipeline.verify_website_candidate(
+                company_name,
+                str(candidate["url"]),
+                city,
+                candidate_confidence=float(candidate["confidence"]),
+                source_signal=f"source_website_candidate:{source}",
+            )
+        except Exception:
+            continue
+
+        source_attempts.extend(result.website_attempts)
+        if result.company.website_url:
+            stats.source_website_candidates_verified += 1
+            return result
+
+    stats.search_fallbacks += 1
+    result = await pipeline.discover(company_name, city)
+    if not source_attempts:
+        return result
+
+    return result.model_copy(
+        update={"website_attempts": [*source_attempts, *result.website_attempts]}
+    )
