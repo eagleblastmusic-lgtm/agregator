@@ -33,10 +33,12 @@ def test_default_registry_contains_api_and_public_sources(
         "pracuj",
         "rocketjobs",
         "skillshot",
+        "theprotocol",
     ]
     assert registry.create("OLX").name == "olx"
     assert registry.create("PRACUJ").name == "pracuj"
     assert registry.create("APLIKUJ").name == "aplikuj"
+    assert registry.create("THEPROTOCOL").name == "theprotocol"
     assert registry.create("SKILLSHOT").name == "skillshot"
     assert registry.create("NOFLUFFJOBS").name == "nofluffjobs"
     assert registry.create("JUSTJOINIT").name == "justjoinit"
@@ -69,6 +71,11 @@ def test_default_registry_exposes_access_policy_metadata() -> None:
     assert aplikuj.access_mode == "public_html"
     assert aplikuj.experimental is True
     assert aplikuj.required_env == ()
+
+    theprotocol = registry.describe("theprotocol")
+    assert theprotocol.access_mode == "public_html"
+    assert theprotocol.experimental is True
+    assert theprotocol.required_env == ()
 
     skillshot = registry.describe("skillshot")
     assert skillshot.access_mode == "public_html"
