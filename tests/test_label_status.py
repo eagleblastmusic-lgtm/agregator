@@ -95,7 +95,11 @@ def test_label_status_surfaces_valid_sampling_manifest_without_blocking_gate(
                 "schema_version": "1",
                 "seed": "audit-seed",
                 "strategy": "deterministic stratified sampling",
-                "files": [{"name": "company_resolution", "sampled_rows": 1}],
+                "files": [
+                    {"name": "company_resolution", "sampled_rows": 1},
+                    {"name": "website_resolution", "sampled_rows": 1},
+                    {"name": "contact_classification", "sampled_rows": 1},
+                ],
             }
         ),
         encoding="utf-8",
@@ -109,7 +113,9 @@ def test_label_status_surfaces_valid_sampling_manifest_without_blocking_gate(
     assert status.sampling_manifest.valid is True
     assert status.sampling_manifest.schema_version == "1"
     assert status.sampling_manifest.seed == "audit-seed"
-    assert status.sampling_manifest.file_count == 1
+    assert status.sampling_manifest.file_count == 3
+    assert status.sampling_manifest.matches_label_files is True
+    assert status.sampling_manifest.mismatches == ()
 
 
 def test_label_status_warns_about_invalid_sampling_manifest(tmp_path: Path) -> None:
@@ -126,3 +132,49 @@ def test_label_status_warns_about_invalid_sampling_manifest(tmp_path: Path) -> N
     assert status.sampling_manifest.valid is False
     assert status.sampling_manifest.error is not None
     assert status.audit_warnings[0].startswith("invalid_sampling_manifest:")
+
+
+def test_label_status_warns_when_sampling_manifest_row_counts_drift(
+    tmp_path: Path,
+) -> None:
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    (labels / "company_resolution_truth.csv").write_text(
+        "source,source_id,truth_company_id\na,1,company-1\na,2,company-2\n",
+        encoding="utf-8",
+    )
+    (labels / "website_resolution_truth.csv").write_text(
+        "company_id,truth_domain\n1,example.com\n",
+        encoding="utf-8",
+    )
+    (labels / "contact_classification_truth.csv").write_text(
+        "contact_id,truth_decision\n1,green\n",
+        encoding="utf-8",
+    )
+    (labels / "sampling_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "seed": "audit-seed",
+                "strategy": "deterministic stratified sampling",
+                "files": [
+                    {"name": "company_resolution", "sampled_rows": 1},
+                    {"name": "website_resolution", "sampled_rows": 1},
+                    {"name": "contact_classification", "sampled_rows": 1},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status = build_label_bundle_status(labels)
+
+    assert status.ready_for_quality_gate is True
+    assert status.sampling_manifest.valid is True
+    assert status.sampling_manifest.matches_label_files is False
+    assert status.sampling_manifest.mismatches == (
+        "company_resolution:expected=1:actual=2",
+    )
+    assert status.audit_warnings == (
+        "sampling_manifest_row_mismatch:company_resolution:expected=1:actual=2",
+    )
