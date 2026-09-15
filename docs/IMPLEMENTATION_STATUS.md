@@ -29,6 +29,8 @@ epraca
 
 Careerjet i ePraca wymagają prawidłowej konfiguracji partnera/integratora. Repo nie tworzy sztucznych danych wymaganych przez te usługi i nie obchodzi uwierzytelniania.
 
+`SourceRegistry` rozróżnia też sposób dostępu. Jooble/Adzuna/Careerjet są `partner_api`, ePraca jest `official_partner_feed`, a obecny adapter OLX jest oznaczony jako `public_web_endpoint + experimental`. Kontrolowany benchmark wymaga dla źródeł eksperymentalnych jawnego `--allow-experimental-sources`.
+
 Benchmark mierzy źródła na kilku niezależnych osiach zamiast redukować je od razu do jednego arbitralnego score:
 
 ```text
@@ -119,12 +121,18 @@ Po instalacji dostępny jest osobny entrypoint:
 agregator-benchmark run \
   --db benchmark/benchmark.sqlite3 \
   --output-dir benchmark/run \
-  --sources olx,jooble,adzuna \
+  --sources jooble,adzuna \
   --target-jobs 1000 \
   --max-rounds 100 \
   --enrichment-batch-size 25 \
   --max-enrichment-companies 1000 \
   --label-sampling-seed faro-ground-truth-v1
+```
+
+Jeżeli świadomie włączamy OLX w aktualnej eksperymentalnej postaci, trzeba dodać:
+
+```text
+--allow-experimental-sources
 ```
 
 Workflow tworzy `collection.json`, `enrichment.json`, `benchmark_report.json`, dataset schema v7, pakiet etykiet, `labels/sampling_manifest.json`, `labels/prediction_reference/` i `benchmark_run_manifest.json` schema v5.
@@ -236,6 +244,7 @@ Należy zmierzyć:
 - konflikt NIP/REGON/KRS bez auto-merge,
 - źródłowy URL jest kandydatem, nie automatycznie oficjalną domeną,
 - integracje partnerskie wymagają prawidłowej autoryzacji,
+- źródła eksperymentalne wymagają jawnego opt-in w kontrolowanym benchmarku,
 - formularz/checkbox marketingowy jest sygnałem do REVIEW, nie zgodą na outreach,
 - quality gate wymaga ręcznie oznaczonego ground truth,
 - sampling pomaga zbudować mniej tendencyjną próbkę, ale nie zastępuje ręcznej walidacji ani interpretacji supportu per stratum,
