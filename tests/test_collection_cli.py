@@ -7,6 +7,21 @@ from agregator.collection_cli import app
 runner = CliRunner()
 
 
+def test_collection_sources_exposes_access_policy_without_credentials() -> None:
+    result = runner.invoke(app, ["sources"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    by_name = {item["name"]: item for item in payload}
+
+    assert by_name["jooble"]["access_mode"] == "partner_api"
+    assert by_name["jooble"]["experimental"] is False
+    assert by_name["epraca"]["access_mode"] == "official_partner_feed"
+    assert by_name["olx"]["access_mode"] == "public_web_endpoint"
+    assert by_name["olx"]["experimental"] is True
+    assert "revalidate" in (by_name["olx"]["notes"] or "")
+
+
 def test_collection_preflight_does_not_require_search_provider(monkeypatch) -> None:
     monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
     monkeypatch.setenv("JOOBLE_API_KEY", "test-key")
