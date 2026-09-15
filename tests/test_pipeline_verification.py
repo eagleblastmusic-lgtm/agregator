@@ -72,6 +72,13 @@ async def test_discover_rejects_false_top_search_result_and_uses_verified_candid
     assert "accepted" in result.company.website_verification_signals
     assert crawler.calls == [false_url, official_url]
     assert result.scanned_pages == [official_url]
+    assert len(result.website_attempts) == 2
+    assert result.website_attempts[0].url == false_url
+    assert result.website_attempts[0].accepted is False
+    assert "identity_not_confirmed" in result.website_attempts[0].signals
+    assert result.website_attempts[1].url == official_url
+    assert result.website_attempts[1].accepted is True
+    assert result.website_attempts[1].scanned_pages == [official_url]
 
 
 @pytest.mark.asyncio
@@ -109,3 +116,6 @@ async def test_discover_returns_no_website_when_identity_cannot_be_confirmed() -
         "no_verified_website_candidate"
     ]
     assert result.channels == []
+    assert len(result.website_attempts) == 1
+    assert result.website_attempts[0].accepted is False
+    assert result.website_attempts[0].resolved_url == candidate_url
