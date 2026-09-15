@@ -98,6 +98,9 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert result.collection.jobs_after == 2
     assert result.enrichment.enriched == 1
     assert result.enrichment.websites_found == 1
+    assert result.enrichment.evidence_snapshots == 1
+    assert result.enrichment.evidence_observations == 1
+    assert result.enrichment.evidence_changes == 0
     assert result.enrichment.stopped_reason == "no_pending_companies"
     assert result.benchmark.jobs_total == 2
     assert result.benchmark.companies_total == 1
@@ -115,6 +118,7 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert result.benchmark_report_path.exists()
     assert result.run_manifest_path.exists()
     assert result.dataset.manifest_path.exists()
+    assert result.dataset.evidence_observations_path.exists()
     assert result.website_snapshots.path.exists()
     assert result.website_snapshots.rows == 1
     assert result.website_snapshots.parse_errors == 0
@@ -126,9 +130,11 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert manifest["schema_version"] == "3"
     assert manifest["collection"]["target_reached"] is True
     assert manifest["enrichment"]["enriched"] == 1
+    assert manifest["enrichment"]["evidence_observations"] == 1
     assert manifest["benchmark"]["websites_found"] == 1
     assert manifest["website_snapshots"]["rows"] == 1
-    assert manifest["dataset"]["schema_version"] == "6"
+    assert manifest["dataset"]["schema_version"] == "7"
+    assert manifest["dataset"]["evidence_observations"] == 1
     assert manifest["readiness"]["ready_for_manual_labeling"] is True
     assert manifest["readiness"]["blockers"] == []
     assert manifest["files"]["dataset_dir"] == "dataset"
@@ -174,6 +180,8 @@ async def test_benchmark_pipeline_stops_after_all_failed_enrichment_batch(tmp_pa
     assert result.enrichment.candidates == 1
     assert result.enrichment.enriched == 0
     assert result.enrichment.failed == 1
+    assert result.enrichment.evidence_observations == 0
+    assert result.enrichment.evidence_changes == 0
     assert result.enrichment.stopped_reason == "batch_all_failed"
     assert result.website_snapshots.rows == 0
     assert result.readiness.collection_target_reached is True
