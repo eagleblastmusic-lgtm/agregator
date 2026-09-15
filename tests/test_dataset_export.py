@@ -97,7 +97,9 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     assert result.companies == 1
     assert result.jobs == 1
     assert result.identifiers == 1
+    assert result.identifier_observations == 1
     assert result.website_candidates == 1
+    assert result.website_candidate_observations == 1
     assert result.contacts == 1
     assert result.website_verifications == 1
     assert result.evidence_snapshots == 1
@@ -107,7 +109,9 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     assert result.companies_path.exists()
     assert result.jobs_path.exists()
     assert result.identifiers_path.exists()
+    assert result.identifier_observations_path.exists()
     assert result.website_candidates_path.exists()
+    assert result.website_candidate_observations_path.exists()
     assert result.contacts_path.exists()
     assert result.website_verifications_path.exists()
     assert result.evidence_snapshots_path.exists()
@@ -118,7 +122,13 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     companies = result.companies_path.read_text(encoding="utf-8-sig")
     jobs = result.jobs_path.read_text(encoding="utf-8-sig")
     identifiers = result.identifiers_path.read_text(encoding="utf-8-sig")
+    identifier_observations = result.identifier_observations_path.read_text(
+        encoding="utf-8-sig"
+    )
     website_candidates = result.website_candidates_path.read_text(encoding="utf-8-sig")
+    website_candidate_observations = result.website_candidate_observations_path.read_text(
+        encoding="utf-8-sig"
+    )
     contacts = result.contacts_path.read_text(encoding="utf-8-sig")
     website_runs = result.website_verifications_path.read_text(encoding="utf-8-sig")
     snapshots = result.evidence_snapshots_path.read_text(encoding="utf-8-sig")
@@ -131,9 +141,15 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     assert "company_resolution_confidence" in jobs
     assert "1234567890" in identifiers
     assert "fixture.nip" in identifiers
+    assert "job_source" in identifier_observations
+    assert "olx" in identifier_observations
+    assert "fixture.nip" in identifier_observations
     assert "https://acme.test" in website_candidates
     assert "fixture.website" in website_candidates
     assert "observation_count" in website_candidates
+    assert "job_source" in website_candidate_observations
+    assert "olx" in website_candidate_observations
+    assert "fixture.website" in website_candidate_observations
     assert "partnerzy@acme.test" in contacts
     assert "evidence_url" in contacts
     assert "exact_normalized_company_name" in website_runs
@@ -146,12 +162,14 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     assert "business_partnership" in observations
     assert "ACME Sp. z o.o. — kontakt dla partnerów" in page_snapshots
     assert "a" * 64 in page_snapshots
-    assert manifest["schema_version"] == "7"
+    assert manifest["schema_version"] == "8"
     assert manifest["counts"] == {
         "companies": 1,
         "job_postings": 1,
         "company_identifiers": 1,
+        "company_identifier_observations": 1,
         "company_website_candidates": 1,
+        "company_website_candidate_observations": 1,
         "contact_channels": 1,
         "website_verification_runs": 1,
         "contact_evidence_snapshots": 1,
@@ -159,6 +177,12 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
         "website_page_snapshots": 1,
         "website_page_snapshot_parse_errors": 0,
     }
+    assert manifest["files"]["company_identifier_observations"] == (
+        "company_identifier_observations.csv"
+    )
+    assert manifest["files"]["company_website_candidate_observations"] == (
+        "company_website_candidate_observations.csv"
+    )
     assert manifest["files"]["contact_evidence_observations"] == (
         "contact_evidence_observations.csv"
     )
