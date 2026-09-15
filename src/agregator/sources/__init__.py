@@ -114,21 +114,55 @@ def default_registry() -> SourceRegistry:
         "jooble",
         _jooble_from_env,
         access_mode="partner_api",
+        required_env=("JOOBLE_API_KEY",),
+        configuration_env=(
+            "JOOBLE_KEYWORDS",
+            "JOOBLE_LOCATION",
+            "JOOBLE_RESULTS_PER_PAGE",
+            "JOOBLE_RADIUS",
+        ),
     )
     registry.register(
         "adzuna",
         _adzuna_from_env,
         access_mode="partner_api",
+        required_env=("ADZUNA_APP_ID", "ADZUNA_APP_KEY"),
+        configuration_env=(
+            "ADZUNA_COUNTRY",
+            "ADZUNA_WHAT",
+            "ADZUNA_WHERE",
+            "ADZUNA_RESULTS_PER_PAGE",
+        ),
     )
     registry.register(
         "careerjet",
         _careerjet_from_env,
         access_mode="partner_api",
+        required_env=(
+            "CAREERJET_API_KEY",
+            "CAREERJET_REFERER",
+            "CAREERJET_USER_IP",
+            "CAREERJET_USER_AGENT",
+        ),
+        configuration_env=(
+            "CAREERJET_LOCALE",
+            "CAREERJET_KEYWORDS",
+            "CAREERJET_LOCATION",
+            "CAREERJET_PAGE_SIZE",
+            "CAREERJET_SORT",
+        ),
     )
     registry.register(
         "epraca",
         _epraca_from_env,
         access_mode="official_partner_feed",
+        required_env=("EPRACA_PARTNER",),
+        configuration_env=(
+            "EPRACA_LANGUAGE",
+            "EPRACA_WOJEWODZTWO",
+            "EPRACA_JEDNOSTKA",
+            "EPRACA_ALL",
+        ),
     )
     return registry
 
