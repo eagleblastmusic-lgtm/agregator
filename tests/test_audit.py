@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from agregator.audit import record_discovery_audit
+from agregator.audit import init_audit_schema, record_discovery_audit
 from agregator.models import (
     ChannelKind,
     ChannelPurpose,
@@ -13,6 +13,7 @@ from agregator.models import (
     JobPosting,
     PageSnapshot,
     SearchCandidate,
+    WebsiteResolutionOrigin,
     WebsiteVerificationAttempt,
 )
 from agregator.storage import SQLiteStore
@@ -52,6 +53,8 @@ def _result(text: str = "Kontakt dla partnerów: partnerzy@firma.test") -> Disco
         search_score=0.88,
         content_score=0.96,
         name_coverage=1.0,
+        origin=WebsiteResolutionOrigin.SEARCH,
+        source="search_provider",
         signals=["exact_normalized_company_name", "accepted"],
         scanned_pages=["https://firma.test/partnerzy"],
         page_snapshots=[snapshot],
@@ -63,6 +66,8 @@ def _result(text: str = "Kontakt dla partnerów: partnerzy@firma.test") -> Disco
             website_url="https://firma.test",
             domain="firma.test",
             website_confidence=0.93,
+            website_resolution_origin=WebsiteResolutionOrigin.SEARCH,
+            website_resolution_source="search_provider",
             website_verification_signals=[
                 "jsonld_organization_name",
                 "accepted",
@@ -120,6 +125,8 @@ def test_discovery_audit_records_website_run_and_deduplicates_same_evidence(tmp_
 
     assert len(runs) == 2
     assert runs[0]["outcome"] == "verified"
+    assert runs[0]["resolution_origin"] == "search"
+    assert runs[0]["resolution_source"] == "search_provider"
     assert json.loads(runs[0]["verification_signals_json"]) == [
         "jsonld_organization_name",
         "accepted",
@@ -129,9 +136,57 @@ def test_discovery_audit_records_website_run_and_deduplicates_same_evidence(tmp_
     assert page_snapshots[0]["content_sha256"] == "a" * 64
     attempts = json.loads(runs[0]["website_attempts_json"])
     assert attempts[0]["accepted"] is True
+    assert attempts[0]["origin"] == "search"
+    assert attempts[0]["source"] == "search_provider"
     assert attempts[0]["page_snapshots"][0]["content_sha256"] == "a" * 64
     assert len(snapshots) == 1
     assert len(snapshots[0]["content_sha256"]) == 64
+
+
+def test_audit_schema_migrates_legacy_website_runs_before_creating_origin_index(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "legacy-audit.sqlite3")
+    store.init_schema()
+    with store.connect() as connection:
+        connection.executescript(
+            """
+            CREATE TABLE website_verification_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id INTEGER NOT NULL,
+                outcome TEXT NOT NULL,
+                website_url TEXT,
+                website_confidence REAL NOT NULL DEFAULT 0,
+                verification_signals_json TEXT NOT NULL,
+                search_candidates_json TEXT NOT NULL,
+                website_attempts_json TEXT NOT NULL DEFAULT '[]',
+                scanned_pages_json TEXT NOT NULL,
+                page_snapshots_json TEXT NOT NULL DEFAULT '[]',
+                captured_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(company_id) REFERENCES companies(id)
+            );
+            """
+        )
+
+    init_audit_schema(store)
+
+    with store.connect() as connection:
+        columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(website_verification_runs)"
+            ).fetchall()
+        }
+        indexes = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA index_list(website_verification_runs)"
+            ).fetchall()
+        }
+
+    assert "resolution_origin" in columns
+    assert "resolution_source" in columns
+    assert "idx_website_verification_runs_origin" in indexes
 
 
 def test_changed_evidence_creates_new_snapshot(tmp_path: Path) -> None:
