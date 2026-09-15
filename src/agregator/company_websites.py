@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from urllib.parse import urlsplit, urlunsplit
 
-from .models import CompanyWebsiteCandidate, JobPosting
+from .models import JobPosting
 from .storage import SQLiteStore
 
 
