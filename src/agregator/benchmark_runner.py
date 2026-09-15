@@ -52,6 +52,14 @@ class BenchmarkCollectionResult:
         )
 
     @property
+    def sources_without_jobs(self) -> tuple[str, ...]:
+        return tuple(
+            name
+            for name, stats in sorted(self.sources.items())
+            if stats.runs > 0 and stats.jobs_seen == 0
+        )
+
+    @property
     def sources_with_errors(self) -> tuple[str, ...]:
         return tuple(
             name
@@ -61,7 +69,11 @@ class BenchmarkCollectionResult:
 
     @property
     def source_health_ready(self) -> bool:
-        return not self.unexercised_sources and not self.disabled_sources
+        return (
+            not self.unexercised_sources
+            and not self.disabled_sources
+            and not self.sources_without_jobs
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +87,7 @@ class BenchmarkCollectionResult:
             "source_health_ready": self.source_health_ready,
             "unexercised_sources": list(self.unexercised_sources),
             "disabled_sources": list(self.disabled_sources),
+            "sources_without_jobs": list(self.sources_without_jobs),
             "sources_with_errors": list(self.sources_with_errors),
             "sources": {
                 name: stats.to_dict() for name, stats in self.sources.items()
