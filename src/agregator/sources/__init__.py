@@ -10,6 +10,7 @@ from .careerjet import CareerjetApiSource
 from .epraca import EPracaSource
 from .jooble import JoobleApiSource
 from .kprm import KprmPublicSource
+from .manpower import ManpowerPublicSource
 from .ngo import NgoPublicSource
 from .ofertypracy_edu import OfertyPracyEduPublicSource
 from .olx import OlxPublicSource
@@ -171,6 +172,17 @@ def default_registry() -> SourceRegistry:
         ),
     )
     registry.register(
+        "manpower",
+        ManpowerPublicSource,
+        access_mode="public_html",
+        experimental=True,
+        notes=(
+            "Public Manpower Poland job search and /pl/job/<id>/<slug> details. Undisclosed "
+            "client employers remain explicit low-confidence agency fallbacks rather than "
+            "invented employer identities."
+        ),
+    )
+    registry.register(
         "skillshot",
         skillshot_source,
         access_mode="public_html",
@@ -299,6 +311,7 @@ __all__ = [
     "EPracaSource",
     "JoobleApiSource",
     "KprmPublicSource",
+    "ManpowerPublicSource",
     "NgoPublicSource",
     "OfertyPracyEduPublicSource",
     "OlxPublicSource",
