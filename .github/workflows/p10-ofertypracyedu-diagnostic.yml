@@ -27,24 +27,76 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
 
-      - name: Capture public listing diagnostics
+      - name: Compare public Inertia listing variants
         shell: bash
         run: |
           mkdir -p p10-ofertypracyedu-diagnostic
           python - <<'PY'
           import asyncio
+          import html as html_module
           import json
           import urllib.robotparser
           from pathlib import Path
-          from urllib.parse import urlparse
+          from urllib.parse import urljoin
 
           import httpx
           from bs4 import BeautifulSoup
 
           BASE = "https://ofertypracy.edu.pl"
-          LISTING = BASE + "/?page=1&per_page=25&search=1&sort=-published_at"
           UA = "FaroEmployerDiscovery/0.2"
           root = Path("p10-ofertypracyedu-diagnostic")
+          variants = [
+              BASE + "/",
+              BASE + "/?page=1",
+              BASE + "/?page=1&per_page=15&sort=-published_at",
+              BASE + "/?page=1&per_page=25&sort=-published_at",
+              BASE + "/?page=1&per_page=25&search=1&sort=-published_at",
+          ]
+          candidate_offer_ids = ["313542", "310370", "304845"]
+
+          def parse_inertia(html: str):
+              soup = BeautifulSoup(html, "html.parser")
+              app = soup.select_one("#app[data-page]")
+              if app is None:
+                  return None, soup
+              raw = str(app.get("data-page") or "")
+              if not raw:
+                  return None, soup
+              return json.loads(html_module.unescape(raw)), soup
+
+          def compact_variant(url: str, response: httpx.Response, payload, soup):
+              result = {
+                  "requested_url": url,
+                  "status": response.status_code,
+                  "final_url": str(response.url),
+                  "content_type": response.headers.get("content-type"),
+                  "html_chars": len(response.text),
+                  "title": soup.title.get_text(" ", strip=True) if soup.title else None,
+                  "inertia": payload is not None,
+              }
+              if not payload:
+                  return result
+              props = payload.get("props") or {}
+              offers = props.get("offers") or {}
+              data = offers.get("data") or []
+              meta = offers.get("meta") or {}
+              result.update(
+                  {
+                      "component": payload.get("component"),
+                      "payload_url": payload.get("url"),
+                      "sort": props.get("sort"),
+                      "perPage": props.get("perPage"),
+                      "filter": props.get("filter"),
+                      "defaultFilter": props.get("defaultFilter"),
+                      "offers_count": len(data),
+                      "offers_total": meta.get("total"),
+                      "offers_current_page": meta.get("current_page"),
+                      "offers_per_page": meta.get("per_page"),
+                      "offers_last_page": meta.get("last_page"),
+                      "first_offers": data[:3],
+                  }
+              )
+              return result
 
           async def main():
               async with httpx.AsyncClient(
@@ -62,7 +114,6 @@ jobs:
                       robots_response.text,
                       encoding="utf-8",
                   )
-
                   parser = urllib.robotparser.RobotFileParser()
                   parser.set_url(robots_url)
                   if robots_response.status_code in {401, 403}:
@@ -73,61 +124,96 @@ jobs:
                       robots_response.raise_for_status()
                       parser.parse(robots_response.text.splitlines())
 
-                  allowed = parser.can_fetch(UA, LISTING)
-                  if not allowed:
-                      root.joinpath("summary.json").write_text(
-                          json.dumps(
-                              {
-                                  "robots_status": robots_response.status_code,
-                                  "robots_allowed": False,
-                                  "listing_url": LISTING,
-                              },
-                              indent=2,
-                          ) + "\n",
+                  rows = []
+                  script_urls = set()
+                  for index, url in enumerate(variants):
+                      if not parser.can_fetch(UA, url):
+                          rows.append({"requested_url": url, "robots_allowed": False})
+                          continue
+                      response = await client.get(url)
+                      response.raise_for_status()
+                      payload, soup = parse_inertia(response.text)
+                      row = compact_variant(url, response, payload, soup)
+                      row["robots_allowed"] = True
+                      rows.append(row)
+                      root.joinpath(f"variant-{index}.html").write_text(
+                          response.text,
                           encoding="utf-8",
                       )
-                      return
+                      for script in soup.find_all("script", src=True):
+                          src = str(script.get("src") or "").strip()
+                          if src:
+                              script_urls.add(urljoin(str(response.url), src))
 
-                  response = await client.get(LISTING)
-                  response.raise_for_status()
-                  html = response.text
-                  soup = BeautifulSoup(html, "html.parser")
-                  hrefs = [
-                      str(a.get("href") or "").strip()
-                      for a in soup.select("a[href]")
-                      if str(a.get("href") or "").strip()
-                  ]
-                  offerish = [href for href in hrefs if "ofert" in href.lower()]
-                  scripts = [
-                      {
-                          "type": str(script.get("type") or ""),
-                          "src": str(script.get("src") or ""),
-                          "text_prefix": script.get_text(" ", strip=True)[:500],
-                      }
-                      for script in soup.find_all("script")
-                  ]
-                  summary = {
+                  js_rows = []
+                  for script_url in sorted(script_urls):
+                      if "SearchIndex" not in script_url:
+                          continue
+                      response = await client.get(script_url)
+                      response.raise_for_status()
+                      text = response.text
+                      root.joinpath("SearchIndex.js").write_text(text, encoding="utf-8")
+                      snippets = {}
+                      for needle in (
+                          "search",
+                          "per_page",
+                          "sort",
+                          "filter",
+                          "router.get",
+                          "search.index",
+                          "published_at",
+                      ):
+                          pos = text.find(needle)
+                          if pos >= 0:
+                              snippets[needle] = text[max(0, pos - 500) : pos + 1200]
+                      js_rows.append(
+                          {
+                              "url": script_url,
+                              "status": response.status_code,
+                              "chars": len(text),
+                              "snippets": snippets,
+                          }
+                      )
+
+                  candidate_rows = []
+                  for offer_id in candidate_offer_ids:
+                      url = f"{BASE}/oferty/{offer_id}"
+                      if not parser.can_fetch(UA, url):
+                          candidate_rows.append(
+                              {"id": offer_id, "robots_allowed": False}
+                          )
+                          continue
+                      response = await client.get(url)
+                      soup = BeautifulSoup(response.text, "html.parser")
+                      candidate_rows.append(
+                          {
+                              "id": offer_id,
+                              "robots_allowed": True,
+                              "status": response.status_code,
+                              "final_url": str(response.url),
+                              "title": (
+                                  soup.title.get_text(" ", strip=True)
+                                  if soup.title
+                                  else None
+                              ),
+                              "h3": (
+                                  soup.find("h3").get_text(" ", strip=True)
+                                  if soup.find("h3")
+                                  else None
+                              ),
+                          }
+                      )
+
+                  output = {
                       "robots_status": robots_response.status_code,
-                      "robots_allowed": allowed,
-                      "listing_url": LISTING,
-                      "status": response.status_code,
-                      "final_url": str(response.url),
-                      "content_type": response.headers.get("content-type"),
-                      "content_length": len(response.content),
-                      "html_chars": len(html),
-                      "title": soup.title.get_text(" ", strip=True) if soup.title else None,
-                      "anchors": len(hrefs),
-                      "offerish_hrefs": len(offerish),
-                      "first_hrefs": hrefs[:150],
-                      "first_offerish_hrefs": offerish[:100],
-                      "scripts": scripts[:50],
-                      "body_text_prefix": " ".join(soup.stripped_strings)[:5000],
+                      "variants": rows,
+                      "frontend": js_rows,
+                      "candidate_offer_pages": candidate_rows,
                   }
-                  root.joinpath("summary.json").write_text(
-                      json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+                  root.joinpath("variants.json").write_text(
+                      json.dumps(output, ensure_ascii=False, indent=2) + "\n",
                       encoding="utf-8",
                   )
-                  root.joinpath("listing.html").write_text(html, encoding="utf-8")
 
           asyncio.run(main())
           PY
