@@ -8,7 +8,7 @@ Silnik do budowania bazy firm aktywnie rekrutujących oraz wykrywania ich oficja
 
 Projekt **nie wysyła wiadomości**, nie omija logowania ani zabezpieczeń portali i nie próbuje pozyskiwać niepublicznych danych. Zapisuje publicznie dostępne informacje oraz źródło, z którego zostały znalezione.
 
-## Aktualny zakres M0/M1/M2
+## Aktualny zakres M0/M1/M2/M3
 
 - modele danych dla ofert, firm, kanałów kontaktu i dowodów,
 - wspólny kontrakt `JobSource` i `SourceRegistry`,
@@ -29,7 +29,9 @@ Projekt **nie wysyła wiadomości**, nie omija logowania ani zabezpieczeń porta
 - eksport szablonu ground truth i evaluator precision/recall/F1 dla Company Resolution,
 - wyszukiwanie oficjalnej strony przez wymienny `SearchProvider`,
 - opcjonalny provider Brave Search API,
-- resolver domeny z oceną dopasowania,
+- dwuetapowy wybór oficjalnej strony: search ranking + first-party content verification,
+- fallback do kolejnego kandydata, gdy najwyższy wynik wyszukiwarki nie potwierdza tożsamości firmy,
+- `website_verification_signals` i confidence po weryfikacji treścią strony,
 - crawler stron firmowych z limitem stron i obsługą `robots.txt`,
 - ekstrakcja e-maili oraz formularzy,
 - klasyfikacja kontekstu: `GREEN / REVIEW / IGNORE`,
@@ -202,6 +204,10 @@ agregator enrich-db --db agregator.sqlite3 --limit 20
 
 Domyślnie przetwarzane są firmy z `identity_confidence >= 0.7`.
 
+Automatyczne `discover` nie uznaje już samego wysokiego miejsca w wyszukiwarce za dowód. Kandydat jest crawlowany i sprawdzany pod kątem nazwy firmy, pokrycia tokenów, hosta i miejscowości. Jeżeli pierwszy wynik nie potwierdza tożsamości, pipeline może sprawdzić kolejne wysoko ocenione domeny. `website_confidence` jest wynikiem po tej drugiej fazie, a `website_verification_signals` pokazuje użyte sygnały.
+
+Ręczny `scan-url` pozostaje trybem dla domeny podanej jawnie przez użytkownika/integratora.
+
 ### 15. Wyniki GREEN i eksport
 
 ```bash
@@ -271,4 +277,5 @@ Pełny plan: [`docs/PLAN.md`](docs/PLAN.md).
 4. Sama obecność e-maila nie oznacza `GREEN`.
 5. Adaptery portali pracy są oddzielone od silnika enrichmentu.
 6. Każde źródło przed wdrożeniem produkcyjnym przechodzi przegląd regulaminu i sposobu dostępu.
-7. Outreach i automatyczna wysyłka wiadomości są poza zakresem tego repo.
+7. Fuzzy Company Resolution pozostaje warstwą REVIEW, nie automatycznym merge.
+8. Outreach i automatyczna wysyłka wiadomości są poza zakresem tego repo.
