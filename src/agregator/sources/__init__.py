@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from .adzuna import AdzunaApiSource
+from .aplikuj import AplikujPublicSource
 from .careerjet import CareerjetApiSource
 from .epraca import EPracaSource
 from .jooble import JoobleApiSource
@@ -122,6 +123,16 @@ def default_registry() -> SourceRegistry:
         notes=(
             "Current-offer sitemap is advertised in robots.txt; detail pages are fetched "
             "only when robots allows them. Terms review remains required before production."
+        ),
+    )
+    registry.register(
+        "aplikuj",
+        AplikujPublicSource,
+        access_mode="public_html",
+        experimental=True,
+        notes=(
+            "Public server-rendered /praca/strona-N listing and /oferta detail pages. "
+            "Employer name, NIP when visible, and full source evidence are preserved."
         ),
     )
     registry.register(
@@ -248,6 +259,7 @@ def default_registry() -> SourceRegistry:
 
 __all__ = [
     "AdzunaApiSource",
+    "AplikujPublicSource",
     "CareerjetApiSource",
     "EPracaSource",
     "JoobleApiSource",
