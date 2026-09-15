@@ -13,6 +13,7 @@ from agregator.models import (
     DiscoveryResult,
     Evidence,
     JobPosting,
+    WebsiteResolutionOrigin,
 )
 from agregator.reporting import build_benchmark_report, export_green_channels
 from agregator.storage import SQLiteStore
@@ -96,6 +97,8 @@ def test_benchmark_report_counts_pipeline_outputs(tmp_path: Path) -> None:
     assert report.source_website_candidate_company_rate == 0.0
     assert report.source_verified_website_rate == 0.0
     assert report.source_verified_share_of_found == 0.0
+    assert report.website_resolution_origin_counts == {}
+    assert report.source_verified_website_counts == {}
     assert report.green_channels == 1
     assert report.company_to_job_ratio == 0.5
     assert report.website_find_rate == 1.0
@@ -145,6 +148,8 @@ def test_benchmark_report_measures_source_website_shortcut(tmp_path: Path) -> No
             website_url="https://acme.test",
             domain="acme.test",
             website_confidence=0.97,
+            website_resolution_origin=WebsiteResolutionOrigin.SOURCE_CANDIDATE,
+            website_resolution_source="official_feed.adresWww",
             website_verification_signals=[
                 "source_website_candidate:official_feed.adresWww",
                 "accepted",
@@ -163,6 +168,10 @@ def test_benchmark_report_measures_source_website_shortcut(tmp_path: Path) -> No
     assert report.source_website_candidate_company_rate == 1.0
     assert report.source_verified_website_rate == 1.0
     assert report.source_verified_share_of_found == 1.0
+    assert report.website_resolution_origin_counts == {"source_candidate": 1}
+    assert report.source_verified_website_counts == {
+        "official_feed.adresWww": 1
+    }
 
 
 def test_export_green_channels_json_and_csv(tmp_path: Path) -> None:
