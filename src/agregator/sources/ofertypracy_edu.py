@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import html as html_module
+import json
 import re
 import urllib.robotparser
 from collections.abc import Iterable
-from urllib.parse import urljoin, urlparse, urlunparse
+from typing import Any
+from urllib.parse import urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -13,7 +16,7 @@ from ..models import CompanyWebsiteCandidate, JobPosting
 from .base import SourceBatch
 
 BASE_URL = "https://ofertypracy.edu.pl"
-LISTING_URL = BASE_URL + "/?page={page}&per_page=100&search=1&sort=-published_at"
+HOME_URL = BASE_URL + "/"
 _OFFER_PATH = re.compile(r"^/oferty/(\d+)/?$", re.IGNORECASE)
 _OFFICIAL_ID = re.compile(r"\bID:\s*([0-9]+/[0-9]{4})\b", re.IGNORECASE)
 _POSTAL_CITY = re.compile(r"\b\d{2}-\d{3}\s+([^\n]+)")
@@ -24,9 +27,13 @@ _PHONE = re.compile(r"(?<!\d)(?:\+?48[\s/-]?)?(?:\d[\s/-]?){7,12}(?!\d)")
 class OfertyPracyEduPublicSource:
     """Collect public MEN/SIO education vacancies from OfertyPracy.edu.pl.
 
-    The source uses only the public listing and public offer pages. robots.txt is
-    checked before requests. Recruitment e-mails/phones are preserved as raw source
-    evidence only; they are not promoted to Faro GREEN cooperation channels.
+    The current site is an Inertia application. Its unfiltered home response reports
+    zero offers, while the same public search returns offers after selecting a
+    voivodeship. The adapter therefore iterates public voivodeship searches and reads
+    ``#app[data-page]`` JSON instead of relying on client-rendered anchors.
+
+    Recruitment contact data stays raw evidence only and is never promoted directly
+    to Faro GREEN.
     """
 
     name = "ofertypracyedu"
@@ -46,8 +53,7 @@ class OfertyPracyEduPublicSource:
         self._robots: urllib.robotparser.RobotFileParser | None = None
 
     async def collect(self, cursor: str | None = None) -> SourceBatch:
-        page = self._parse_page(cursor)
-        listing_url = LISTING_URL.format(page=page)
+        region_index, page = self._parse_cursor(cursor)
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(
             timeout=25,
@@ -60,9 +66,17 @@ class OfertyPracyEduPublicSource:
         )
 
         try:
+            await self._assert_allowed(client, HOME_URL)
+            home_html = await self._get_text(client, HOME_URL)
+            region_ids = extract_voivodeship_ids(home_html)
+            if region_index >= len(region_ids):
+                return SourceBatch(jobs=[], next_cursor=None)
+
+            region_id = region_ids[region_index]
+            listing_url = build_region_listing_url(region_id, page)
             await self._assert_allowed(client, listing_url)
             listing_html = await self._get_text(client, listing_url)
-            links = extract_offer_links(listing_url, listing_html)
+            links, next_page = extract_listing_offer_links(listing_url, listing_html)
             links = links[: self.max_details_per_page]
 
             jobs: list[JobPosting] = []
@@ -81,20 +95,40 @@ class OfertyPracyEduPublicSource:
             if owns_client:
                 await client.aclose()
 
-        next_cursor = str(page + 1) if links else None
+        if next_page is not None:
+            next_cursor = f"{region_index}:{next_page}"
+        elif region_index + 1 < len(region_ids):
+            next_cursor = f"{region_index + 1}:1"
+        else:
+            next_cursor = None
         return SourceBatch(jobs=jobs, next_cursor=next_cursor)
 
     @staticmethod
-    def _parse_page(cursor: str | None) -> int:
+    def _parse_cursor(cursor: str | None) -> tuple[int, int]:
         if not cursor:
-            return 1
-        try:
-            page = int(cursor)
-        except ValueError as exc:
-            raise ValueError(f"invalid OfertyPracy.edu.pl page cursor: {cursor}") from exc
-        if page < 1:
-            raise ValueError("OfertyPracy.edu.pl page cursor must be positive")
-        return page
+            return 0, 1
+
+        if ":" in cursor:
+            region_raw, page_raw = cursor.split(":", 1)
+            try:
+                region_index = int(region_raw)
+                page = int(page_raw)
+            except ValueError as exc:
+                raise ValueError(
+                    f"invalid OfertyPracy.edu.pl regional cursor: {cursor}"
+                ) from exc
+        else:
+            try:
+                region_index = 0
+                page = int(cursor)
+            except ValueError as exc:
+                raise ValueError(
+                    f"invalid OfertyPracy.edu.pl page cursor: {cursor}"
+                ) from exc
+
+        if region_index < 0 or page < 1:
+            raise ValueError("OfertyPracy.edu.pl cursor values are out of range")
+        return region_index, page
 
     async def _assert_allowed(self, client: httpx.AsyncClient, url: str) -> None:
         if self._robots is None:
@@ -121,7 +155,86 @@ class OfertyPracyEduPublicSource:
         return response.text
 
 
+def build_region_listing_url(region_id: str, page: int) -> str:
+    query = urlencode(
+        {
+            "filter[rspo.voivodeship_id]": region_id,
+            "page": str(page),
+            "per_page": "25",
+            "search": "1",
+            "sort": "-published_at",
+        }
+    )
+    return f"{BASE_URL}/?{query}"
+
+
+def extract_voivodeship_ids(html: str) -> list[str]:
+    payload = _inertia_payload(html)
+    if payload is None:
+        return []
+    props = payload.get("props")
+    props = props if isinstance(props, dict) else {}
+    values = props.get("voivodeships")
+    values = values if isinstance(values, list) else []
+
+    output: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        region_id = _as_identifier(item.get("id"))
+        if region_id is None or region_id in seen:
+            continue
+        seen.add(region_id)
+        output.append(region_id)
+    return output
+
+
+def extract_listing_offer_links(
+    listing_url: str,
+    html: str,
+) -> tuple[list[str], str | None]:
+    """Return offer URLs and the next page from public Inertia or legacy HTML."""
+
+    payload = _inertia_payload(html)
+    if payload is not None:
+        props = payload.get("props")
+        props = props if isinstance(props, dict) else {}
+        offers = props.get("offers")
+        offers = offers if isinstance(offers, dict) else {}
+        data = offers.get("data")
+        data = data if isinstance(data, list) else []
+        meta = offers.get("meta")
+        meta = meta if isinstance(meta, dict) else {}
+
+        output: list[str] = []
+        seen: set[str] = set()
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            offer_id = _as_identifier(item.get("id"))
+            if offer_id is None:
+                continue
+            url = f"{BASE_URL}/oferty/{offer_id}"
+            if url not in seen:
+                seen.add(url)
+                output.append(url)
+
+        current_page = _as_positive_int(meta.get("current_page"))
+        last_page = _as_positive_int(meta.get("last_page"))
+        next_page = None
+        if current_page is not None and last_page is not None and current_page < last_page:
+            next_page = str(current_page + 1)
+        return output, next_page
+
+    links = extract_offer_links(listing_url, html)
+    page = _page_from_listing_url(listing_url)
+    return links, str(page + 1) if links else None
+
+
 def extract_offer_links(listing_url: str, html: str) -> list[str]:
+    """Legacy server-rendered HTML fallback kept for backwards compatibility."""
+
     soup = BeautifulSoup(html, "html.parser")
     expected_host = urlparse(BASE_URL).netloc.lower()
     output: list[str] = []
@@ -148,6 +261,71 @@ def extract_offer_links(listing_url: str, html: str) -> list[str]:
 
 
 def parse_offer_detail(url: str, html: str) -> JobPosting | None:
+    payload = _inertia_payload(html)
+    if payload is not None:
+        props = payload.get("props")
+        props = props if isinstance(props, dict) else {}
+        offer = props.get("offer")
+        if isinstance(offer, dict):
+            parsed = _job_from_inertia_offer(url, offer)
+            if parsed is not None:
+                return parsed
+
+    return _parse_legacy_offer_detail(url, html)
+
+
+def _job_from_inertia_offer(url: str, offer: dict[str, Any]) -> JobPosting | None:
+    source_id = _as_identifier(offer.get("id")) or _source_id_from_url(url)
+    rspo = offer.get("rspo")
+    rspo = rspo if isinstance(rspo, dict) else {}
+    position_category = offer.get("position_category")
+    position_category = position_category if isinstance(position_category, dict) else {}
+
+    title = _first_text(
+        offer.get("position_category_name"),
+        position_category.get("name"),
+        _nested_name(offer, "subject"),
+        _nested_name(offer, "profession"),
+        _nested_name(offer, "employee_type"),
+    )
+    company_name = _first_text(rspo.get("name"))
+    if not source_id or not title or not company_name:
+        return None
+
+    city = _first_text(rspo.get("city"), rspo.get("post_office"), rspo.get("commune"))
+    websites = _website_candidates_from_offer(offer)
+    emails = _recruitment_emails_from_offer(offer)
+    phones = _recruitment_phones_from_offer(offer)
+    description = _offer_description(offer)
+    official_id = _first_text(offer.get("reference"))
+
+    return JobPosting(
+        source="ofertypracyedu",
+        source_id=source_id,
+        url=url,
+        title=title,
+        company_name=company_name,
+        company_name_source="ofertypracyedu.inertia.offer.rspo.name",
+        company_name_confidence=0.99,
+        company_website_candidates=websites,
+        city=city,
+        description=description,
+        published_at=_first_text(offer.get("published_at")),
+        source_payload={
+            "portal_offer_id": source_id,
+            "official_offer_id": official_id,
+            "public_inertia_offer": offer,
+            "recruitment_emails": emails,
+            "recruitment_phones": phones,
+            "company_website_candidates": [item.url for item in websites],
+            "deadline_for_submission_of_documents": _first_text(
+                offer.get("deadline_for_submission_of_documents")
+            ),
+        },
+    )
+
+
+def _parse_legacy_offer_detail(url: str, html: str) -> JobPosting | None:
     soup = BeautifulSoup(html, "html.parser")
     title = _heading_text(soup, "h3")
     company_name = _company_heading(soup)
@@ -183,6 +361,145 @@ def parse_offer_detail(url: str, html: str) -> JobPosting | None:
             "company_website_candidates": [item.url for item in websites],
         },
     )
+
+
+def _inertia_payload(html: str) -> dict[str, Any] | None:
+    soup = BeautifulSoup(html, "html.parser")
+    app = soup.select_one("#app[data-page]")
+    if app is None:
+        return None
+    raw = str(app.get("data-page") or "").strip()
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        try:
+            payload = json.loads(html_module.unescape(raw))
+        except json.JSONDecodeError:
+            return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _offer_description(offer: dict[str, Any]) -> str | None:
+    parts: list[str] = []
+    fields = (
+        "job_description",
+        "requirements",
+        "responsibilities",
+        "offer",
+        "required_documents",
+        "additional_documents",
+        "contact",
+    )
+    for field in fields:
+        value = _first_text(offer.get(field))
+        if value and value not in parts:
+            parts.append(value)
+    return "\n\n".join(parts) if parts else None
+
+
+def _recruitment_emails_from_offer(offer: dict[str, Any]) -> list[str]:
+    rspo = offer.get("rspo")
+    rspo = rspo if isinstance(rspo, dict) else {}
+    values = [
+        offer.get("required_application_documents_to"),
+        offer.get("contact"),
+        rspo.get("email"),
+    ]
+    matches: list[str] = []
+    for value in values:
+        text = _first_text(value)
+        if text:
+            matches.extend(_EMAIL.findall(text))
+    return _unique(matches)
+
+
+def _recruitment_phones_from_offer(offer: dict[str, Any]) -> list[str]:
+    rspo = offer.get("rspo")
+    rspo = rspo if isinstance(rspo, dict) else {}
+    values = [rspo.get("phone_number"), rspo.get("phone_number_2"), offer.get("contact")]
+    matches: list[str] = []
+    for value in values:
+        text = _first_text(value)
+        if not text:
+            continue
+        found = [match.group(0).strip() for match in _PHONE.finditer(text)]
+        if found:
+            matches.extend(found)
+        elif re.sub(r"\D", "", text):
+            matches.append(text)
+    return _unique(matches)
+
+
+def _website_candidates_from_offer(
+    offer: dict[str, Any],
+) -> list[CompanyWebsiteCandidate]:
+    rspo = offer.get("rspo")
+    rspo = rspo if isinstance(rspo, dict) else {}
+    normalized = _normalize_public_url(rspo.get("website"))
+    if normalized is None:
+        return []
+    return [
+        CompanyWebsiteCandidate(
+            url=normalized,
+            source="ofertypracyedu.inertia.offer.rspo.website",
+            confidence=0.90,
+        )
+    ]
+
+
+def _normalize_public_url(value: object) -> str | None:
+    text = _first_text(value)
+    if not text:
+        return None
+    if not text.startswith(("http://", "https://")):
+        text = "https://" + text.lstrip("/")
+    parsed = urlparse(text)
+    if not parsed.netloc:
+        return None
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path or "/", "", parsed.query, ""))
+
+
+def _nested_name(offer: dict[str, Any], key: str) -> object:
+    value = offer.get(key)
+    return value.get("name") if isinstance(value, dict) else None
+
+
+def _first_text(*values: object) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _as_identifier(value: object) -> str | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, str)):
+        text = str(value).strip()
+        return text or None
+    return None
+
+
+def _as_positive_int(value: object) -> int | None:
+    try:
+        number = int(str(value))
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _page_from_listing_url(url: str) -> int:
+    for key, value in httpx.QueryParams(urlparse(url).query).multi_items():
+        if key == "page":
+            parsed = _as_positive_int(value)
+            if parsed is not None:
+                return parsed
+    return 1
 
 
 def _heading_text(soup: BeautifulSoup, tag: str) -> str | None:
