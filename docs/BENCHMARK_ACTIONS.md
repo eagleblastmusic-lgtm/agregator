@@ -15,12 +15,47 @@ Po merge workflow do gałęzi domyślnej i po skonfigurowaniu wymaganych GitHub 
 Domyślne parametry:
 
 ```text
-sources=olx,jooble,adzuna
+sources=jooble,adzuna
+allow_experimental_sources=false
 target_jobs=1000
 max_rounds=100
 max_enrichment_companies=1000
 label_sampling_seed=faro-ground-truth-v1
 ```
+
+## Klasy dostępu źródeł
+
+`SourceRegistry` zapisuje teraz również `access_mode`, flagę `experimental` i opcjonalną notatkę operacyjną. Obecne klasy:
+
+```text
+jooble     -> partner_api
+adzuna     -> partner_api
+careerjet  -> partner_api
+epraca     -> official_partner_feed
+olx        -> public_web_endpoint + experimental
+```
+
+Adapter OLX korzystający z publicznego endpointu odczytowego nie jest traktowany jako stabilny kontrakt partnerskiego API. Dlatego kontrolowany benchmark **nie użyje go bez jawnego opt-in**.
+
+Lokalnie:
+
+```bash
+agregator-benchmark preflight \
+  --sources olx \
+  --allow-experimental-sources \
+  --strict
+```
+
+oraz przy właściwym runie:
+
+```bash
+agregator-benchmark run \
+  --sources olx \
+  --allow-experimental-sources \
+  ...
+```
+
+W GitHub Actions odpowiada za to boolean `allow_experimental_sources`. Domyślnie jest `false`.
 
 ## Secrets
 
@@ -40,7 +75,7 @@ EPRACA_PARTNER
 
 Należy skonfigurować wyłącznie sekrety potrzebne dla źródeł wybranych w `sources`. `BRAVE_SEARCH_API_KEY` jest wymagany przez pełny enrichment/search benchmark.
 
-Workflow nie wypisuje wartości sekretów. Pierwszym krokiem merytorycznym jest `agregator-benchmark preflight --strict`; jeśli wybrane źródło nie ma wymaganej konfiguracji, właściwy benchmark nie startuje.
+Workflow nie wypisuje wartości sekretów. Pierwszym krokiem merytorycznym jest `agregator-benchmark preflight --strict`; jeśli wybrane źródło nie ma wymaganej konfiguracji lub źródło eksperymentalne nie zostało jawnie zaakceptowane, właściwy benchmark nie startuje.
 
 ## Przebieg
 
@@ -183,6 +218,7 @@ Przed pierwszym pełnym runem warto uruchomić lokalny `agregator-benchmark pref
 - nie zapisuje wartości sekretów do generowanych plików,
 - nie uruchamia się automatycznie,
 - właściwy benchmark jest blokowany po nieudanym preflight,
+- źródła eksperymentalne wymagają jawnego opt-in,
 - artifact powstaje również dla nieudanego preflightu lub niekompletnego strict runu,
 - concurrency blokuje dwa równoległe pełne benchmarki,
 - limit joba to 180 minut,
