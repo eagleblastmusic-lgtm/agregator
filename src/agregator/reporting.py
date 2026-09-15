@@ -10,6 +10,7 @@ from .audit import init_audit_schema
 from .company_identifiers import init_company_identifier_schema
 from .company_websites import init_company_website_candidate_schema
 from .employer_score import rank_companies
+from .source_overlap import build_source_overlap_report
 from .storage import SQLiteStore
 
 
@@ -52,6 +53,7 @@ class BenchmarkReport:
     employer_score_ge_60: int
     employer_score_distribution: dict[str, int]
     source_job_counts: dict[str, int]
+    source_overlap: dict[str, Any]
     company_resolution_counts: dict[str, int]
     website_resolution_origin_counts: dict[str, int]
     source_verified_website_counts: dict[str, int]
@@ -247,6 +249,7 @@ def build_benchmark_report(
 
     attempt_stats = _source_website_attempt_metrics(latest_website_rows)
     source_run_metrics = _source_run_metrics(run_rows)
+    source_overlap = build_source_overlap_report(store).to_dict()
     employer_scores = rank_companies(store, min_score=0, limit=max(1, companies_total))
     score_values = [item.score for item in employer_scores]
 
@@ -299,6 +302,7 @@ def build_benchmark_report(
         employer_score_ge_60=sum(1 for score in score_values if score >= 60),
         employer_score_distribution=_score_distribution(score_values),
         source_job_counts=source_job_counts,
+        source_overlap=source_overlap,
         company_resolution_counts=company_resolution_counts,
         website_resolution_origin_counts=website_resolution_origin_counts,
         source_verified_website_counts=source_verified_website_counts,
