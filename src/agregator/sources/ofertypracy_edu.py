@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import urllib.robotparser
+from collections.abc import Iterable
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
@@ -136,7 +137,9 @@ def extract_offer_links(listing_url: str, html: str) -> list[str]:
             continue
         if not _OFFER_PATH.match(parsed.path):
             continue
-        normalized = urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
+        normalized = urlunparse(
+            (parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", "")
+        )
         if normalized in seen:
             continue
         seen.add(normalized)
@@ -224,7 +227,9 @@ def _company_websites(soup: BeautifulSoup) -> list[CompanyWebsiteCandidate]:
         parsed = urlparse(raw)
         if not parsed.netloc or parsed.netloc.lower() == portal_host:
             continue
-        normalized = urlunparse((parsed.scheme, parsed.netloc, parsed.path or "/", "", parsed.query, ""))
+        normalized = urlunparse(
+            (parsed.scheme, parsed.netloc, parsed.path or "/", "", parsed.query, "")
+        )
         if normalized in seen:
             continue
         seen.add(normalized)
@@ -238,10 +243,10 @@ def _company_websites(soup: BeautifulSoup) -> list[CompanyWebsiteCandidate]:
     return output
 
 
-def _unique(values: object) -> list[str]:
+def _unique(values: Iterable[object]) -> list[str]:
     seen: set[str] = set()
     output: list[str] = []
-    for value in values:  # type: ignore[union-attr]
+    for value in values:
         text = str(value).strip()
         if not text or text in seen:
             continue
