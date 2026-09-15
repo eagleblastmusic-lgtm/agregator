@@ -35,11 +35,13 @@ async def test_source_collects_public_education_offer() -> None:
       <p>Wymagane dokumenty aplikacyjne: sekretariat@szkola.example</p>
     </body></html>
     """
+    listing_queries: list[dict[str, str]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
             return httpx.Response(200, text="User-agent: *\nAllow: /\n")
         if request.url.path == "/":
+            listing_queries.append(dict(request.url.params.multi_items()))
             return httpx.Response(200, text=listing)
         if request.url.path == "/oferty/223593":
             return httpx.Response(200, text=detail)
@@ -49,6 +51,14 @@ async def test_source_collects_public_education_offer() -> None:
         source = OfertyPracyEduPublicSource(client=client, request_delay=0)
         batch = await source.collect()
 
+    assert listing_queries == [
+        {
+            "page": "1",
+            "per_page": "25",
+            "search": "1",
+            "sort": "-published_at",
+        }
+    ]
     assert batch.next_cursor == "2"
     assert len(batch.jobs) == 1
     job = batch.jobs[0]
