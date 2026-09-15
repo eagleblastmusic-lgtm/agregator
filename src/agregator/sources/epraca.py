@@ -12,7 +12,7 @@ from xml.etree import ElementTree
 
 import httpx
 
-from ..models import JobPosting
+from ..models import CompanyIdentifier, JobPosting
 from .base import SourceBatch
 
 EPRACA_V2_ENDPOINT = "https://oferty.praca.gov.pl/integration/services/v2/oferta"
@@ -266,11 +266,29 @@ def _parse_offer(raw: Mapping[str, Any]) -> JobPosting | None:
         company_name=company_name,
         company_name_source="official_feed.pracodawca",
         company_name_confidence=0.995,
+        company_identifiers=_company_identifiers(raw),
         city=city,
         description=description,
         published_at=_string(raw.get("dataDodaniaOferty")),
         refreshed_at=_string(raw.get("dataAktualizacji")),
     )
+
+
+def _company_identifiers(raw: Mapping[str, Any]) -> list[CompanyIdentifier]:
+    identifiers: list[CompanyIdentifier] = []
+    for kind, field in (("nip", "nip"), ("regon", "regon")):
+        value = _string(raw.get(field))
+        if not value:
+            continue
+        identifiers.append(
+            CompanyIdentifier(
+                kind=kind,
+                value=value,
+                source=f"official_feed.{field}",
+                confidence=0.995,
+            )
+        )
+    return identifiers
 
 
 def _first_workplace_city(value: Any) -> str | None:
