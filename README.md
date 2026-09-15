@@ -1,37 +1,45 @@
 # Agregator — Faro Employer Discovery Engine
 
-Silnik do budowania bazy firm aktywnie rekrutujących, rozwiązywania ich tożsamości, weryfikowania oficjalnych stron WWW oraz wykrywania publicznych kanałów współpracy B2B z pełnym provenance i audit trail.
+Silnik Faro do budowania bazy firm aktywnie rekrutujących, rozwiązywania ich tożsamości, weryfikowania oficjalnych stron WWW oraz wykrywania publicznych kanałów współpracy B2B z pełnym provenance i audit trail.
 
-## Główny łańcuch
+```text
+oferta pracy
+  -> firma
+  -> Company Resolution
+  -> kandydat WWW
+  -> first-party verification
+  -> crawl
+  -> kanał współpracy
+  -> evidence + confidence
+```
 
-`oferta pracy -> firma -> Company Resolution -> kandydat WWW -> first-party verification -> crawl -> kanał współpracy -> evidence + confidence`
-
-Projekt **nie wysyła wiadomości**, nie omija logowania, CAPTCHA, paywalli ani kontroli dostępu i nie próbuje pozyskiwać niepublicznych danych kontaktowych. Źródła partnerskie/API działają tylko z prawidłową konfiguracją i autoryzacją.
+Projekt **nie wysyła wiadomości**, nie omija logowania, CAPTCHA, paywalli ani kontroli dostępu i nie próbuje pozyskiwać niepublicznych danych kontaktowych. Integracje partnerskie/API działają wyłącznie z prawidłową konfiguracją i autoryzacją.
 
 ## Aktualny zakres M0–M4
 
 - wspólny `JobSource` + `SourceRegistry`,
 - adaptery: `olx`, `jooble`, `adzuna`, `careerjet`, `epraca`,
 - katalog 91 źródeł w `config/source_catalog.tsv`,
-- resumowalne pobieranie i `source_runs`,
-- kontrolowany `benchmark-collect` round-robin,
+- resumowalne pobieranie + `source_runs`,
+- kontrolowany collector round-robin,
 - Company Resolution v1 z konserwatywnym exact-match i fuzzy REVIEW-only,
-- aliasy i lokalizacje firm,
+- aliasy/lokalizacje firm,
 - jawne identyfikatory przedsiębiorstw z provenance/confidence,
 - NIP/REGON z oficjalnego feedu ePraca,
 - konflikty identyfikatorów bez automatycznego merge,
 - źródłowe kandydatury WWW, np. ePraca `adresWww`,
-- first-party verification każdej domeny przed uznaniem jej za oficjalną,
-- search fallback przez wymienny `SearchProvider`, domyślnie Brave Search,
+- first-party verification domeny przed uznaniem jej za oficjalną,
+- search fallback przez wymienny `SearchProvider` (Brave),
 - strukturalne provenance rozwiązania domeny: `source_candidate`, `search`, `known_url`,
-- crawler first-party z `robots.txt`, limitem stron i rate limitingiem,
-- `sitemap.xml` i priorytety stron kontaktowych/B2B,
+- crawler first-party z `robots.txt`, limitami, rate limitingiem i `sitemap.xml`,
 - ekstrakcja e-maili, formularzy i typowych obfuskowanych adresów,
 - klasyfikacja `GREEN / REVIEW / IGNORE`,
-- append-only audit dla weryfikacji WWW i snapshotów evidence,
+- append-only audit website verification i evidence,
+- immutable SHA-256 page/contact snapshots,
 - ręcznie etykietowane quality gates dla Company Resolution, domen i kontaktów,
 - Employer Discovery Score 0–100,
-- eksport Faro schema v5.
+- kontrolowany benchmark end-to-end 1000 ofert,
+- eksport Faro **schema v6**.
 
 ## Instalacja
 
@@ -42,122 +50,43 @@ pip install -e ".[dev]"
 cp .env.example .env
 ```
 
+Po instalacji dostępne są dwa entrypointy:
+
+```text
+agregator
+agregator-benchmark
+```
+
 ## Konfiguracja
 
-Najważniejsze zmienne znajdują się w `.env.example`.
-
-### Wyszukiwanie WWW
+Najważniejsze zmienne są w `.env.example`.
 
 ```text
 BRAVE_SEARCH_API_KEY=
-AGREGATOR_USER_AGENT=FaroEmployerDiscovery/0.1
-AGREGATOR_MAX_PAGES=12
-AGREGATOR_REQUEST_DELAY=0.8
-```
-
-### Jooble
-
-```text
 JOOBLE_API_KEY=
-JOOBLE_KEYWORDS=praca
-JOOBLE_LOCATION=Polska
-JOOBLE_RESULTS_PER_PAGE=20
-```
-
-### Adzuna
-
-```text
 ADZUNA_APP_ID=
 ADZUNA_APP_KEY=
-ADZUNA_COUNTRY=pl
-ADZUNA_RESULTS_PER_PAGE=20
-```
-
-### Careerjet Publisher API
-
-Careerjet wymaga kompletnego, rzeczywistego kontekstu partnera:
-
-```text
 CAREERJET_API_KEY=
 CAREERJET_REFERER=
 CAREERJET_USER_IP=
 CAREERJET_USER_AGENT=
-CAREERJET_LOCALE=pl_PL
-```
-
-Adapter nie podstawia fikcyjnego `user_ip`, `user_agent` ani `Referer`.
-
-### ePraca WebService v2
-
-Wymaga wartości `Partner` nadanej integratorowi oraz dokładnie jednego zakresu:
-
-```text
 EPRACA_PARTNER=
-EPRACA_LANGUAGE=pl
-EPRACA_WOJEWODZTWO=
-EPRACA_JEDNOSTKA=
-EPRACA_ALL=
 ```
 
-Przykładowo należy ustawić tylko jedno z: `EPRACA_WOJEWODZTWO`, `EPRACA_JEDNOSTKA`, `EPRACA_ALL=true`.
+Careerjet wymaga rzeczywistego kontekstu partnera. ePraca wymaga wartości `Partner` nadanej integratorowi i prawidłowego zakresu zapytania. Repo nie podstawia fikcyjnych danych i nie obchodzi autoryzacji.
 
 ## Podstawowe użycie
 
-### Inicjalizacja bazy
-
 ```bash
 agregator db-init --db agregator.sqlite3
-```
-
-### Lista adapterów
-
-```bash
 agregator sources
-```
-
-Aktualnie rejestrowane są: `adzuna`, `careerjet`, `epraca`, `jooble`, `olx`.
-
-### Pobranie jednego źródła
-
-```bash
 agregator collect --source olx --pages 2
-agregator collect --source jooble --pages 1
-agregator collect --source adzuna --pages 1
+agregator companies --db agregator.sqlite3 --limit 50
+agregator enrich-db --db agregator.sqlite3 --limit 20
+agregator benchmark --db agregator.sqlite3
 ```
 
-Careerjet i ePraca można uruchomić analogicznie po poprawnej konfiguracji partnera/integratora.
-
-### Kontrolowany benchmark 1000 ofert
-
-```bash
-agregator benchmark-collect \
-  --db agregator.sqlite3 \
-  --sources olx,jooble,adzuna \
-  --target-jobs 1000 \
-  --max-rounds 100
-```
-
-Collector działa round-robin: każde aktywne źródło dostaje najwyżej jedną stronę w rundzie. Źródła bez wymaganej konfiguracji są wyłączane, a powtarzające się błędy mają limit.
-
-### Historia runów
-
-```bash
-agregator runs --db agregator.sqlite3 --limit 50
-```
-
-Każdy run zapisuje m.in. status, kursory, liczbę stron, oferty insert/update, nowe firmy, czas i skrócony błąd.
-
-## Company Resolution
-
-Resolver nie wykonuje automatycznego fuzzy-merge. Automatyczne łączenie jest konserwatywne i opiera się na znormalizowanej nazwie, lokalizacji, jednoznaczności kandydata i confidence źródła.
-
-Każda oferta zapisuje m.in.:
-
-- `company_resolution_method`,
-- `company_resolution_confidence`,
-- provenance i confidence nazwy pracodawcy.
-
-Potencjalne duplikaty można skierować do ręcznego review:
+Potencjalne duplikaty firm trafiają do ręcznego review:
 
 ```bash
 agregator resolution-review \
@@ -166,118 +95,62 @@ agregator resolution-review \
   --limit 100
 ```
 
-Komenda **niczego nie scala**.
+Ta komenda **niczego nie scala**.
 
-## Jawne identyfikatory firm
+## Weryfikacja oficjalnej WWW
 
-`JobPosting` może zawierać `CompanyIdentifier`. Obserwacje są normalizowane i przechowywane w `company_identifiers` wraz z provenance, confidence i `observation_count`.
+Pipeline rozróżnia finalne źródło rozwiązania domeny:
 
-Rozpoznawane są m.in. NIP, REGON i KRS. ePraca mapuje NIP i REGON z oficjalnego feedu. Ten sam identyfikator pod więcej niż jednym `company_id` jest traktowany jako konflikt do REVIEW, a nie sygnał do automatycznego merge.
+- `source_candidate` — URL ze źródła oferty, zaakceptowany dopiero po first-party verification,
+- `search` — domena znaleziona przez SearchProvider i zweryfikowana,
+- `known_url` — URL jawnie przekazany do `scan-url`.
 
-## Weryfikacja oficjalnej strony WWW
+`website_resolution_source` przechowuje konkretne provenance, np. `official_feed.adresWww` albo `brave`. Każda `WebsiteVerificationAttempt` ma własne `origin` i `source`, więc audit zachowuje także kandydatów odrzuconych przed znalezieniem poprawnej domeny.
 
-Pipeline rozróżnia trzy finalne źródła rozwiązania domeny:
-
-- `source_candidate` — URL pochodzi bezpośrednio ze źródła oferty i przeszedł first-party verification,
-- `search` — domena została znaleziona przez SearchProvider i zweryfikowana,
-- `known_url` — domena została jawnie podana do `scan-url`.
-
-`website_resolution_source` zachowuje konkretne provenance, np. `official_feed.adresWww` albo `brave`. Każda `WebsiteVerificationAttempt` ma własne `origin` i `source`.
-
-Źródłowy URL nie jest akceptowany w ciemno. Kolejność enrichmentu jest następująca:
-
-`source website candidates -> first-party verification -> jeśli brak sukcesu: search -> first-party verification -> crawl kontaktów`
-
-Dzięki temu poprawny URL z feedu może oszczędzić zapytanie do wyszukiwarki, ale błędny URL nie obniża jakości rozwiązania domeny.
-
-### Enrichment bazy
-
-```bash
-agregator enrich-db --db agregator.sqlite3 --limit 20
+```text
+source website candidates
+  -> first-party verification
+  -> jeśli brak sukcesu: search
+  -> first-party verification
+  -> crawl kontaktów
 ```
 
-Wymaga `BRAVE_SEARCH_API_KEY` wtedy, gdy trzeba wykonać search fallback.
+## Kontrolowany benchmark end-to-end
 
-### Pojedyncza firma
-
-```bash
-agregator scan-url \
-  --company "Przykładowa Firma" \
-  --url https://example.com
-
-agregator discover \
-  --company "Przykładowa Firma" \
-  --city Gdynia
-```
-
-## Benchmark techniczny
+Pełny workflow ma osobny entrypoint:
 
 ```bash
-agregator benchmark --db agregator.sqlite3
+agregator-benchmark run \
+  --db benchmark/benchmark.sqlite3 \
+  --output-dir benchmark/run \
+  --sources olx,jooble,adzuna \
+  --target-jobs 1000 \
+  --max-rounds 100 \
+  --enrichment-batch-size 25 \
+  --max-enrichment-companies 1000
 ```
 
-Raport obejmuje m.in.:
+Workflow wykonuje:
 
-- liczbę ofert, firm i źródeł,
-- Company Resolution methods,
-- pokrycie jawnych identyfikatorów i konflikty,
-- skuteczność enrichmentu,
-- `website_candidates_total`,
-- `companies_with_website_candidates`,
-- `source_verified_websites`,
-- `source_website_candidate_company_rate`,
-- `source_verified_website_rate`,
-- `source_verified_share_of_found`,
-- `website_resolution_origin_counts`,
-- `source_verified_website_counts`,
-- GREEN/REVIEW/IGNORE,
-- Employer Discovery Score,
-- `source_run_metrics` z czasem i health per source.
+```text
+collection
+  -> Company Resolution
+  -> enrichment
+  -> website verification
+  -> contact crawl/classification
+  -> benchmark report
+  -> dataset export
+  -> offline website snapshots
+  -> ground-truth templates
+```
+
+Opcja `--strict` ustawia kod wyjścia `2`, jeśli nie osiągnięto targetu albo enrichment nie został domknięty. `benchmark_run_manifest.json` przechowuje `readiness` i listę blockerów. `ready_for_manual_labeling=true` oznacza gotowość do ręcznego labelingu, a nie przejście quality gate.
+
+Szczegóły: [`docs/BENCHMARK_RUN.md`](docs/BENCHMARK_RUN.md).
 
 ## Ground truth i quality gate
 
-### Company Resolution
-
-```bash
-agregator export-ground-truth \
-  --db agregator.sqlite3 \
-  --output company_ground_truth.csv \
-  --limit 1000
-
-agregator evaluate-resolution \
-  --db agregator.sqlite3 \
-  --path company_ground_truth.csv
-```
-
-### Oficjalna domena
-
-```bash
-agregator export-website-ground-truth \
-  --db agregator.sqlite3 \
-  --output website_ground_truth.csv \
-  --limit 1000
-
-agregator evaluate-website \
-  --db agregator.sqlite3 \
-  --path website_ground_truth.csv
-```
-
-`__none__` oznacza ręcznie potwierdzony brak oficjalnej strony.
-
-### Kontakty
-
-```bash
-agregator export-contact-ground-truth \
-  --db agregator.sqlite3 \
-  --output contact_ground_truth.csv \
-  --limit 1000
-
-agregator evaluate-contacts \
-  --db agregator.sqlite3 \
-  --path contact_ground_truth.csv
-```
-
-### Wspólny pakiet etykiet
+Pakiet etykiet:
 
 ```bash
 agregator export-quality-labels \
@@ -288,7 +161,7 @@ agregator export-quality-labels \
   --contact-limit 1000
 ```
 
-### Quality gate
+Po ręcznym oznaczeniu:
 
 ```bash
 agregator quality-gate \
@@ -305,26 +178,9 @@ Domyślne progi:
 - Website Resolution F1 >= 0.95,
 - Contact decision macro F1 >= 0.90.
 
-## Kontakty i evidence
+`website_resolution_truth.csv` zawiera także latest verification provenance, dzięki czemu można powiązać etykietę z zachowanymi snapshotami strony.
 
-Crawler przeszukuje first-party strony firmy, w tym priorytetowe ścieżki typu `/kontakt`, `/wspolpraca`, `/partnerzy`, `/b2b`, `/dla-firm`, `/dostawcy` i `/franczyza`.
-
-Wyniki klasyfikowane są jako:
-
-- `GREEN` — silny publiczny kanał zgodny z celem,
-- `REVIEW` — wymaga ręcznej oceny,
-- `IGNORE` — kanał nieodpowiedni do celu.
-
-Formularz zawierający zgodę na informacje handlowe nie jest automatycznie traktowany jako GREEN.
-
-```bash
-agregator green --db agregator.sqlite3 --limit 100
-agregator export-green --db agregator.sqlite3 --output green.csv
-```
-
-Każdy kontakt zachowuje `evidence_url`, `evidence_text`, signal i confidence. Audit przechowuje immutable snapshoty z SHA-256.
-
-## Eksport dla Faro — schema v5
+## Eksport Faro — schema v6
 
 ```bash
 agregator export-dataset \
@@ -334,37 +190,40 @@ agregator export-dataset \
 
 Powstają:
 
-- `companies.csv`,
-- `job_postings.csv`,
-- `company_identifiers.csv`,
-- `company_website_candidates.csv`,
-- `contact_channels.csv`,
-- `website_verification_runs.csv`,
-- `contact_evidence_snapshots.csv`,
-- `manifest.json`.
+```text
+companies.csv
+job_postings.csv
+company_identifiers.csv
+company_website_candidates.csv
+contact_channels.csv
+website_verification_runs.csv
+contact_evidence_snapshots.csv
+website_page_snapshots.csv
+manifest.json
+```
 
-`website_verification_runs.csv` zawiera także `resolution_origin` i `resolution_source`. `website_attempts_json` zachowuje provenance każdej sprawdzonej kandydatury.
+`website_page_snapshots.csv` jest spłaszczonym, offline evidence z audit trailu. Zawiera także snapshoty odrzuconych `WebsiteVerificationAttempt`, hash SHA-256, URL, status HTTP, excerpt oraz provenance próby. Nie wymaga ponownego crawlowania strony podczas późniejszego labelingu.
 
-## Katalog źródeł
+## Kontakty i evidence
 
-`config/source_catalog.tsv` zawiera 91 źródeł wraz z priorytetem, typem, stanem integracji i rekomendowaną drogą dostępu.
+Crawler priorytetyzuje first-party ścieżki takie jak `/kontakt`, `/wspolpraca`, `/partnerzy`, `/b2b`, `/dla-firm`, `/dostawcy`, `/franczyza`.
 
-Kolejność integracji jest świadomie konserwatywna:
+- `GREEN` — mocny publiczny sygnał zgodny z celem,
+- `REVIEW` — wymaga ręcznej oceny,
+- `IGNORE` — kanał nieodpowiedni.
 
-1. oficjalne API/feed/partnerstwo,
-2. źródła oficjalne,
-3. publiczny HTML po review technicznym i regulaminowym,
-4. automatyzacja przeglądarki tylko tam, gdzie jest potrzebna i zgodna z zasadami dostępu,
-5. brak zastępowania integracji partnerskich obchodzeniem uwierzytelniania lub zabezpieczeń.
+Sama obecność e-maila lub checkboxa informacji handlowej nie oznacza automatycznie `GREEN`.
 
-## Ważne ograniczenie adaptera OLX
-
-Nie każda oferta OLX zawiera jednoznaczną nazwę przedsiębiorstwa. Adapter zachowuje provenance i confidence. Imię konta lub osoby kontaktowej nie jest automatycznie traktowane jako pewna nazwa firmy i przy niskim confidence nie trafia domyślnie do automatycznego enrichmentu.
+```bash
+agregator green --db agregator.sqlite3 --limit 100
+agregator export-green --db agregator.sqlite3 --output green.csv
+```
 
 ## Dokumentacja
 
-- pełny plan: [`docs/PLAN.md`](docs/PLAN.md),
-- status wdrożenia: [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
+- plan: [`docs/PLAN.md`](docs/PLAN.md),
+- status wdrożenia: [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md),
+- benchmark end-to-end: [`docs/BENCHMARK_RUN.md`](docs/BENCHMARK_RUN.md).
 
 ## Zasady projektu
 
@@ -372,9 +231,8 @@ Nie każda oferta OLX zawiera jednoznaczną nazwę przedsiębiorstwa. Adapter za
 2. Brak omijania logowania, CAPTCHA, paywalli i kontroli dostępu.
 3. Każdy wynik kontaktowy ma provenance/evidence.
 4. Sama obecność e-maila nie oznacza `GREEN`.
-5. Adaptery portali pracy są oddzielone od silnika enrichmentu.
-6. Fuzzy Company Resolution pozostaje REVIEW-only.
-7. Identyczny NIP/REGON nie powoduje automatycznego merge bez zwalidowanej reguły.
-8. Źródłowy URL firmy nie jest automatycznie uznawany za oficjalną domenę.
-9. Quality gate opiera się na ręcznie oznaczonym ground truth.
-10. Outreach i automatyczna wysyłka wiadomości są poza zakresem repo.
+5. Fuzzy Company Resolution pozostaje REVIEW-only.
+6. Identyczny NIP/REGON nie powoduje automatycznego merge bez zwalidowanej reguły.
+7. Źródłowy URL firmy nie jest automatycznie uznawany za oficjalną domenę.
+8. Quality gate opiera się na ręcznie oznaczonym ground truth.
+9. Outreach i automatyczna wysyłka wiadomości są poza zakresem repo.
