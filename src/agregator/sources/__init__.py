@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from .adzuna import AdzunaApiSource
+from .careerjet import CareerjetApiSource
 from .jooble import JoobleApiSource
 from .olx import OlxPublicSource
 from .registry import SourceRegistry
@@ -40,16 +41,51 @@ def _adzuna_from_env() -> AdzunaApiSource:
     )
 
 
+def _careerjet_from_env() -> CareerjetApiSource:
+    api_key = os.getenv("CAREERJET_API_KEY", "")
+    referer = os.getenv("CAREERJET_REFERER", "")
+    user_ip = os.getenv("CAREERJET_USER_IP", "")
+    user_agent = os.getenv("CAREERJET_USER_AGENT", "")
+    missing = [
+        name
+        for name, value in {
+            "CAREERJET_API_KEY": api_key,
+            "CAREERJET_REFERER": referer,
+            "CAREERJET_USER_IP": user_ip,
+            "CAREERJET_USER_AGENT": user_agent,
+        }.items()
+        if not value
+    ]
+    if missing:
+        raise ValueError(
+            "Ustaw wymagane zmienne Careerjet: " + ", ".join(missing)
+        )
+
+    return CareerjetApiSource(
+        api_key,
+        referer=referer,
+        user_ip=user_ip,
+        user_agent=user_agent,
+        locale_code=os.getenv("CAREERJET_LOCALE", "pl_PL"),
+        keywords=os.getenv("CAREERJET_KEYWORDS") or None,
+        location=os.getenv("CAREERJET_LOCATION") or None,
+        page_size=int(os.getenv("CAREERJET_PAGE_SIZE", "20")),
+        sort=os.getenv("CAREERJET_SORT", "date"),
+    )
+
+
 def default_registry() -> SourceRegistry:
     registry = SourceRegistry()
     registry.register("olx", OlxPublicSource)
     registry.register("jooble", _jooble_from_env)
     registry.register("adzuna", _adzuna_from_env)
+    registry.register("careerjet", _careerjet_from_env)
     return registry
 
 
 __all__ = [
     "AdzunaApiSource",
+    "CareerjetApiSource",
     "JoobleApiSource",
     "OlxPublicSource",
     "SourceRegistry",
