@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from dataclasses import asdict
 
 import typer
 
@@ -121,7 +122,7 @@ def enrich_db(
             min_identity_confidence=min_identity_confidence,
             refresh=refresh,
         )
-        typer.echo(json.dumps(vars(stats), ensure_ascii=False, indent=2))
+        typer.echo(json.dumps(asdict(stats), ensure_ascii=False, indent=2))
 
     asyncio.run(run())
 
