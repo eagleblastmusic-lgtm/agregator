@@ -8,6 +8,7 @@ from .adzuna import AdzunaApiSource
 from .careerjet import CareerjetApiSource
 from .epraca import EPracaSource
 from .jooble import JoobleApiSource
+from .kprm import KprmPublicSource
 from .olx import OlxPublicSource
 from .public_sources import (
     justjoinit_source,
@@ -177,6 +178,17 @@ def default_registry() -> SourceRegistry:
         ),
     )
     registry.register(
+        "kprm",
+        KprmPublicSource,
+        access_mode="official_public_html",
+        experimental=True,
+        notes=(
+            "Official civil-service recruitment site. The footer advertises an XML export; "
+            "this adapter currently preserves the human-visible public HTML notices and checks "
+            "robots.txt before requests."
+        ),
+    )
+    registry.register(
         "jooble",
         _jooble_from_env,
         access_mode="partner_api",
@@ -238,6 +250,7 @@ __all__ = [
     "CareerjetApiSource",
     "EPracaSource",
     "JoobleApiSource",
+    "KprmPublicSource",
     "OlxPublicSource",
     "SourceRegistry",
     "default_registry",
