@@ -120,6 +120,10 @@ def set_row_label(
     modes = int(bool(explicit_value)) + int(exclude)
     if modes != 1:
         raise ValueError("choose exactly one labeling mode: value or exclude")
+    if explicit_value.lower() == EXCLUDE_LABEL:
+        raise ValueError("use exclude=True instead of passing __exclude__ as value")
+    if exclude and purpose:
+        raise ValueError("purpose cannot be combined with exclude")
 
     path, fieldnames, rows = _read_rows(label_dir, label_kind)
     if row_number > len(rows):
@@ -186,8 +190,6 @@ def _resolve_label(
         raw = explicit_value
         if raw.lower() == NO_WEBSITE:
             return NO_WEBSITE, None
-        if raw.lower() == EXCLUDE_LABEL:
-            return EXCLUDE_LABEL, None
         domain = normalize_domain(raw)
         if not domain:
             raise ValueError(f"invalid website truth domain: {raw!r}")
