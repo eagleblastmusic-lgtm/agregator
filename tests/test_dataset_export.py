@@ -3,12 +3,14 @@ from pathlib import Path
 
 from agregator.audit import record_discovery_audit
 from agregator.company_identifiers import persist_job_company_identifiers
+from agregator.company_websites import persist_job_company_website_candidates
 from agregator.dataset_export import export_dataset_bundle
 from agregator.models import (
     ChannelKind,
     ChannelPurpose,
     CompanyIdentifier,
     CompanyIdentity,
+    CompanyWebsiteCandidate,
     ContactChannel,
     Decision,
     DiscoveryResult,
@@ -37,10 +39,18 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
                 confidence=0.99,
             )
         ],
+        company_website_candidates=[
+            CompanyWebsiteCandidate(
+                url="https://acme.test",
+                source="fixture.website",
+                confidence=0.96,
+            )
+        ],
         city="Gdańsk",
     )
     store.upsert_jobs([job])
     persist_job_company_identifiers(store, [job])
+    persist_job_company_website_candidates(store, [job])
     company_id = int(store.list_companies()[0]["id"])
     discovery = DiscoveryResult(
         company=CompanyIdentity(
@@ -75,12 +85,14 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     assert result.companies == 1
     assert result.jobs == 1
     assert result.identifiers == 1
+    assert result.website_candidates == 1
     assert result.contacts == 1
     assert result.website_verifications == 1
     assert result.evidence_snapshots == 1
     assert result.companies_path.exists()
     assert result.jobs_path.exists()
     assert result.identifiers_path.exists()
+    assert result.website_candidates_path.exists()
     assert result.contacts_path.exists()
     assert result.website_verifications_path.exists()
     assert result.evidence_snapshots_path.exists()
@@ -89,6 +101,7 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     companies = result.companies_path.read_text(encoding="utf-8-sig")
     jobs = result.jobs_path.read_text(encoding="utf-8-sig")
     identifiers = result.identifiers_path.read_text(encoding="utf-8-sig")
+    website_candidates = result.website_candidates_path.read_text(encoding="utf-8-sig")
     contacts = result.contacts_path.read_text(encoding="utf-8-sig")
     website_runs = result.website_verifications_path.read_text(encoding="utf-8-sig")
     snapshots = result.evidence_snapshots_path.read_text(encoding="utf-8-sig")
@@ -99,15 +112,19 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     assert "company_resolution_confidence" in jobs
     assert "1234567890" in identifiers
     assert "fixture.nip" in identifiers
+    assert "https://acme.test" in website_candidates
+    assert "fixture.website" in website_candidates
+    assert "observation_count" in website_candidates
     assert "partnerzy@acme.test" in contacts
     assert "evidence_url" in contacts
     assert "exact_normalized_company_name" in website_runs
     assert "content_sha256" in snapshots
-    assert manifest["schema_version"] == "3"
+    assert manifest["schema_version"] == "4"
     assert manifest["counts"] == {
         "companies": 1,
         "job_postings": 1,
         "company_identifiers": 1,
+        "company_website_candidates": 1,
         "contact_channels": 1,
         "website_verification_runs": 1,
         "contact_evidence_snapshots": 1,
