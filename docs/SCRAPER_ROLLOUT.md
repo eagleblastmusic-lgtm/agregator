@@ -33,8 +33,8 @@ Master catalog: **91 źródeł**.
 Aktualnie:
 
 ```text
-adaptery zaimplementowane: 18
-pozostałe:                73
+adaptery zaimplementowane: 19
+pozostałe:                72
 ```
 
 Zaimplementowane adaptery:
@@ -54,6 +54,7 @@ Zaimplementowane adaptery:
 | Jooble Polska | `jooble` | partner API | optional source method |
 | Careerjet Polska | `careerjet` | publisher API | optional source method |
 | Randstad Polska | `randstad` | public HTML | experimental |
+| Manpower Polska | `manpower` | public HTML | experimental |
 | NGO.pl — praca i współpraca | `ngo` | public HTML | experimental |
 | Kariera w Finansach | `karierawfinansach` | public HTML | experimental |
 | Skillshot.pl | `skillshot` | public HTML | experimental |
@@ -177,6 +178,20 @@ Adapter `randstad`:
 - jeżeli Randstad nie ujawnia klienta końcowego, system nie wymyśla pracodawcy: zapisuje Randstad jako jawny **low-confidence agency fallback** i oznacza `client_employer_disclosed=false`,
 - robots check, retry i request delay.
 
+### Manpower Polska
+
+Adapter `manpower`:
+
+- publiczna wyszukiwarka `/pl/szukaj-pracy`,
+- jawna paginacja `/pl/szukaj-pracy/pN`,
+- publiczne szczegóły `/pl/job/<id>/<slug>`,
+- preferowany JSON-LD `JobPosting`, gdy strona ujawnia `hiringOrganization`,
+- numer oferty z URL oraz `Reference Number`/`Numer ref.` zachowywany w `source_payload`,
+- data publikacji i lokalizacja pobierane z publicznej strony szczegółów,
+- pełny widoczny tekst oferty zachowany jako source evidence,
+- gdy klient końcowy nie jest ujawniony, system zapisuje ManpowerGroup jako jawny **low-confidence agency fallback** i `client_employer_disclosed=false`, zamiast zgadywać pracodawcę,
+- robots check, retry i request delay.
+
 ### Następne A1
 
 Priorytet mają źródła oficjalne/publiczne i server-rendered, w których można zebrać dużo danych o pracodawcy bez obchodzenia ograniczeń. Kolejny audyt obejmuje przede wszystkim portale z czytelnym publicznym listingiem oraz źródła oficjalne/agencje.
@@ -193,7 +208,7 @@ Pobranie wybranych źródeł:
 
 ```bash
 agregator-scrape run \
-  --sources kprm,ofertypracyedu,ngo,aplikuj,theprotocol,bulldogjob,randstad \
+  --sources kprm,ofertypracyedu,ngo,aplikuj,theprotocol,bulldogjob,randstad,manpower \
   --pages-per-source 1 \
   --db agregator.sqlite3 \
   --strict
