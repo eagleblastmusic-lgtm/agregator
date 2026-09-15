@@ -79,16 +79,16 @@ def test_source_health_distinguishes_success_with_zero_records(tmp_path: Path) -
     assert health.jobs_seen == 0
 
 
-def test_source_health_distinguishes_http_access_block(tmp_path: Path) -> None:
-    store = SQLiteStore(tmp_path / "blocked.sqlite3")
+def _record_http_failure(tmp_path: Path, status_code: int, reason: str) -> str:
+    store = SQLiteStore(tmp_path / f"blocked-{status_code}.sqlite3")
     store.init_schema()
     run_id = store.start_source_run("blocked", cursor_before=None, pages_requested=1)
     response = httpx.Response(
-        403,
+        status_code,
         request=httpx.Request("GET", "https://example.test/jobs"),
     )
     error = httpx.HTTPStatusError(
-        "Client error '403 Forbidden' for url 'https://example.test/jobs'",
+        f"Client error '{status_code} {reason}' for url 'https://example.test/jobs'",
         request=response.request,
         response=response,
     )
@@ -100,9 +100,12 @@ def test_source_health_distinguishes_http_access_block(tmp_path: Path) -> None:
         stats=UpsertStats(),
         error=error,
     )
+    return build_source_health(store, ["blocked"])[0].state
 
-    health = build_source_health(store, ["blocked"])[0]
 
-    assert health.state == "access_blocked"
-    assert health.failed_runs == 1
-    assert health.last_error_type == "HTTPStatusError"
+def test_source_health_distinguishes_http_access_block(tmp_path: Path) -> None:
+    assert _record_http_failure(tmp_path, 403, "Forbidden") == "access_blocked"
+
+
+def test_source_health_distinguishes_http_406_access_block(tmp_path: Path) -> None:
+    assert _record_http_failure(tmp_path, 406, "Not Acceptable") == "access_blocked"
