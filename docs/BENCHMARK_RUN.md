@@ -10,6 +10,7 @@ zbieranie ofert
     -> crawl kontaktów
     -> raport benchmarku
     -> eksport datasetu
+    -> offline snapshoty stron
     -> pakiet do ręcznego ground truth
 ```
 
@@ -73,6 +74,7 @@ benchmark/run/
 │   ├── contact_channels.csv
 │   ├── website_verification_runs.csv
 │   ├── contact_evidence_snapshots.csv
+│   ├── website_page_snapshots.csv
 │   └── manifest.json
 └── labels/
     ├── company_resolution_truth.csv
@@ -80,7 +82,25 @@ benchmark/run/
     └── contact_classification_truth.csv
 ```
 
-`benchmark_run_manifest.json` zapisuje konfigurację runu, wynik collection, zagregowane statystyki enrichmentu, pełny raport benchmarku oraz ścieżki eksportów.
+`benchmark_run_manifest.json` zapisuje konfigurację runu, wynik collection, zagregowane statystyki enrichmentu, pełny raport benchmarku, wynik eksportu snapshotów oraz ścieżki eksportów.
+
+## Offline evidence stron WWW
+
+`website_page_snapshots.csv` jest tworzony z append-only audit trailu, bez ponownego pobierania stron. Dla automatycznego website resolution preferowane są snapshoty zapisane przy poszczególnych `WebsiteVerificationAttempt`, dzięki czemu plik obejmuje także kandydatów odrzuconych przed wyborem poprawnej domeny.
+
+Każdy wiersz może zawierać m.in.:
+
+- `verification_id` i `company_id`,
+- finalne `resolution_origin` i `resolution_source`,
+- URL sprawdzanego kandydata i informację, czy został zaakceptowany,
+- provenance próby (`attempt_origin`, `attempt_source`),
+- URL konkretnej strony,
+- kod HTTP,
+- SHA-256 treści,
+- tekstowy excerpt zapisany w chwili weryfikacji,
+- timestamp runu.
+
+Jeżeli run nie posiada listy prób, np. dla jawnie podanego znanego URL, exporter używa run-level `page_snapshots_json`. Dzięki temu ręczny audyt domen nie musi zależeć od tego, czy strona nadal wygląda tak samo w późniejszym terminie.
 
 ## Następny krok: ręczny ground truth
 
@@ -89,6 +109,8 @@ Po wykonaniu benchmarku nie należy automatycznie podnosić progów ani rozszerz
 - `company_resolution_truth.csv`,
 - `website_resolution_truth.csv`,
 - `contact_classification_truth.csv`.
+
+Przy oznaczaniu domen można wspierać się `website_page_snapshots.csv` i `website_verification_runs.csv`, aby zobaczyć nie tylko finalną domenę, ale również odrzucone kandydatury i evidence z momentu runu.
 
 Następnie można uruchomić istniejący `quality-gate`:
 
