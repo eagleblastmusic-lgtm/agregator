@@ -1,3 +1,4 @@
+import csv
 import json
 from pathlib import Path
 
@@ -62,6 +63,11 @@ class FakeCrawler:
 class ExplodingPipeline:
     async def discover(self, company_name: str, city: str | None = None) -> object:
         raise RuntimeError("temporary search failure")
+
+
+def _fields(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle).fieldnames or [])
 
 
 async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_path: Path) -> None:
@@ -129,6 +135,23 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert result.quality_labels.website_resolution_path.exists()
     assert result.quality_labels.contact_classification_path.exists()
     assert result.quality_labels.sampling_manifest_path.exists()
+    assert result.quality_labels.prediction_reference_dir.exists()
+    assert result.quality_labels.company_resolution_reference_path.exists()
+    assert result.quality_labels.website_resolution_reference_path.exists()
+    assert result.quality_labels.contact_classification_reference_path.exists()
+
+    assert "predicted_company_id" not in _fields(
+        result.quality_labels.company_resolution_path
+    )
+    assert "predicted_company_id" in _fields(
+        result.quality_labels.company_resolution_reference_path
+    )
+    assert "predicted_website_url" not in _fields(
+        result.quality_labels.website_resolution_path
+    )
+    assert "predicted_decision" not in _fields(
+        result.quality_labels.contact_classification_path
+    )
 
     sampling_manifest = json.loads(
         result.quality_labels.sampling_manifest_path.read_text(encoding="utf-8")
@@ -137,7 +160,7 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert sampling_manifest["files"][0]["population_rows"] == 2
 
     manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "4"
+    assert manifest["schema_version"] == "5"
     assert manifest["configuration"]["label_sampling_seed"] == "benchmark-test-seed"
     assert manifest["collection"]["target_reached"] is True
     assert manifest["enrichment"]["enriched"] == 1
@@ -155,6 +178,18 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert manifest["files"]["labels_dir"] == "labels"
     assert manifest["files"]["label_sampling_manifest"] == (
         "labels/sampling_manifest.json"
+    )
+    assert manifest["files"]["prediction_reference_dir"] == (
+        "labels/prediction_reference"
+    )
+    assert manifest["files"]["company_resolution_reference"] == (
+        "labels/prediction_reference/company_resolution_reference.csv"
+    )
+    assert manifest["files"]["website_resolution_reference"] == (
+        "labels/prediction_reference/website_resolution_reference.csv"
+    )
+    assert manifest["files"]["contact_classification_reference"] == (
+        "labels/prediction_reference/contact_classification_reference.csv"
     )
 
 
