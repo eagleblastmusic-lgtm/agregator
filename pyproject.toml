@@ -30,6 +30,7 @@ agregator-collect = "agregator.collection_cli:app"
 agregator-export = "agregator.lead_cli:app"
 agregator-run = "agregator.workflow_cli:app"
 agregator-scrape = "agregator.scrape_cli:app"
+agregator-validate = "agregator.validation_cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agregator"]
