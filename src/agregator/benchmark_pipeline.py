@@ -57,28 +57,16 @@ class BenchmarkEnrichmentSummary:
 @dataclass(frozen=True, slots=True)
 class BenchmarkReadiness:
     collection_target_reached: bool
-    source_health_ready: bool
     enrichment_complete: bool
     dataset_exported: bool
     ground_truth_templates_generated: bool
     ready_for_manual_labeling: bool
     manual_ground_truth_required: bool
-    unexercised_sources: tuple[str, ...]
-    disabled_sources: tuple[str, ...]
-    sources_without_jobs: tuple[str, ...]
-    sources_with_errors: tuple[str, ...]
     blockers: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
-        for key in (
-            "unexercised_sources",
-            "disabled_sources",
-            "sources_without_jobs",
-            "sources_with_errors",
-            "blockers",
-        ):
-            payload[key] = list(payload[key])
+        payload["blockers"] = list(self.blockers)
         return payload
 
 
@@ -196,7 +184,7 @@ async def run_benchmark_pipeline(
     readiness = _build_readiness(collection, enrichment)
 
     manifest = {
-        "schema_version": "6",
+        "schema_version": "5",
         "created_at": datetime.now(UTC).isoformat(),
         "database": str(store.path),
         "configuration": {
@@ -305,33 +293,17 @@ def _build_readiness(
     blockers: list[str] = []
     if not collection.target_reached:
         blockers.append("collection_target_not_reached")
-    if collection.unexercised_sources:
-        blockers.append(
-            "unexercised_sources:" + ",".join(collection.unexercised_sources)
-        )
-    if collection.disabled_sources:
-        blockers.append("disabled_sources:" + ",".join(collection.disabled_sources))
-    if collection.sources_without_jobs:
-        blockers.append(
-            "sources_without_jobs:" + ",".join(collection.sources_without_jobs)
-        )
-
     enrichment_complete = enrichment.stopped_reason == "no_pending_companies"
     if not enrichment_complete:
         blockers.append(f"enrichment_incomplete:{enrichment.stopped_reason}")
 
     return BenchmarkReadiness(
         collection_target_reached=collection.target_reached,
-        source_health_ready=collection.source_health_ready,
         enrichment_complete=enrichment_complete,
         dataset_exported=True,
         ground_truth_templates_generated=True,
         ready_for_manual_labeling=not blockers,
         manual_ground_truth_required=True,
-        unexercised_sources=collection.unexercised_sources,
-        disabled_sources=collection.disabled_sources,
-        sources_without_jobs=collection.sources_without_jobs,
-        sources_with_errors=collection.sources_with_errors,
         blockers=tuple(blockers),
     )
 
