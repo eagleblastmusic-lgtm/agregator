@@ -126,3 +126,73 @@ async def test_discover_returns_no_website_when_identity_cannot_be_confirmed() -
     assert result.website_attempts[0].accepted is False
     assert result.website_attempts[0].resolved_url == candidate_url
     assert len(result.website_attempts[0].page_snapshots) == 1
+
+
+@pytest.mark.asyncio
+async def test_source_website_candidate_is_verified_before_acceptance() -> None:
+    official_url = "https://acme-logistics.test"
+    crawler = FakeCrawler(
+        {
+            official_url: [
+                _page(
+                    official_url,
+                    """
+                    <html><body>
+                      <h1>ACME Logistics Sp. z o.o.</h1>
+                      <p>Siedziba firmy: Gdańsk.</p>
+                      <p>Kontakt dla partnerów: partnerzy@acme-logistics.test</p>
+                    </body></html>
+                    """,
+                )
+            ]
+        }
+    )
+    pipeline = EmployerDiscoveryPipeline(crawler=crawler)  # type: ignore[arg-type]
+
+    result = await pipeline.verify_website_candidate(
+        "ACME Logistics Sp. z o.o.",
+        official_url,
+        "Gdańsk",
+        candidate_confidence=0.98,
+        source_signal="source_website_candidate:official_feed.adresWww",
+    )
+
+    assert result.company.website_url == official_url
+    assert result.company.website_confidence >= 0.55
+    assert result.company.website_verification_signals[0] == (
+        "source_website_candidate:official_feed.adresWww"
+    )
+    assert "accepted" in result.company.website_verification_signals
+    assert len(result.website_attempts) == 1
+    assert result.website_attempts[0].accepted is True
+    assert crawler.calls == [official_url]
+
+
+@pytest.mark.asyncio
+async def test_source_website_candidate_is_rejected_when_identity_does_not_match() -> None:
+    candidate_url = "https://unrelated-company.test"
+    crawler = FakeCrawler(
+        {
+            candidate_url: [
+                _page(
+                    candidate_url,
+                    "<html><body><h1>Inna Firma</h1><p>Warszawa</p></body></html>",
+                )
+            ]
+        }
+    )
+    pipeline = EmployerDiscoveryPipeline(crawler=crawler)  # type: ignore[arg-type]
+
+    result = await pipeline.verify_website_candidate(
+        "ACME Logistics",
+        candidate_url,
+        "Gdańsk",
+        candidate_confidence=0.98,
+        source_signal="source_website_candidate:official_feed.adresWww",
+    )
+
+    assert result.company.website_url is None
+    assert "source_candidate_not_verified" in result.company.website_verification_signals
+    assert len(result.website_attempts) == 1
+    assert result.website_attempts[0].accepted is False
+    assert "identity_not_confirmed" in result.website_attempts[0].signals
