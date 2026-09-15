@@ -6,6 +6,7 @@ from agregator.website_ground_truth import (
     NO_WEBSITE,
     WebsiteGroundTruthLabel,
     evaluate_website_resolution,
+    evaluate_website_resolution_csv,
     export_website_ground_truth_template,
     load_website_ground_truth_csv,
     normalize_domain,
@@ -86,6 +87,7 @@ def test_website_resolution_metrics_count_wrong_domain_as_fp_and_fn(tmp_path: Pa
     assert report.recall == 0.5
     assert report.f1 == 0.5
     assert report.accuracy == 0.6667
+    assert report.excluded_rows == 0
 
 
 def test_website_ground_truth_loader_and_template(tmp_path: Path) -> None:
@@ -111,3 +113,32 @@ def test_website_ground_truth_loader_and_template(tmp_path: Path) -> None:
     assert labels[0].truth_domain == "alpha.example"
     assert labels[1].truth_domain is None
     assert normalize_domain("WWW.Example.COM/path") == "example.com"
+
+
+def test_website_ground_truth_exclusion_is_separate_from_no_website(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "excluded.sqlite3")
+    alpha_id, beta_id, gamma_id = _seed(store)
+    truth = tmp_path / "excluded_truth.csv"
+    truth.write_text(
+        "company_id,truth_domain\n"
+        f"{alpha_id},alpha.example\n"
+        f"{beta_id},__exclude__\n"
+        f"{gamma_id},{NO_WEBSITE}\n",
+        encoding="utf-8",
+    )
+
+    labels = load_website_ground_truth_csv(truth)
+    report = evaluate_website_resolution_csv(store, truth)
+
+    assert len(labels) == 2
+    assert labels[0].company_id == alpha_id
+    assert labels[0].truth_domain == "alpha.example"
+    assert labels[1].company_id == gamma_id
+    assert labels[1].truth_domain is None
+    assert report.labeled_rows == 2
+    assert report.excluded_rows == 1
+    assert report.true_positive == 1
+    assert report.true_negative == 1
+    assert report.f1 == 1.0
