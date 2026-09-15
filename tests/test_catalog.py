@@ -6,10 +6,15 @@ def test_source_catalog_matches_master_list() -> None:
     summary = catalog_summary(entries)
 
     assert summary["total"] == 91
-    assert summary["implemented"] == 3
-    assert summary["remaining"] == 88
+    assert summary["implemented"] == 4
+    assert summary["remaining"] == 87
     assert summary["priorities"] == {"A0": 14, "A1": 36, "B": 24, "C": 17}
-    assert summary["implemented_adapters"] == ["olx", "jooble", "adzuna"]
+    assert summary["implemented_adapters"] == [
+        "olx",
+        "jooble",
+        "careerjet",
+        "adzuna",
+    ]
 
 
 def test_filter_catalog_a0_pending() -> None:
