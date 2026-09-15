@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from heapq import heappop, heappush
-from urllib.parse import urldefrag, urljoin, urlparse
+from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 from xml.etree import ElementTree
 
@@ -11,6 +11,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from .signals import contains_discovery_signal, normalize_text
+from .url_utils import canonicalize_http_url
 
 PRIORITY_PATH_HINTS = (
     "kontakt",
@@ -95,9 +96,8 @@ class WebsiteCrawler:
             href = anchor.get("href", "").strip()
             if not href or href.startswith(("mailto:", "tel:", "javascript:", "#")):
                 continue
-            absolute = urldefrag(urljoin(page_url, href))[0]
-            parsed = urlparse(absolute)
-            if parsed.scheme not in {"http", "https"}:
+            absolute = canonicalize_http_url(href, base_url=page_url)
+            if absolute is None:
                 continue
             if not self._same_site(base_url, absolute):
                 continue
@@ -143,8 +143,9 @@ class WebsiteCrawler:
 
         pages: list[str] = []
         child_sitemaps: list[str] = []
-        for location in locations:
-            if not self._same_site(start_url, location):
+        for raw_location in locations:
+            location = canonicalize_http_url(raw_location)
+            if location is None or not self._same_site(start_url, location):
                 continue
             lower_path = urlparse(location).path.lower()
             if lower_path.endswith((".xml", ".xml.gz")):
@@ -158,10 +159,11 @@ class WebsiteCrawler:
             if not robots.can_fetch(self.user_agent, sitemap_url):
                 continue
             child_locations = await self._fetch_sitemap_locations(client, sitemap_url)
-            for location in child_locations:
+            for raw_location in child_locations:
                 if len(pages) >= self.sitemap_max_urls:
                     break
-                if not self._same_site(start_url, location):
+                location = canonicalize_http_url(raw_location)
+                if location is None or not self._same_site(start_url, location):
                     continue
                 lower_path = urlparse(location).path.lower()
                 if lower_path.endswith((".xml", ".xml.gz")):
@@ -171,11 +173,10 @@ class WebsiteCrawler:
         deduplicated: list[str] = []
         seen: set[str] = set()
         for value in pages:
-            clean = urldefrag(value)[0]
-            if clean in seen:
+            if value in seen:
                 continue
-            seen.add(clean)
-            deduplicated.append(clean)
+            seen.add(value)
+            deduplicated.append(value)
             if len(deduplicated) >= self.sitemap_max_urls:
                 break
         return deduplicated
@@ -197,6 +198,10 @@ class WebsiteCrawler:
     async def crawl(self, start_url: str) -> list[CrawlPage]:
         if not urlparse(start_url).scheme:
             start_url = f"https://{start_url}"
+        canonical_start = canonicalize_http_url(start_url)
+        if canonical_start is None:
+            return []
+        start_url = canonical_start
 
         headers = {"User-Agent": self.user_agent, "Accept": "text/html,application/xhtml+xml"}
         pages: list[CrawlPage] = []
@@ -239,7 +244,8 @@ class WebsiteCrawler:
                 if response.status_code >= 400 or "text/html" not in content_type:
                     continue
 
-                final_url = str(response.url)
+                raw_final_url = str(response.url)
+                final_url = canonicalize_http_url(raw_final_url) or raw_final_url
                 pages.append(
                     CrawlPage(
                         url=final_url,
@@ -248,7 +254,7 @@ class WebsiteCrawler:
                     )
                 )
 
-                for priority, link in self._links(response.text, final_url, start_url):
+                for priority, link in self._links(response.text, raw_final_url, start_url):
                     if link in visited or link in queued:
                         continue
                     sequence += 1
