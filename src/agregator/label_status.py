@@ -34,11 +34,15 @@ class SamplingManifestStatus:
     seed: str | None = None
     strategy: str | None = None
     file_count: int = 0
+    sampled_rows_by_name: dict[str, int] | None = None
+    matches_label_files: bool | None = None
+    mismatches: tuple[str, ...] = ()
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["path"] = str(self.path)
+        payload["mismatches"] = list(self.mismatches)
         return payload
 
 
@@ -84,6 +88,8 @@ def build_label_bundle_status(label_dir: str | Path) -> LabelBundleStatus:
         for name, filename, label_field in _LABEL_FILES
     )
     sampling_manifest = _inspect_sampling_manifest(directory / "sampling_manifest.json")
+    if sampling_manifest.valid:
+        sampling_manifest = _compare_sampling_manifest_to_labels(sampling_manifest, files)
 
     total_rows = sum(item.total_rows for item in files)
     labeled_rows = sum(item.labeled_rows for item in files)
@@ -106,6 +112,11 @@ def build_label_bundle_status(label_dir: str | Path) -> LabelBundleStatus:
     elif not sampling_manifest.valid:
         audit_warnings.append(
             f"invalid_sampling_manifest:{sampling_manifest.error or 'unknown_error'}"
+        )
+    elif sampling_manifest.matches_label_files is False:
+        audit_warnings.extend(
+            f"sampling_manifest_row_mismatch:{item}"
+            for item in sampling_manifest.mismatches
         )
 
     return LabelBundleStatus(
@@ -232,6 +243,35 @@ def _inspect_sampling_manifest(path: Path) -> SamplingManifestStatus:
             error=f"missing_or_invalid:{','.join(missing)}",
         )
 
+    sampled_rows_by_name: dict[str, int] = {}
+    invalid_entries: list[str] = []
+    for index, item in enumerate(files):
+        if not isinstance(item, dict):
+            invalid_entries.append(str(index))
+            continue
+        name = str(item.get("name") or "").strip()
+        sampled_rows = item.get("sampled_rows")
+        if not name or isinstance(sampled_rows, bool) or not isinstance(sampled_rows, int):
+            invalid_entries.append(str(index))
+            continue
+        if sampled_rows < 0:
+            invalid_entries.append(str(index))
+            continue
+        sampled_rows_by_name[name] = sampled_rows
+
+    if invalid_entries:
+        return SamplingManifestStatus(
+            path=path,
+            exists=True,
+            valid=False,
+            schema_version=schema_version,
+            seed=seed,
+            strategy=strategy,
+            file_count=len(files),
+            sampled_rows_by_name=sampled_rows_by_name,
+            error=f"invalid_file_entries:{','.join(invalid_entries)}",
+        )
+
     return SamplingManifestStatus(
         path=path,
         exists=True,
@@ -240,6 +280,36 @@ def _inspect_sampling_manifest(path: Path) -> SamplingManifestStatus:
         seed=seed,
         strategy=strategy,
         file_count=len(files),
+        sampled_rows_by_name=sampled_rows_by_name,
+    )
+
+
+def _compare_sampling_manifest_to_labels(
+    manifest: SamplingManifestStatus,
+    files: tuple[LabelFileStatus, ...],
+) -> SamplingManifestStatus:
+    declared = manifest.sampled_rows_by_name or {}
+    mismatches: list[str] = []
+    for item in files:
+        expected = declared.get(item.name)
+        if expected is None:
+            mismatches.append(f"{item.name}:missing_in_manifest")
+            continue
+        if item.exists and item.error is None and expected != item.total_rows:
+            mismatches.append(f"{item.name}:expected={expected}:actual={item.total_rows}")
+
+    return SamplingManifestStatus(
+        path=manifest.path,
+        exists=manifest.exists,
+        valid=manifest.valid,
+        schema_version=manifest.schema_version,
+        seed=manifest.seed,
+        strategy=manifest.strategy,
+        file_count=manifest.file_count,
+        sampled_rows_by_name=manifest.sampled_rows_by_name,
+        matches_label_files=not mismatches,
+        mismatches=tuple(mismatches),
+        error=manifest.error,
     )
 
 
