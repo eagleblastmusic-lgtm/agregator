@@ -88,6 +88,10 @@ def test_benchmark_report_counts_pipeline_outputs(tmp_path: Path) -> None:
     assert report.website_find_rate == 1.0
     assert report.green_company_rate == 1.0
     assert report.source_job_counts == {"source-a": 1, "source-b": 1}
+    assert report.company_resolution_counts == {
+        "exact_name_city": 1,
+        "new_company": 1,
+    }
 
 
 def test_export_green_channels_json_and_csv(tmp_path: Path) -> None:
