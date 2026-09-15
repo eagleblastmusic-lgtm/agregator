@@ -12,7 +12,7 @@ from .company_websites import init_company_website_candidate_schema
 from .employer_score import rank_companies
 from .storage import SQLiteStore
 
-EXPORT_SCHEMA_VERSION = "4"
+EXPORT_SCHEMA_VERSION = "5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +222,8 @@ def export_dataset_bundle(
                     w.outcome,
                     w.website_url,
                     w.website_confidence,
+                    w.resolution_origin,
+                    w.resolution_source,
                     w.verification_signals_json,
                     w.search_candidates_json,
                     w.website_attempts_json,
@@ -310,6 +312,9 @@ def export_dataset_bundle(
             ),
             "company_website_candidates": (
                 "source-provided website leads with provenance; each requires identity verification"
+            ),
+            "website_resolution_origin": (
+                "structured final origin: source_candidate, search or known_url with provenance"
             ),
             "employer_discovery_score": (
                 "0-100 prioritization score; separate from identity/contact confidence"
@@ -455,6 +460,8 @@ def _website_verification_fields() -> list[str]:
         "outcome",
         "website_url",
         "website_confidence",
+        "resolution_origin",
+        "resolution_source",
         "verification_signals_json",
         "search_candidates_json",
         "website_attempts_json",
