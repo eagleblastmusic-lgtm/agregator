@@ -101,7 +101,35 @@ jobs:
         if: always()
         shell: bash
         run: |
-          code="$(cat "p10-public/${{ matrix.source }}/exit_code.txt" 2>/dev/null || echo 1)"
+          root="p10-public/${{ matrix.source }}"
+          code="$(cat "$root/exit_code.txt" 2>/dev/null || echo 1)"
+          state="$(python - "$root/validation.json" "${{ matrix.source }}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          source = sys.argv[2]
+          state = "unknown"
+          if path.exists():
+              try:
+                  payload = json.loads(path.read_text(encoding="utf-8"))
+                  row = next(
+                      (item for item in payload.get("sources", []) if item.get("source") == source),
+                      None,
+                  )
+                  if row:
+                      state = str(row.get("state", "unknown"))
+              except Exception:
+                  pass
+          print(state)
+          PY
+          )"
+          echo "${{ matrix.source }} state: $state"
+          if [[ "$state" == "access_blocked" ]]; then
+            echo "Access is blocked by the source; preserving as P10 access_blocked, not parser failure."
+            exit 0
+          fi
           if [[ "$code" != "0" ]]; then
             echo "${{ matrix.source }} smoke failed with exit code $code"
             exit "$code"
@@ -134,13 +162,30 @@ jobs:
               try:
                   payload = json.loads(result_path.read_text(encoding="utf-8"))
               except Exception as exc:
-                  rows.append({"source": source, "status": "invalid_result", "error": str(exc)})
+                  rows.append({"source": source, "state": "invalid_result", "error": str(exc)})
                   continue
               item = (payload.get("results") or [{}])[0]
+              state = str(item.get("status", "unknown"))
+              validation_path = result_path.parent / "validation.json"
+              if validation_path.exists():
+                  try:
+                      validation = json.loads(validation_path.read_text(encoding="utf-8"))
+                      validation_row = next(
+                          (
+                              row
+                              for row in validation.get("sources", [])
+                              if row.get("source") == source
+                          ),
+                          None,
+                      )
+                      if validation_row:
+                          state = str(validation_row.get("state", state))
+                  except Exception:
+                      pass
               rows.append(
                   {
                       "source": source,
-                      "status": item.get("status", "unknown"),
+                      "state": state,
                       "jobs_seen": item.get("jobs_seen", 0),
                       "jobs_inserted": item.get("jobs_inserted", 0),
                       "companies_created": item.get("companies_created", 0),
@@ -150,8 +195,15 @@ jobs:
 
           payload = {
               "sources": rows,
-              "successful": [row["source"] for row in rows if row["status"] == "success"],
-              "failed": [row["source"] for row in rows if row["status"] != "success"],
+              "healthy": [row["source"] for row in rows if row["state"] == "healthy"],
+              "access_blocked": [
+                  row["source"] for row in rows if row["state"] == "access_blocked"
+              ],
+              "failing": [
+                  row["source"]
+                  for row in rows
+                  if row["state"] not in {"healthy", "access_blocked"}
+              ],
           }
           Path("p10-public-summary.json").write_text(
               json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
@@ -161,16 +213,17 @@ jobs:
           lines = [
               "## P10 public source matrix smoke",
               "",
-              f"- Successful: `{len(payload['successful'])}`",
-              f"- Failed: `{len(payload['failed'])}`",
+              f"- Healthy: `{len(payload['healthy'])}`",
+              f"- Access blocked: `{len(payload['access_blocked'])}`",
+              f"- Failing: `{len(payload['failing'])}`",
               "",
-              "| Source | Status | Seen | Inserted | Companies | Error |",
+              "| Source | State | Seen | Inserted | Companies | Error |",
               "|---|---|---:|---:|---:|---|",
           ]
           for row in rows:
               error = str(row.get("error", "")).replace("|", "\\|").replace("\n", " ")
               lines.append(
-                  f"| {row['source']} | {row['status']} | {row.get('jobs_seen', 0)} | "
+                  f"| {row['source']} | {row['state']} | {row.get('jobs_seen', 0)} | "
                   f"{row.get('jobs_inserted', 0)} | {row.get('companies_created', 0)} | {error} |"
               )
           summary = "\n".join(lines) + "\n"
