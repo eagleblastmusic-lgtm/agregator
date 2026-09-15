@@ -1,21 +1,36 @@
 # Faro Employer Discovery Engine — implementation status
 
-Aktualny zakres PR obejmuje M0–M3 oraz warstwę pomiarową potrzebną do kontrolowanego benchmarku: enrichment kontaktów, agregację ofert, Company Resolution, dwuetapową weryfikację oficjalnej strony WWW i ręcznie etykietowane quality gates.
+Aktualny zakres PR obejmuje M0–M3, fundamenty M4 oraz warstwę pomiarową potrzebną do kontrolowanego benchmarku: enrichment kontaktów, agregację ofert, Company Resolution, dwuetapową weryfikację oficjalnej strony WWW, audyt provenance i ręcznie etykietowane quality gates.
 
 Szczegółowy plan i checkpointy: [`PLAN.md`](PLAN.md).
 
 ## Gotowe baseline'y
 
 - M0: crawler + evidence + GREEN/REVIEW/IGNORE.
-- M1: OLX, Jooble, Adzuna, source registry, resumowalne runy, katalog 91 źródeł, benchmark i pełny bundle eksportowy dla Faro.
+- M1: OLX, Jooble, Adzuna, source registry, resumowalne runy, katalog 91 źródeł, pełny bundle eksportowy dla Faro oraz kontrolowany `benchmark-collect` round-robin.
 - M2: konserwatywny Company Resolution v1, aliasy/lokalizacje, metody/confidence, ground truth, pairwise precision/recall/F1, fuzzy REVIEW bez automatycznego merge.
-- M3: ranking wyników wyszukiwarki + first-party content verification z fallbackiem do kolejnych kandydatów.
+- M3: ranking wyników wyszukiwarki + first-party content verification z fallbackiem do kolejnych kandydatów, JSON-LD Organization oraz zapis każdej próby weryfikacji kandydata.
+- M4 foundations: `sitemap.xml`, priorytety podstron współpracy/B2B, typowe obfuskowane e-maile, formularze ze zgodą na informacje handlowe, append-only evidence snapshots z SHA-256.
 - Quality benchmark: osobne ground truth i ewaluatory dla Company Resolution, wyboru oficjalnej domeny oraz klasyfikacji kontaktów.
+- Employer Discovery Score: niezależny od confidence ranking firm na podstawie liczby ofert, liczby źródeł, zweryfikowanej WWW, strony biznesowej, GREEN channel i jakości identity.
+
+## Kontrolowany benchmark
+
+```bash
+agregator benchmark-collect \
+  --db agregator.sqlite3 \
+  --sources olx,jooble,adzuna \
+  --target-jobs 1000 \
+  --max-rounds 100
+
+agregator benchmark --db agregator.sqlite3
+```
+
+`benchmark-collect` działa round-robin i daje każdemu aktywnemu źródłu najwyżej jedną stronę na rundę. Źródła bez wymaganej konfiguracji są wyłączane, a powtarzające się błędy runtime mają limit. `benchmark` raportuje także `source_run_metrics`: success rate, strony, oferty, insert/update, utworzone firmy i czas per source.
 
 ## Kluczowe komendy jakościowe
 
 ```bash
-agregator benchmark --db agregator.sqlite3
 agregator resolution-review --db agregator.sqlite3 --min-score 0.82 --limit 100
 
 agregator export-quality-labels \
@@ -61,6 +76,33 @@ Domyślne progi `quality-gate` to:
 
 Progi są parametrami CLI i przed zamrożeniem produkcyjnym powinny zostać potwierdzone na realnym, ręcznie oznaczonym benchmarku.
 
+## Audit trail i eksport Faro
+
+Każdy enrichment zapisuje append-only `website_verification_runs`, również gdy żaden kandydat nie został zaakceptowany. Rekord przechowuje ranking wyszukiwarki, wszystkie rzeczywiście sprawdzone kandydaty wraz z wynikiem weryfikacji, sygnały, odwiedzone strony i finalny confidence.
+
+Kontaktowe evidence jest snapshotowane do `contact_evidence_snapshots`. Każdy snapshot ma pełny tekst dowodu, URL, signal, timestamp i SHA-256; identyczny snapshot nie jest dublowany.
+
+`export-dataset` schema v2 eksportuje:
+
+- `companies.csv`,
+- `job_postings.csv`,
+- `contact_channels.csv`,
+- `website_verification_runs.csv`,
+- `contact_evidence_snapshots.csv`,
+- `manifest.json`.
+
+## M4 — wdrożone fundamenty crawler/classifier v2
+
+- `sitemap.xml` i ograniczona obsługa sitemap index,
+- priorytety `/kontakt`, `/wspolpraca`, `/partnerzy`, `/b2b`, `/dla-firm`, `/dostawcy`, `/franczyza`,
+- rekonstrukcja publicznych adresów typu `wspolpraca [at] firma [dot] pl` i `partnerzy (małpa) firma.pl`,
+- wykrywanie formularzy z checkboxem/frazą zgody na informacje handlowe jako `SALES / REVIEW`, nigdy automatycznie GREEN,
+- JSON-LD `Organization`/`Corporation`/`LocalBusiness` jako dodatkowy sygnał tożsamości oficjalnej WWW,
+- trwały audit trail prób weryfikacji WWW,
+- immutable evidence hash dla znalezionych kanałów.
+
+M4 nie jest jeszcze zamknięte. Do dalszego rozwinięcia pozostają m.in. bogatsza semantyka formularzy, dodatkowe warianty obfuskacji, snapshot/hash całych stron oraz kalibracja classifiera na realnym ground truth.
+
 ## Cel najbliższego benchmarku
 
 Próbka 1000 ofert ma dostarczyć danych do kalibracji:
@@ -70,12 +112,14 @@ Próbka 1000 ofert ma dostarczyć danych do kalibracji:
 - precision/recall wyboru oficjalnej domeny,
 - udziału firm z poprawnym enrichmentem,
 - jakości GREEN/REVIEW/IGNORE,
+- rozkładu Employer Discovery Score,
 - kosztu/czasu per źródło i per firma.
 
 ## Granice automatyzacji
 
 - fuzzy podobieństwo nazw nie scala firm automatycznie,
 - domena WWW jest mocnym sygnałem REVIEW, ale auto-merge wymaga wcześniejszej walidacji na ground truth,
+- formularz ze zgodą marketingową jest sygnałem REVIEW, a nie zgodą na automatyczny outreach,
 - quality gate nie zastępuje ręcznego labelingu — mierzy jakość względem etykiet,
 - źródła partnerskie/API nie są zastępowane obchodzeniem uwierzytelniania lub zabezpieczeń,
 - outreach pozostaje poza zakresem repo.
