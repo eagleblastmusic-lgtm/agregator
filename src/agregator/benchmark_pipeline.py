@@ -10,6 +10,7 @@ from .audit_export import WebsiteSnapshotExportResult
 from .benchmark_runner import BenchmarkCollectionResult, collect_benchmark
 from .dataset_export import DatasetExportResult, export_dataset_bundle
 from .enrich import EnrichmentStats, enrich_pending_companies
+from .label_sampling import DEFAULT_SAMPLING_SEED
 from .pipeline import EmployerDiscoveryPipeline
 from .quality_labels import QualityLabelBundle, export_quality_label_bundle
 from .reporting import BenchmarkReport, build_benchmark_report
@@ -119,6 +120,7 @@ async def run_benchmark_pipeline(
     job_label_limit: int = 1000,
     company_label_limit: int = 1000,
     contact_label_limit: int = 1000,
+    label_sampling_seed: str = DEFAULT_SAMPLING_SEED,
 ) -> BenchmarkPipelineResult:
     """Run the reproducible Faro benchmark workflow from collection to label bundle.
 
@@ -134,6 +136,9 @@ async def run_benchmark_pipeline(
         raise ValueError("max_enrichment_companies must be >= 1")
     if not 0.0 <= min_identity_confidence <= 1.0:
         raise ValueError("min_identity_confidence must be between 0 and 1")
+    normalized_sampling_seed = label_sampling_seed.strip()
+    if not normalized_sampling_seed:
+        raise ValueError("label_sampling_seed cannot be empty")
 
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
@@ -174,11 +179,12 @@ async def run_benchmark_pipeline(
         job_limit=job_label_limit,
         company_limit=company_label_limit,
         contact_limit=contact_label_limit,
+        sampling_seed=normalized_sampling_seed,
     )
     readiness = _build_readiness(collection, enrichment)
 
     manifest = {
-        "schema_version": "3",
+        "schema_version": "4",
         "created_at": datetime.now(UTC).isoformat(),
         "database": str(store.path),
         "configuration": {
@@ -194,6 +200,7 @@ async def run_benchmark_pipeline(
             "job_label_limit": job_label_limit,
             "company_label_limit": company_label_limit,
             "contact_label_limit": contact_label_limit,
+            "label_sampling_seed": normalized_sampling_seed,
         },
         "collection": collection.to_dict(),
         "enrichment": enrichment.to_dict(),
@@ -209,6 +216,7 @@ async def run_benchmark_pipeline(
             "dataset_dir": "dataset",
             "website_page_snapshots": "dataset/website_page_snapshots.csv",
             "labels_dir": "labels",
+            "label_sampling_manifest": "labels/sampling_manifest.json",
         },
     }
     _write_json(run_manifest_path, manifest)
