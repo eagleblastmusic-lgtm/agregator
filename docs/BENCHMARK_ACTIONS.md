@@ -8,6 +8,8 @@ Repo zawiera manualny workflow:
 
 Workflow **nie uruchamia się automatycznie** na push/PR ani według harmonogramu. Jest dostępny wyłącznie przez `workflow_dispatch`, dzięki czemu pełny benchmark i potencjalnie płatne API nie są wywoływane przypadkowo.
 
+Przed nim zalecany jest tańszy collection-only smoke opisany w [`COLLECTION_SMOKE.md`](COLLECTION_SMOKE.md).
+
 ## Kiedy użyć
 
 Po merge workflow do gałęzi domyślnej i po skonfigurowaniu wymaganych GitHub Actions Secrets można uruchomić kontrolowany benchmark bez przygotowywania lokalnego środowiska Python.
@@ -25,7 +27,7 @@ label_sampling_seed=faro-ground-truth-v1
 
 ## Klasy dostępu źródeł
 
-`SourceRegistry` zapisuje teraz również `access_mode`, flagę `experimental` i opcjonalną notatkę operacyjną. Obecne klasy:
+`SourceRegistry` zapisuje `access_mode`, `experimental` i opcjonalną notatkę operacyjną:
 
 ```text
 jooble     -> partner_api
@@ -35,31 +37,11 @@ epraca     -> official_partner_feed
 olx        -> public_web_endpoint + experimental
 ```
 
-Adapter OLX korzystający z publicznego endpointu odczytowego nie jest traktowany jako stabilny kontrakt partnerskiego API. Dlatego kontrolowany benchmark **nie użyje go bez jawnego opt-in**.
+Aktualny adapter OLX nie jest traktowany jako stabilny kontrakt partnerskiego API, dlatego kontrolowany benchmark nie użyje go bez jawnego opt-in `--allow-experimental-sources`. W GitHub Actions odpowiada za to boolean `allow_experimental_sources`, domyślnie `false`.
 
-Lokalnie:
+## Secrets i variables
 
-```bash
-agregator-benchmark preflight \
-  --sources olx \
-  --allow-experimental-sources \
-  --strict
-```
-
-oraz przy właściwym runie:
-
-```bash
-agregator-benchmark run \
-  --sources olx \
-  --allow-experimental-sources \
-  ...
-```
-
-W GitHub Actions odpowiada za to boolean `allow_experimental_sources`. Domyślnie jest `false`.
-
-## Secrets
-
-Workflow przekazuje do procesu tylko standardowe zmienne konfiguracyjne używane przez aplikację:
+Secrets:
 
 ```text
 BRAVE_SEARCH_API_KEY
@@ -73,9 +55,17 @@ CAREERJET_USER_AGENT
 EPRACA_PARTNER
 ```
 
-Należy skonfigurować wyłącznie sekrety potrzebne dla źródeł wybranych w `sources`. `BRAVE_SEARCH_API_KEY` jest wymagany przez pełny enrichment/search benchmark.
+Dla ePraca zakres można skonfigurować jako GitHub repository variables:
 
-Workflow nie wypisuje wartości sekretów. Pierwszym krokiem merytorycznym jest `agregator-benchmark preflight --strict`; jeśli wybrane źródło nie ma wymaganej konfiguracji lub źródło eksperymentalne nie zostało jawnie zaakceptowane, właściwy benchmark nie startuje.
+```text
+EPRACA_WOJEWODZTWO
+EPRACA_JEDNOSTKA
+EPRACA_ALL
+```
+
+Należy ustawić prawidłowy, jawny scope zgodny z adapterem. `BRAVE_SEARCH_API_KEY` jest wymagany przez pełny enrichment/search benchmark, ale nie przez osobny collection smoke.
+
+Workflow nie wypisuje wartości sekretów. `agregator-benchmark preflight --strict` blokuje run przy brakującej konfiguracji lub niezaakceptowanym źródle eksperymentalnym.
 
 ## Przebieg
 
@@ -86,12 +76,12 @@ manual dispatch
 install
    │
    ▼
-initialize benchmark workspace
+initialize workspace
    │
    ▼
 preflight --strict
    │
-   ├── FAIL -> zapisz preflight.json + exit code -> artifact -> FAIL workflow
+   ├── FAIL -> preflight.json + artifact + FAIL
    │
    └── PASS
           │
@@ -102,15 +92,39 @@ controlled benchmark --strict
 source diagnostics
           │
           ▼
+GitHub Step Summary
+          │
+          ▼
 upload workspace artifact
           │
           ▼
 enforce exit code
 ```
 
-Workspace jest inicjalizowany **przed** preflightem. Dzięki temu nawet błąd konfiguracji pozostawia audytowalny artifact z `preflight.json`, `preflight_exit_code.txt` i informacją, że właściwy run został pominięty.
+Workspace jest inicjalizowany przed preflightem. Dzięki temu nawet błąd konfiguracji pozostawia audytowalny artifact z `preflight.json`, kodem wyjścia i informacją o pominięciu właściwego runu.
 
-Sam run benchmarku zapisuje swój kod wyjścia do `benchmark/exit_code.txt`. Standardowy JSON zwracany przez CLI trafia do `benchmark/run_result.json`; właściwe dane benchmarku są nadal zapisywane w `benchmark/run/` przez samą aplikację.
+`benchmark/run_result.json` zawiera standardowy JSON zwracany przez CLI, a `benchmark/run/` zawiera właściwy workspace benchmarku.
+
+## GitHub Step Summary
+
+Workflow generuje czytelne podsumowanie bez wypisywania sekretów. Pokazuje m.in.:
+
+```text
+preflight ready
+search provider ready
+collection target reached
+jobs collected
+companies
+companies enriched
+websites found
+GREEN channels
+ready_for_manual_labeling
+readiness blockers
+```
+
+Jeżeli powstały source diagnostics, summary dodaje tabelę per źródło z liczbą ofert/firm, średnim confidence nazwy i Company Resolution oraz city coverage.
+
+To jest szybki widok operacyjny; pełnym źródłem audytowym pozostają JSON-y, SQLite i eksporty w artifact.
 
 ## Source diagnostics
 
@@ -121,61 +135,30 @@ agregator-benchmark source-diagnostics \
   --db benchmark/benchmark.sqlite3
 ```
 
-Wynik trafia do:
+Wynik trafia do `benchmark/source_diagnostics.json`.
 
-```text
-benchmark/source_diagnostics.json
-```
+Sekcja `identity` opisuje jakość rekordów ofertowych per źródło, m.in. confidence nazwy firmy, Company Resolution i coverage miasta/opisu.
 
-Sekcja `identity` opisuje jakość rekordów ofertowych per źródło, m.in. confidence nazwy firmy, confidence Company Resolution, coverage miasta/opisu i rozkład metod resolution.
-
-Sekcja `provenance` odpowiada na inne pytanie: **które źródło faktycznie dostarczyło jawne dane pracodawcy**, np. NIP/REGON lub kandydat oficjalnej strony WWW. W tym celu silnik utrzymuje osobne observation tables:
+Sekcja `provenance` pokazuje, które źródło faktycznie dostarczyło jawne dane pracodawcy, np. NIP/REGON lub kandydaturę oficjalnej WWW. Wykorzystuje:
 
 ```text
 company_identifier_observations
 company_website_candidate_observations
 ```
 
-Każda obserwacja zachowuje jednocześnie:
-
-```text
-job_source
-+ evidence_source
-+ company_id
-+ wartość / URL
-+ confidence
-+ observation_count
-```
-
-Dzięki temu, jeśli dwie integracje dostarczą ten sam NIP lub tę samą stronę firmy, obie dostają własny credit w diagnostyce. Nie trzeba zgadywać źródła na podstawie ogólnego pola typu `official_feed.nip`.
-
-Przykładowe metryki provenance per źródło:
-
-```text
-identifier_observations
-identifiers
-companies_with_identifiers
-identifier_company_rate
-identifier_kinds
-identifier_evidence_sources
-website_candidate_observations
-website_candidates
-companies_with_website_candidates
-website_candidate_company_rate
-website_evidence_sources
-```
-
-To nadal nie jest jeden arbitralny `Source Value Score`. Po realnym benchmarku wolumen, exclusivity/overlap, identity quality, jawne employer evidence, stabilność i koszt runtime powinny być analizowane osobno.
+Każda obserwacja zachowuje `job_source + evidence_source + company_id + wartość/URL + confidence + observation_count`. Jeśli dwie integracje dostarczą ten sam NIP/WWW, obie zachowują własny provenance.
 
 ## Artifact
 
-Artifact ma nazwę:
+Artifact:
 
 ```text
 faro-controlled-benchmark-<github.run_id>
 ```
 
-oraz retencję 14 dni. Obejmuje katalog `benchmark/`, czyli zależnie od etapu m.in.:
+Retencja: 14 dni.
+
+Typowa zawartość:
 
 ```text
 preflight.json
@@ -193,9 +176,7 @@ run/dataset/*
 run/labels/*
 ```
 
-`run_skipped.txt` występuje tylko wtedy, gdy preflight nie przeszedł. `run_result.json` i katalog `run/` powstają dopiero po wejściu we właściwy benchmark. `source_diagnostics.json` powstaje, jeśli baza benchmarkowa została utworzona.
-
-Baza i eksport zawierają dane pozyskane podczas benchmarku, dlatego artefaktu nie należy traktować jako pliku do publicznego rozpowszechniania bez wcześniejszego przeglądu danych i warunków źródeł.
+`run_skipped.txt` występuje tylko po nieudanym preflight. Baza i eksport zawierają dane pozyskane podczas benchmarku, dlatego artifactu nie należy publicznie rozpowszechniać bez przeglądu danych i warunków źródeł.
 
 ## Uruchomienie w UI GitHub
 
@@ -209,17 +190,23 @@ Actions
   -> Run workflow
 ```
 
-Przed pierwszym pełnym runem warto uruchomić lokalny `agregator-benchmark preflight` lub zweryfikować konfigurację Secrets, aby nie zużywać czasu runnera na oczywisty błąd konfiguracji.
+Zalecana kolejność przed pierwszym pełnym runem:
+
+```text
+Collection Smoke
+  -> PASS
+  -> Controlled Benchmark
+```
 
 ## Bezpieczeństwo operacyjne
 
-- workflow ma tylko `contents: read`,
-- nie wykonuje outreachu,
-- nie zapisuje wartości sekretów do generowanych plików,
-- nie uruchamia się automatycznie,
-- właściwy benchmark jest blokowany po nieudanym preflight,
+- `contents: read`,
+- brak outreachu,
+- brak wartości sekretów w generowanych raportach/summary,
+- brak automatycznego uruchamiania,
+- benchmark blokowany po failed preflight,
 - źródła eksperymentalne wymagają jawnego opt-in,
-- artifact powstaje również dla nieudanego preflightu lub niekompletnego strict runu,
+- artifact powstaje również dla failed preflight/strict runu,
 - concurrency blokuje dwa równoległe pełne benchmarki,
-- limit joba to 180 minut,
-- brakujące autoryzacje nie są zastępowane scrapingiem obchodzącym kontrolę dostępu.
+- limit joba 180 minut,
+- brakujące autoryzacje nie są zastępowane obchodzeniem kontroli dostępu.
