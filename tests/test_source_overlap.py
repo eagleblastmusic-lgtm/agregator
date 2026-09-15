@@ -93,6 +93,15 @@ def test_source_overlap_report_measures_pairwise_jaccard_without_double_counting
     assert report.cross_source_shared_fingerprints == 1
     assert report.cross_source_shared_fingerprint_rate == 0.3333
 
+    assert report.by_source["adzuna"].fingerprints == 2
+    assert report.by_source["adzuna"].exclusive_fingerprints == 1
+    assert report.by_source["adzuna"].shared_fingerprints == 1
+    assert report.by_source["adzuna"].exclusive_rate == 0.5
+    assert report.by_source["adzuna"].shared_rate == 0.5
+    assert report.by_source["jooble"].exclusive_fingerprints == 0
+    assert report.by_source["jooble"].shared_rate == 1.0
+    assert report.by_source["olx"].exclusive_fingerprints == 1
+
     olx_adzuna = report.pairwise["adzuna|olx"]
     assert olx_adzuna.source_a_fingerprints == 2
     assert olx_adzuna.source_b_fingerprints == 2
@@ -129,4 +138,7 @@ def test_source_overlap_report_is_empty_for_single_source(tmp_path: Path) -> Non
     assert report.unique_job_fingerprints == 1
     assert report.cross_source_shared_fingerprints == 0
     assert report.cross_source_shared_fingerprint_rate == 0.0
+    assert report.by_source["olx"].exclusive_fingerprints == 1
+    assert report.by_source["olx"].exclusive_rate == 1.0
+    assert report.by_source["olx"].shared_rate == 0.0
     assert report.pairwise == {}
