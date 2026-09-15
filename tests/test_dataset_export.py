@@ -16,6 +16,7 @@ from agregator.models import (
     DiscoveryResult,
     Evidence,
     JobPosting,
+    PageSnapshot,
     WebsiteResolutionOrigin,
 )
 from agregator.storage import SQLiteStore
@@ -79,6 +80,14 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
             )
         ],
         scanned_pages=["https://acme.test", "https://acme.test/partnerzy"],
+        page_snapshots=[
+            PageSnapshot(
+                url="https://acme.test",
+                status_code=200,
+                content_sha256="a" * 64,
+                text_excerpt="ACME Sp. z o.o. — kontakt dla partnerów",
+            )
+        ],
     )
     store.save_discovery_result(company_id, discovery)
     record_discovery_audit(store, company_id, discovery)
@@ -92,6 +101,8 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     assert result.contacts == 1
     assert result.website_verifications == 1
     assert result.evidence_snapshots == 1
+    assert result.website_snapshots.rows == 1
+    assert result.website_snapshots.parse_errors == 0
     assert result.companies_path.exists()
     assert result.jobs_path.exists()
     assert result.identifiers_path.exists()
@@ -99,6 +110,7 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     assert result.contacts_path.exists()
     assert result.website_verifications_path.exists()
     assert result.evidence_snapshots_path.exists()
+    assert result.website_snapshots.path.exists()
     assert result.manifest_path.exists()
 
     companies = result.companies_path.read_text(encoding="utf-8-sig")
@@ -108,6 +120,7 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     contacts = result.contacts_path.read_text(encoding="utf-8-sig")
     website_runs = result.website_verifications_path.read_text(encoding="utf-8-sig")
     snapshots = result.evidence_snapshots_path.read_text(encoding="utf-8-sig")
+    page_snapshots = result.website_snapshots.path.read_text(encoding="utf-8-sig")
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
 
     assert "ACME Sp. z o.o." in companies
@@ -125,7 +138,9 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     assert "source_candidate" in website_runs
     assert "fixture.website" in website_runs
     assert "content_sha256" in snapshots
-    assert manifest["schema_version"] == "5"
+    assert "ACME Sp. z o.o. — kontakt dla partnerów" in page_snapshots
+    assert "a" * 64 in page_snapshots
+    assert manifest["schema_version"] == "6"
     assert manifest["counts"] == {
         "companies": 1,
         "job_postings": 1,
@@ -134,4 +149,7 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
         "contact_channels": 1,
         "website_verification_runs": 1,
         "contact_evidence_snapshots": 1,
+        "website_page_snapshots": 1,
+        "website_page_snapshot_parse_errors": 0,
     }
+    assert manifest["files"]["website_page_snapshots"] == "website_page_snapshots.csv"
