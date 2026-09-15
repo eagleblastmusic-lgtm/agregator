@@ -63,10 +63,13 @@ async def collect_benchmark(
 ) -> BenchmarkCollectionResult:
     """Collect jobs round-robin until the database reaches the requested size.
 
-    Each active source receives at most one page per round. This avoids letting one
-    high-volume source dominate the benchmark before the remaining adapters are
-    exercised. Existing source cursors are honored unless ``fresh`` is requested.
-    Persistently unavailable sources are disabled after a bounded number of errors.
+    Every active source gets at most one page per round, and a round is completed
+    before the target-size stop condition is evaluated. This keeps one high-volume
+    source from ending a round before the remaining configured adapters have been
+    exercised. The resulting row count may therefore overshoot ``target_jobs`` by
+    the final round. Existing source cursors are honored unless ``fresh`` is
+    requested. Persistently unavailable sources are disabled after a bounded
+    number of errors.
     """
 
     store.init_schema()
@@ -139,10 +142,6 @@ async def collect_benchmark(
             source_stats.companies_created += result.stats.companies_created
             if result.next_cursor is None:
                 source_stats.exhausted = True
-
-            if _count(store, "job_postings") >= target_jobs:
-                stopped_reason = "target_reached"
-                break
 
         jobs_after_round = _count(store, "job_postings")
         if jobs_after_round >= target_jobs:
