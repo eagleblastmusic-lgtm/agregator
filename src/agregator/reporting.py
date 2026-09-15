@@ -26,6 +26,7 @@ class BenchmarkReport:
     green_company_rate: float
     source_job_counts: dict[str, int]
     company_resolution_counts: dict[str, int]
+    source_run_metrics: dict[str, dict[str, int | float]]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -99,11 +100,41 @@ def build_benchmark_report(
             ORDER BY jobs DESC, method ASC
             """
         ).fetchall()
+        run_rows = connection.execute(
+            """
+            SELECT
+                source,
+                COUNT(*) AS runs_total,
+                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successful_runs,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_runs,
+                SUM(pages_processed) AS pages_processed,
+                SUM(jobs_seen) AS jobs_seen,
+                SUM(jobs_inserted) AS jobs_inserted,
+                SUM(jobs_updated) AS jobs_updated,
+                SUM(companies_created) AS companies_created,
+                AVG(
+                    CASE WHEN finished_at IS NOT NULL THEN
+                        (julianday(finished_at) - julianday(started_at)) * 86400.0
+                    END
+                ) AS avg_seconds_per_run,
+                SUM(
+                    CASE WHEN finished_at IS NOT NULL THEN
+                        (julianday(finished_at) - julianday(started_at)) * 86400.0
+                    ELSE 0
+                    END
+                ) AS total_seconds
+            FROM source_runs
+            GROUP BY source
+            ORDER BY source ASC
+            """
+        ).fetchall()
 
     source_job_counts = {str(row["source"]): int(row["jobs"]) for row in source_rows}
     company_resolution_counts = {
         str(row["method"]): int(row["jobs"]) for row in resolution_rows
     }
+    source_run_metrics = _source_run_metrics(run_rows)
+
     return BenchmarkReport(
         jobs_total=jobs_total,
         companies_total=companies_total,
@@ -120,6 +151,7 @@ def build_benchmark_report(
         green_company_rate=_ratio(green_companies, enriched_companies),
         source_job_counts=source_job_counts,
         company_resolution_counts=company_resolution_counts,
+        source_run_metrics=source_run_metrics,
     )
 
 
@@ -165,12 +197,43 @@ def export_green_channels(
     raise ValueError(f"unsupported export format: {export_format}")
 
 
+def _source_run_metrics(rows: list[Any]) -> dict[str, dict[str, int | float]]:
+    metrics: dict[str, dict[str, int | float]] = {}
+    for row in rows:
+        runs_total = int(row["runs_total"] or 0)
+        successful_runs = int(row["successful_runs"] or 0)
+        failed_runs = int(row["failed_runs"] or 0)
+        jobs_seen = int(row["jobs_seen"] or 0)
+        total_seconds = float(row["total_seconds"] or 0.0)
+        metrics[str(row["source"])] = {
+            "runs_total": runs_total,
+            "successful_runs": successful_runs,
+            "failed_runs": failed_runs,
+            "success_rate": _ratio(successful_runs, runs_total),
+            "pages_processed": int(row["pages_processed"] or 0),
+            "jobs_seen": jobs_seen,
+            "jobs_inserted": int(row["jobs_inserted"] or 0),
+            "jobs_updated": int(row["jobs_updated"] or 0),
+            "companies_created": int(row["companies_created"] or 0),
+            "avg_seconds_per_run": round(float(row["avg_seconds_per_run"] or 0.0), 4),
+            "total_seconds": round(total_seconds, 4),
+            "seconds_per_job_seen": _ratio_float(total_seconds, jobs_seen),
+        }
+    return metrics
+
+
 def _scalar(connection: Any, query: str, params: tuple[object, ...] = ()) -> int:
     row = connection.execute(query, params).fetchone()
     return int(row[0]) if row is not None else 0
 
 
 def _ratio(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round(numerator / denominator, 4)
+
+
+def _ratio_float(numerator: float, denominator: int) -> float:
     if denominator <= 0:
         return 0.0
     return round(numerator / denominator, 4)
