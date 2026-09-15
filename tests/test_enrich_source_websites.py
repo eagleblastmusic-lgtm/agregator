@@ -6,7 +6,12 @@ import pytest
 from agregator.company_websites import persist_job_company_website_candidates
 from agregator.crawler import CrawlPage
 from agregator.enrich import enrich_pending_companies
-from agregator.models import CompanyWebsiteCandidate, JobPosting, SearchCandidate
+from agregator.models import (
+    CompanyWebsiteCandidate,
+    JobPosting,
+    SearchCandidate,
+    WebsiteResolutionOrigin,
+)
 from agregator.pipeline import EmployerDiscoveryPipeline
 from agregator.search import StaticSearchProvider
 from agregator.storage import SQLiteStore
@@ -63,7 +68,7 @@ def _seed_company(store: SQLiteStore, candidate_url: str) -> int:
 async def test_enrichment_uses_verified_source_website_without_search(tmp_path: Path) -> None:
     source_url = "https://acme-logistics.test"
     store = SQLiteStore(tmp_path / "source-candidate.sqlite3")
-    _seed_company(store, source_url)
+    company_id = _seed_company(store, source_url)
     crawler = FakeCrawler(
         {
             source_url: [
@@ -95,6 +100,24 @@ async def test_enrichment_uses_verified_source_website_without_search(tmp_path: 
     assert crawler.calls == [source_url]
     company = store.list_companies()[0]
     assert company["website_url"] == source_url
+
+    with store.connect() as connection:
+        row = connection.execute(
+            """
+            SELECT resolution_origin, resolution_source, website_attempts_json
+            FROM website_verification_runs
+            WHERE company_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (company_id,),
+        ).fetchone()
+
+    assert row["resolution_origin"] == WebsiteResolutionOrigin.SOURCE_CANDIDATE.value
+    assert row["resolution_source"] == "official_feed.adresWww"
+    attempt = json.loads(row["website_attempts_json"])[0]
+    assert attempt["origin"] == WebsiteResolutionOrigin.SOURCE_CANDIDATE.value
+    assert attempt["source"] == "official_feed.adresWww"
 
 
 @pytest.mark.asyncio
@@ -150,7 +173,7 @@ async def test_enrichment_falls_back_to_search_after_bad_source_candidate(tmp_pa
     with store.connect() as connection:
         row = connection.execute(
             """
-            SELECT website_url, website_attempts_json
+            SELECT website_url, resolution_origin, resolution_source, website_attempts_json
             FROM website_verification_runs
             WHERE company_id = ?
             ORDER BY id DESC
@@ -160,9 +183,15 @@ async def test_enrichment_falls_back_to_search_after_bad_source_candidate(tmp_pa
         ).fetchone()
 
     assert row["website_url"] == official_url
+    assert row["resolution_origin"] == WebsiteResolutionOrigin.SEARCH.value
+    assert row["resolution_source"] == "search_provider"
     attempts = json.loads(row["website_attempts_json"])
     assert len(attempts) == 2
     assert attempts[0]["url"] == source_url
     assert attempts[0]["accepted"] is False
+    assert attempts[0]["origin"] == WebsiteResolutionOrigin.SOURCE_CANDIDATE.value
+    assert attempts[0]["source"] == "official_feed.adresWww"
     assert attempts[1]["url"] == official_url
     assert attempts[1]["accepted"] is True
+    assert attempts[1]["origin"] == WebsiteResolutionOrigin.SEARCH.value
+    assert attempts[1]["source"] == "search_provider"
