@@ -2,12 +2,12 @@
 
 ## 1. Cel produktu
 
-Faro jest wewnętrznym silnikiem, który ma odczytać możliwie szeroki zbiór publicznych ofert pracy z poznanych źródeł, zachować każdy rekord źródłowy, ustalić firmy stojące za ofertami, znaleźć ich oficjalne strony internetowe i wykryć publiczne kanały współpracy B2B.
+Faro jest wewnętrznym silnikiem, który ma odczytać szeroki zbiór publicznych ofert pracy z wybranych źródeł, zachować każdy rekord źródłowy, ustalić firmy stojące za ofertami, znaleźć ich oficjalne strony internetowe i wykryć publiczne kanały współpracy B2B.
 
 Końcowym artefaktem biznesowym jest **Excel: jedna firma = jeden wiersz**, ale dopiero po pełnym zachowaniu danych wejściowych.
 
 ```text
-WSZYSTKIE POZNANE ŹRÓDŁA PRACY
+WYBRANE ŹRÓDŁA PRACY
               │
               ▼
        SCRAPER / PUBLIC FEED
@@ -71,20 +71,20 @@ Repo nie wysyła wiadomości. Outreach pozostaje poza zakresem kolektora.
 P0  raw-data invariant / no cross-source dedup      DONE
 P1  master catalog 91                               DONE baseline
 P2  wspólny silnik publicznych scraperów            DONE baseline
-P3  rollout scraperów źródło po źródle              IN PROGRESS  ◀ TERAZ
+P3  rollout scraperów                               BASELINE DONE — 19 źródeł wystarcza
 P4  append-only raw database                        DONE baseline
 P5  Company Resolution / linking                    V1 DONE
 P6  official website resolution                     V1 DONE
 P7  first-party website crawler                     DONE baseline
-P8  contact intent classification                   DONE baseline
+P8  contact intent classification                   DONE + hardened
 P9  finalny Excel 1 firma = 1 wiersz                DONE baseline
-P10 quality control / benchmark                     infrastructure DONE
-P11 pełny resumowalny run wszystkich źródeł         PLANNED after wider coverage
+P10 quality control / real-source validation        IN PROGRESS  ◀ TERAZ
+P11 pełny resumowalny end-to-end run                DONE baseline
 ```
 
-## 5. P1/P3 — katalog i rollout źródeł
+## 5. P1/P3 — katalog i wybrany zestaw źródeł
 
-Master catalog zawiera **91 źródeł**:
+Master catalog nadal zawiera **91 źródeł**:
 
 ```text
 A0  14
@@ -93,7 +93,7 @@ B   24
 C   17
 ```
 
-Aktualnie mamy **19/91 adapterów**, więc **72 źródła pozostają**.
+Na obecny etap świadomie zatrzymujemy rollout na **19 zaimplementowanych adapterach**. Pozostałe 72 pozycje pozostają w katalogu jako przyszły backlog, ale **nie są bieżącym celem rozwoju**.
 
 ```text
 pracuj
@@ -119,9 +119,9 @@ adzuna
 
 Publiczne adaptery pozostają `experimental`, dopóki nie przejdą kontrolowanego realnego smoke oraz audytu pełnej paginacji i bieżących warunków źródła.
 
-### A0
+### HOLD
 
-Po wdrożeniu dozwolonych/publicznych ścieżek trzy A0 pozostają świadomie na `HOLD`:
+Trzy źródła pozostają świadomie bez obchodzenia ich ograniczeń:
 
 ```text
 Praca.pl       HOLD — potrzebne pozytywne rozstrzygnięcie warunków/uprawnienia
@@ -129,20 +129,9 @@ LinkedIn       HOLD — brak obchodzenia ograniczeń
 Indeed         HOLD — brak obchodzenia anty-bot/login
 ```
 
-### A1
+Dalsze zwiększanie liczby adapterów wraca do planu tylko wtedy, gdy realne dane pokażą istotną lukę w pokryciu firm. Bieżący priorytet to stabilność i jakość obecnych 19 źródeł.
 
-Rollout A1 jest rozpoczęty. Najnowsze adaptery:
-
-- `ngo` — publiczna kategoria NGO.pl z ofertami pracy/współpracy,
-- `aplikuj` — publiczny listing i paginacja Aplikuj.pl,
-- `theprotocol` — publiczny listing/detail theprotocol.it,
-- `bulldogjob` — publiczny listing i strony ofert Bulldogjob; pełne pokrycie dalszego ładowania/paginacji wymaga jeszcze realnego smoke,
-- `randstad` — publiczny listing Randstad Polska z jawną paginacją i stronami ofert; ukryty klient końcowy nie jest zgadywany, tylko oznaczany jako low-confidence agency fallback,
-- `manpower` — publiczna wyszukiwarka Manpower Polska i strony `/pl/job/<id>/<slug>`; ukryty klient końcowy również nie jest zgadywany, a dane oferty i provenance zostają zachowane.
-
-Następna kolejność: kolejne czytelne publiczne A1, źródła oficjalne/naukowe/BIP, serwisy agencji, a następnie B i C.
-
-Szczegółowy stan: `docs/SCRAPER_ROLLOUT.md`.
+Szczegółowy stan adapterów: `docs/SCRAPER_ROLLOUT.md`.
 
 ## 6. P2 — wspólny silnik scraperów
 
@@ -160,7 +149,7 @@ Szczegółowy stan: `docs/SCRAPER_ROLLOUT.md`.
 
 `SitemapHtmlJobSource` obsługuje jawne sitemap index/urlset, filtrowanie URL ofert, chunking i resumowalny cursor.
 
-Scraper-first CLI:
+Scraper-first CLI pozostaje dostępny do testów źródeł:
 
 ```bash
 agregator-scrape sources
@@ -171,7 +160,7 @@ agregator-scrape run \
   --db agregator.sqlite3
 ```
 
-`all` oznacza publiczne adaptery scraper/feed. `partner_api` nie jest automatycznie wybierane.
+`agregator-scrape --sources all` oznacza publiczne adaptery scraper/feed. Pełny P11 runner potrafi dodatkowo uruchamiać skonfigurowane źródła partnerskie.
 
 ## 7. P4 — pełna warstwa surowa
 
@@ -218,15 +207,19 @@ first-party identity verification
 
 Ranking wyszukiwarki nie jest dowodem. Oficjalna domena wymaga weryfikacji first-party.
 
+`BRAVE_SEARCH_API_KEY` jest opcjonalny dla seryjnego enrichmentu. Jeżeli portal pracy podał kandydaturę oficjalnej WWW, system najpierw weryfikuje ją bez zewnętrznego SearchProvider. Brak wyszukiwarki jest raportowany jako `search_skipped`, a nie błąd całej firmy.
+
 ## 10. P7/P8 — crawler firmy i klasyfikacja kontaktu
 
-Crawler przegląda publiczne first-party strony, m.in. `/`, `/kontakt`, `/wspolpraca`, `/partnerzy`, `/b2b`, `/dla-firm`, `/dostawcy`, `/franczyza` oraz sitemapę.
+Crawler przegląda publiczne first-party strony, m.in. `/`, `/kontakt`, `/wspolpraca`, `/partnerzy`, `/b2b`, `/dla-firm`, `/dostawcy`, `/supplier`, `/vendor`, `/procurement`, `/sales` i `/franczyza` oraz sitemapę.
 
 Klasyfikacja:
 
 - **GREEN** — wyraźny publiczny kontekst współpracy/partnerstwa/ofert handlowych,
 - **REVIEW** — ogólny kontakt biznesowy/handlowy wymagający oceny,
 - **IGNORE** — recruitment/HR, support, privacy, zakaz ofert lub brak właściwego kontekstu.
+
+System rozpoznaje również semantykę formularzy, checkboxy informacji handlowych, CTA typu „Zostań partnerem” / „Nawiąż współpracę” oraz istotne nazwy skrzynek. Kontekst recruitment/support/privacy ma pierwszeństwo nad samą nazwą mailboxa.
 
 `GREEN` jest kwalifikacją relevance/context, nie automatyczną opinią prawną o zgodzie na dowolny marketing.
 
@@ -242,7 +235,9 @@ Finalny widok ma **1 firmę = 1 wiersz** i zawiera m.in. firmę, miasto, WWW, kw
 
 Surowe rekordy z portali pozostają nietknięte.
 
-## 12. P10 — kontrola jakości
+## 12. P10 — kontrola jakości i real-source validation
+
+To jest bieżący etap prac.
 
 Początkowe progi jakości:
 
@@ -252,54 +247,75 @@ Website Resolution F1 >= 0.95
 Contact decision macro F1 >= 0.90
 ```
 
-Benchmark jest kontrolą jakości, a nie blokadą przed dodawaniem kolejnych publicznie/dozwolenie dostępnych scraperów.
+Obok metryk ground truth kontrolujemy teraz przede wszystkim:
+
+- realny smoke każdego z 19 adapterów,
+- pełność paginacji/cursorów,
+- udział ofert z poprawnie rozpoznaną firmą,
+- udział firm z wiarygodnie zweryfikowaną oficjalną WWW,
+- precision sygnałów `GREEN`,
+- przyczyny `REVIEW` i `IGNORE`,
+- historyczny source health i regresje źródeł.
+
+Benchmark jest kontrolą jakości. Na tym etapie nie rozszerzamy liczby źródeł tylko po to, aby zwiększyć coverage katalogu.
 
 ## 13. P11 — pełne resumowalne uruchomienie
 
-Docelowo jeden run wykonuje:
+Status: **DONE baseline**.
+
+Jeden run wykonuje:
 
 ```text
-1. wszystkie aktywne scrapery
+1. aktywne/skonfigurowane źródła
 2. append-only zapis każdej obserwacji
 3. aktualizacja current source state
 4. Company Resolution/linking
-5. zebranie wszystkich employer clues
+5. zebranie employer clues
 6. official website verification
 7. first-party contact crawl
 8. GREEN / REVIEW / IGNORE
 9. Excel one-company-per-row
-10. raport source health i błędów
+10. bieżący + historyczny source health i błędy
 ```
 
-Awaria jednego portalu nie może niszczyć danych z pozostałych źródeł.
+Uruchomienie:
+
+```bash
+agregator-run run \
+  --sources all \
+  --pages-per-source 1 \
+  --enrichment-limit 100 \
+  --db agregator.sqlite3 \
+  --output export/faro_firmy_kontakt.xlsx
+```
+
+Brakujące poświadczenia opcjonalnego partner API dają `skipped`, nie `failed`. Awaria jednego uruchomionego portalu nie niszczy danych z pozostałych źródeł. Source cursors i `enriched_at` zapewniają resume.
+
+Szczegóły: `docs/P11_WORKFLOW.md`.
 
 ## 14. Co robimy teraz
 
 ```text
-P0 raw-data invariant                         DONE
+P0–P2 fundament danych i scraper engine             DONE
  │
  ▼
-P1 master catalog 91                         DONE baseline
+P3 19 wybranych adapterów                           BASELINE DONE
  │
  ▼
-P2 generic public scraper engine             DONE baseline
+P4–P9 pełny pipeline firma -> WWW -> kontakt -> XLSX DONE baseline
  │
  ▼
-P3 scraper rollout                           ◀ TERAZ
- │   ├── A0 public/dozwolone ścieżki
- │   ├── KPRM + OfertyPracy.edu.pl
- │   ├── NGO.pl + Aplikuj.pl
- │   ├── theprotocol + Bulldogjob
- │   ├── Randstad + Manpower
- │   └── dalsze A1 -> B -> C
- ▼
-P4–P9 utrzymywać i wzmacniać istniejący pipeline
+P11 resumowalny end-to-end runner                   DONE baseline
  │
  ▼
-P10 real quality checks na rosnącym zbiorze
- │
+P10 real-source validation / quality                ◀ TERAZ
+ │   ├── smoke 19 źródeł
+ │   ├── source health i regresje
+ │   ├── jakość Company Resolution
+ │   ├── jakość official website verification
+ │   └── precision GREEN / REVIEW / IGNORE
  ▼
-P11 pełny scheduler/resumable end-to-end run
+stabilny produkcyjny przebieg na realnych danych
 ```
 
-Najważniejszy KPI bieżącego etapu: **pokrycie źródeł i zachowanie pełnej informacji wejściowej**, nie liczba użytych API ani minimalna liczba rekordów po deduplikacji.
+Najważniejszy KPI bieżącego etapu nie jest już liczbą adapterów. Liczy się **stabilność 19 źródeł oraz jakość przejścia oferta -> firma -> oficjalna WWW -> właściwy kanał B2B -> finalny Excel**.
