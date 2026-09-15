@@ -4,9 +4,9 @@ import csv
 import hashlib
 import json
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable
 
 Row = dict[str, str]
 StratumFn = Callable[[Row], str]
