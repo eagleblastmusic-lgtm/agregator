@@ -7,12 +7,45 @@ Szczegółowy plan i checkpointy: [`PLAN.md`](PLAN.md).
 ## Gotowe baseline'y
 
 - M0: crawler + evidence + GREEN/REVIEW/IGNORE.
-- M1: OLX, Jooble, Adzuna i Careerjet Publisher API, source registry, resumowalne runy, katalog 91 źródeł, pełny bundle eksportowy dla Faro oraz kontrolowany `benchmark-collect` round-robin.
+- M1: OLX, Jooble, Adzuna, Careerjet Publisher API i oficjalny ePraca WebService, source registry, resumowalne runy, katalog 91 źródeł, pełny bundle eksportowy dla Faro oraz kontrolowany `benchmark-collect` round-robin.
 - M2: konserwatywny Company Resolution v1, aliasy/lokalizacje, metody/confidence, ground truth, pairwise precision/recall/F1, fuzzy REVIEW bez automatycznego merge.
 - M3: ranking wyników wyszukiwarki + first-party content verification z fallbackiem do kolejnych kandydatów, JSON-LD Organization oraz zapis każdej próby weryfikacji kandydata.
 - M4 foundations: `sitemap.xml`, priorytety podstron współpracy/B2B, typowe obfuskowane e-maile, formularze ze zgodą na informacje handlowe, append-only evidence snapshots z SHA-256.
 - Quality benchmark: osobne ground truth i ewaluatory dla Company Resolution, wyboru oficjalnej domeny oraz klasyfikacji kontaktów.
 - Employer Discovery Score: niezależny od confidence ranking firm na podstawie liczby ofert, liczby źródeł, zweryfikowanej WWW, strony biznesowej, GREEN channel i jakości identity.
+
+## ePraca — oficjalny WebService integratorski
+
+Adapter `epraca` korzysta z oficjalnego WebService v2 i wymaga wartości `Partner` przypisanej podmiotowi przez MRPiPS. Nie ma żadnego fallbacku omijającego autoryzację.
+
+Wymagana konfiguracja:
+
+```text
+EPRACA_PARTNER=<wartość nadana przez MRPiPS>
+EPRACA_LANGUAGE=pl
+```
+
+oraz dokładnie jedno kryterium:
+
+```text
+EPRACA_WOJEWODZTWO=22
+```
+
+albo:
+
+```text
+EPRACA_JEDNOSTKA=22000
+```
+
+albo:
+
+```text
+EPRACA_ALL=true
+```
+
+Adapter wysyła SOAP POST, rozpoznaje statusy usługi, odczytuje zwracane archiwum ZIP i parsuje pliki JSON z aktywnymi ofertami do wspólnego modelu `JobPosting`. Pole `pracodawca` ma wysoki identity confidence, a `identyfikatorOferty`, `stanowisko`, `miejscowosc`, `link`, `dataDodaniaOferty` i `dataAktualizacji` są mapowane bezpośrednio z oficjalnego feedu.
+
+Ze względu na autoryzację, limit wywołań i okna dostępności ePraca nie jest dodawana automatycznie do domyślnego benchmarku. Można ją jawnie podać przez `--sources epraca,...` po uzyskaniu prawidłowej konfiguracji integratora.
 
 ## Careerjet Publisher API
 
