@@ -18,6 +18,22 @@ def _source_names(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+@app.command("sources")
+def sources() -> None:
+    """Show source access policy without creating API clients or reading secrets."""
+
+    payload = [
+        {
+            "name": item.name,
+            "access_mode": item.access_mode,
+            "experimental": item.experimental,
+            "notes": item.notes,
+        }
+        for item in default_registry().registrations()
+    ]
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
 @app.command("preflight")
 def preflight(
     sources: str = typer.Option(_DEFAULT_SOURCES, "--sources"),
