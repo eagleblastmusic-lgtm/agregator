@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup, Tag
 
 from ..models import CompanyIdentifier, JobPosting
 from .base import SourceBatch
-from .public_html import parse_job_detail_html, HtmlJobSourceConfig
+from .public_html import HtmlJobSourceConfig, parse_job_detail_html
 
 BASE_URL = "https://www.aplikuj.pl"
 LISTING_FIRST = BASE_URL + "/praca"
@@ -195,7 +195,9 @@ def extract_offer_links(listing_url: str, html: str) -> list[str]:
         match = _OFFER_PATH.match(parsed.path)
         if parsed.netloc.lower() != expected_host or match is None:
             continue
-        normalized = urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
+        normalized = urlunparse(
+            (parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", "")
+        )
         if normalized in seen:
             continue
         seen.add(normalized)
@@ -251,7 +253,11 @@ def _augment_job(job: JobPosting, soup: BeautifulSoup, text: str, url: str) -> N
     nip_match = _NIP.search(text)
     if nip_match is not None:
         nip = nip_match.group(1)
-        if not any(item.kind.lower() == "nip" and item.value == nip for item in job.company_identifiers):
+        duplicate_nip = any(
+            item.kind.lower() == "nip" and item.value == nip
+            for item in job.company_identifiers
+        )
+        if not duplicate_nip:
             job.company_identifiers.append(
                 CompanyIdentifier(
                     kind="nip",
@@ -306,11 +312,19 @@ def _employer_profile_url(soup: BeautifulSoup, base_url: str) -> str | None:
 
 
 def _city_near_heading(title_node: Tag) -> str | None:
+    ignored_prefixes = (
+        "wygasa",
+        "Umowa",
+        "Pełny",
+        "Specjalista",
+        "Rekrutacja",
+        "Praca",
+    )
     for raw in title_node.find_all_next(string=True, limit=12):
         text = str(raw).strip()
         if not text or text == title_node.get_text(" ", strip=True):
             continue
-        if text.startswith(("wygasa", "Umowa", "Pełny", "Specjalista", "Rekrutacja", "Praca")):
+        if text.startswith(ignored_prefixes):
             continue
         if len(text) <= 80 and not text.endswith(":"):
             return text.split(",", 1)[0].strip() or None
