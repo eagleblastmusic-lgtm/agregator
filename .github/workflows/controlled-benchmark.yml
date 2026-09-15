@@ -138,6 +138,77 @@ jobs:
         run: |
           echo "Benchmark skipped because preflight failed." > benchmark/run_skipped.txt
 
+      - name: Write benchmark summary
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("benchmark")
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+
+          def load(name):
+              path = root / name
+              if not path.exists():
+                  return None
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"))
+              except json.JSONDecodeError:
+                  return None
+
+          preflight = load("preflight.json")
+          result = load("run_result.json")
+          diagnostics = load("source_diagnostics.json")
+
+          lines = ["## Faro controlled benchmark", ""]
+          if preflight is not None:
+              lines.extend([
+                  f"- Preflight ready: `{preflight.get('ready')}`",
+                  f"- Search provider ready: `{preflight.get('search_provider_ready')}`",
+              ])
+              blockers = preflight.get("blockers") or []
+              if blockers:
+                  lines.append("- Preflight blockers: `" + ", ".join(map(str, blockers)) + "`")
+
+          if result is not None:
+              collection = result.get("collection") or {}
+              enrichment = result.get("enrichment") or {}
+              readiness = result.get("readiness") or {}
+              benchmark = result.get("benchmark") or {}
+              lines.extend([
+                  f"- Collection target reached: `{collection.get('target_reached')}`",
+                  f"- Jobs collected: `{collection.get('jobs_after')}`",
+                  f"- Companies: `{benchmark.get('companies_total')}`",
+                  f"- Enriched companies: `{enrichment.get('enriched')}`",
+                  f"- Websites found: `{enrichment.get('websites_found')}`",
+                  f"- GREEN channels: `{enrichment.get('green_channels')}`",
+                  f"- Ready for manual labeling: `{readiness.get('ready_for_manual_labeling')}`",
+              ])
+              blockers = readiness.get("blockers") or []
+              if blockers:
+                  lines.append("- Readiness blockers: `" + ", ".join(map(str, blockers)) + "`")
+
+          if diagnostics is not None:
+              identity = diagnostics.get("identity") or {}
+              lines.extend(["", "### Source identity", ""])
+              lines.extend([
+                  "| Source | Jobs | Companies | Name conf. | Resolution conf. | City coverage |",
+                  "| --- | ---: | ---: | ---: | ---: | ---: |",
+              ])
+              for source, metrics in sorted(identity.items()):
+                  lines.append(
+                      f"| {source} | {metrics.get('jobs', 0)} | {metrics.get('companies', 0)} | "
+                      f"{metrics.get('avg_company_name_confidence', 0)} | "
+                      f"{metrics.get('avg_resolution_confidence', 0)} | "
+                      f"{metrics.get('city_coverage', 0)} |"
+                  )
+
+          summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
       - name: Upload benchmark workspace
         if: always()
         uses: actions/upload-artifact@v4
