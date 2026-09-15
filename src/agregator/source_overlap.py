@@ -25,10 +25,24 @@ class SourcePairOverlap:
 
 
 @dataclass(frozen=True, slots=True)
+class SourceFingerprintValue:
+    source: str
+    fingerprints: int
+    exclusive_fingerprints: int
+    shared_fingerprints: int
+    exclusive_rate: float
+    shared_rate: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class SourceOverlapReport:
     unique_job_fingerprints: int
     cross_source_shared_fingerprints: int
     cross_source_shared_fingerprint_rate: float
+    by_source: dict[str, SourceFingerprintValue]
     pairwise: dict[str, SourcePairOverlap]
 
     def to_dict(self) -> dict[str, Any]:
@@ -36,6 +50,10 @@ class SourceOverlapReport:
             "unique_job_fingerprints": self.unique_job_fingerprints,
             "cross_source_shared_fingerprints": self.cross_source_shared_fingerprints,
             "cross_source_shared_fingerprint_rate": self.cross_source_shared_fingerprint_rate,
+            "by_source": {
+                key: value.to_dict()
+                for key, value in self.by_source.items()
+            },
             "pairwise": {
                 key: value.to_dict()
                 for key, value in self.pairwise.items()
@@ -61,7 +79,7 @@ def build_source_overlap_report(store: SQLiteStore) -> SourceOverlapReport:
             """
         ).fetchall()
 
-    by_source: dict[str, set[tuple[str, str, str]]] = {}
+    by_source_fingerprints: dict[str, set[tuple[str, str, str]]] = {}
     fingerprint_sources: dict[tuple[str, str, str], set[str]] = {}
     for row in rows:
         source = str(row["source"] or "").strip().lower()
@@ -72,13 +90,28 @@ def build_source_overlap_report(store: SQLiteStore) -> SourceOverlapReport:
         )
         if not source or fingerprint is None:
             continue
-        by_source.setdefault(source, set()).add(fingerprint)
+        by_source_fingerprints.setdefault(source, set()).add(fingerprint)
         fingerprint_sources.setdefault(fingerprint, set()).add(source)
 
+    by_source: dict[str, SourceFingerprintValue] = {}
+    for source, fingerprints in sorted(by_source_fingerprints.items()):
+        exclusive = sum(
+            1 for fingerprint in fingerprints if len(fingerprint_sources[fingerprint]) == 1
+        )
+        shared = len(fingerprints) - exclusive
+        by_source[source] = SourceFingerprintValue(
+            source=source,
+            fingerprints=len(fingerprints),
+            exclusive_fingerprints=exclusive,
+            shared_fingerprints=shared,
+            exclusive_rate=_ratio(exclusive, len(fingerprints)),
+            shared_rate=_ratio(shared, len(fingerprints)),
+        )
+
     pairwise: dict[str, SourcePairOverlap] = {}
-    for source_a, source_b in combinations(sorted(by_source), 2):
-        fingerprints_a = by_source[source_a]
-        fingerprints_b = by_source[source_b]
+    for source_a, source_b in combinations(sorted(by_source_fingerprints), 2):
+        fingerprints_a = by_source_fingerprints[source_a]
+        fingerprints_b = by_source_fingerprints[source_b]
         shared = fingerprints_a & fingerprints_b
         union = fingerprints_a | fingerprints_b
         key = f"{source_a}|{source_b}"
@@ -105,6 +138,7 @@ def build_source_overlap_report(store: SQLiteStore) -> SourceOverlapReport:
             shared_fingerprints,
             unique_fingerprints,
         ),
+        by_source=by_source,
         pairwise=pairwise,
     )
 
