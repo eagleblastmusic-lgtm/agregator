@@ -1,381 +1,773 @@
 # Plan rozwoju — Faro Employer Discovery Engine
 
-## Cel produktu
+## 1. Cel produktu
 
-Zbudować program, który:
+Faro Employer Discovery Engine ma zbudować możliwie wiarygodną, audytowalną warstwę danych o firmach aktywnie rekrutujących.
 
-1. pobiera publiczne oferty pracy z wielu źródeł,
-2. wyciąga i normalizuje pracodawców,
-3. deduplikuje firmy między portalami,
-4. znajduje oficjalną stronę WWW firmy,
-5. przeszukuje jej publiczne podstrony,
-6. wykrywa kanały typu współpraca / partnerzy / B2B / oferty handlowe / dostawcy / franczyza,
-7. zapisuje e-mail lub formularz **razem z kontekstem, źródłem i confidence**,
-8. nie wysyła wiadomości — moduł outreach jest poza zakresem tego repo na M0/M1.
-
-## Architektura docelowa
+Docelowy przepływ:
 
 ```text
-Job Sources
-   │
-   ▼
-Collectors / Adapters
-   │
-   ▼
-Job Normalizer
-   │
-   ▼
-Company Resolver + Deduplication
-   │
-   ▼
-Website Search Provider
-   │
-   ▼
-Official Website Resolver
-   │
-   ▼
-Company Website Crawler
-   │
-   ▼
+publiczna oferta pracy
+        │
+        ▼
+normalizacja oferty
+        │
+        ▼
+Company Resolution
+        │
+        ├──────────────► jawne identyfikatory firmy
+        │                 NIP / REGON / KRS / source IDs
+        │
+        ▼
+źródłowy kandydat WWW
+        │
+        ├── verified ──► oficjalna WWW
+        │
+        └── rejected
+                │
+                ▼
+         SearchProvider
+                │
+                ▼
+      first-party verification
+                │
+                ▼
+         oficjalna WWW
+                │
+                ▼
+        first-party crawler
+                │
+                ▼
 Contact / Intent Extractor
-   │
-   ▼
-Evidence + Confidence Engine
-   │
-   ▼
-Database / Export / API
+                │
+                ▼
+GREEN / REVIEW / IGNORE
+                │
+                ▼
+Evidence + Audit + Export/API
 ```
 
-## M0 — rdzeń enrichmentu
+Repo **nie wysyła wiadomości**. Outreach pozostaje poza zakresem silnika discovery.
 
-Status: **funkcjonalny baseline gotowy**.
+---
+
+## 2. Zasady projektowe
+
+1. Tylko publicznie dostępne dane i autoryzowane źródła partnerskie/API.
+2. Brak obchodzenia logowania, CAPTCHA, paywalli i kontroli dostępu.
+3. Każdy istotny wynik musi zachować provenance i confidence.
+4. Fuzzy similarity nie jest samodzielnym dowodem tożsamości firmy.
+5. Fuzzy Company Resolution pozostaje REVIEW-only do czasu walidacji na ground truth.
+6. Identyczny NIP/REGON pod różnymi rekordami nie powoduje automatycznego merge przed walidacją reguł.
+7. URL firmy podany przez portal/feed jest kandydatem, nie automatycznie oficjalną domeną.
+8. Oficjalna domena wymaga first-party identity verification.
+9. Kontakt jest klasyfikowany kontekstowo; sama obecność e-maila nie oznacza GREEN.
+10. Każda automatyczna reguła rozszerzająca zakres merge/accept musi przejść benchmark jakościowy.
+
+---
+
+## 3. Stan projektu
+
+### M0 — rdzeń enrichmentu
+
+Status: **DONE — funkcjonalny baseline**.
 
 Zaimplementowano:
 
-- modele danych,
+- modele danych dla firm, ofert, domen, kontaktów i evidence,
 - wymienny `SearchProvider`,
-- resolver oficjalnej domeny,
-- crawler stron firmowych,
-- `robots.txt`, limity i opóźnienie między requestami,
+- Brave Search provider,
+- first-party website crawler,
+- respektowanie `robots.txt`,
+- limit stron i rate limiting,
 - ekstrakcję e-maili i formularzy,
 - klasyfikację `GREEN / REVIEW / IGNORE`,
-- provenance/evidence,
+- evidence URL + tekst + signal + confidence,
 - CLI,
-- testy i CI.
+- testy,
+- GitHub Actions CI.
 
-### Kryteria akceptacji M0
+Kryteria M0 są spełnione. Dalsze zmiany rdzenia powinny być traktowane jako kalibracja jakości, nie budowa fundamentu od zera.
 
-- `scan-url` potrafi przeskanować znaną stronę firmy i zwrócić JSON,
-- wynik zawiera URL źródłowy i kontekst każdej znalezionej pozycji,
-- fraza typu „Propozycje współpracy: wspolpraca@firma.pl” daje GREEN,
-- „Nie przyjmujemy ofert handlowych” daje IGNORE,
-- adres RODO / IOD daje IGNORE,
-- zwykły `kontakt@` bez kontekstu nie daje GREEN,
-- crawler nie wychodzi poza domenę i respektuje `robots.txt`.
+---
 
-## M1 — agregacja ofert pracy
+### M1 — agregacja ofert pracy
 
-Status: **zaawansowany fundament w realizacji**.
+Status: **BASELINE DONE; rozszerzanie źródeł kontrolowane benchmarkiem i dostępnością integracji**.
 
-Zaimplementowano:
+#### Zaimplementowane adaptery
+
+- `olx`,
+- `jooble`,
+- `adzuna`,
+- `careerjet`,
+- `epraca`.
+
+#### Zaimplementowana infrastruktura
 
 - wspólny kontrakt `JobSource`,
-- `SourceRegistry` pod kolejne portale,
-- adapter publicznego źródła OLX,
-- adapter Jooble oparty o REST API,
-- adapter Adzuna oparty o REST API,
-- cursor/offset/page i resumowalne pobieranie,
-- SQLite z tabelami `companies`, `job_postings`, `contact_channels`, `source_state`, `source_runs`,
-- podstawową normalizację i konserwatywną deduplikację firm,
-- provenance nazwy pracodawcy oraz `identity_confidence`,
-- historię runów: success/failure, kursory, strony, insert/update i skrócony błąd,
-- kolejkę firm do enrichmentu,
-- trwały zapis oficjalnej strony, kanałów i evidence,
-- importer CSV do benchmarków wieloźródłowych,
-- katalog 91 źródeł z master-listy i raport pokrycia adapterami,
-- benchmark snapshot: oferty, firmy, źródła, enrichment, GREEN/REVIEW/IGNORE, rate domen,
-- eksport wyników GREEN do JSON/CSV,
-- pełny bundle `export-dataset`: firmy, oferty, kontakty/evidence + manifest wersji schematu,
-- CLI do całego przepływu.
+- `SourceRegistry`,
+- resumowalne cursor/offset/page tam, gdzie źródło to wspiera,
+- `source_state`,
+- `source_runs`,
+- metryki success/failure,
+- liczba stron i ofert,
+- insert/update,
+- nowe firmy,
+- czas runu,
+- kontrolowany `benchmark-collect` round-robin,
+- importer CSV,
+- katalog 91 źródeł,
+- eksport danych dla Faro.
 
-### Interfejs adaptera źródła
-
-Każde źródło implementuje ten sam kontrakt:
+#### Interfejs logiczny adaptera
 
 ```text
-collect(cursor) -> JobPosting[] + next_cursor
+collect(cursor) -> SourceBatch(
+    jobs=JobPosting[],
+    next_cursor=...
+)
 ```
 
-Minimalne dane:
-
-- source,
-- source_id,
-- URL oferty,
-- tytuł,
-- nazwa firmy,
-- provenance i confidence nazwy,
-- lokalizacja,
-- opis,
-- data publikacji / odświeżenia, jeśli dostępna.
-
-### Strategia integracji źródeł
-
-1. źródła z oficjalnym API/feedem,
-2. źródła publiczne/oficjalne,
-3. publiczne portale bez logowania po przeglądzie sposobu dostępu i regulaminu,
-4. strony dynamiczne przez Playwright tylko tam, gdzie jest to konieczne i zgodne z zasadami dostępu,
-5. źródła partnerskie/ograniczone nie są zastępowane obchodzeniem zabezpieczeń.
-
-Każdy adapter jest izolowany w `src/agregator/sources/<source>.py` i może zostać wyłączony bez wpływu na pozostałe.
-
-### Stan katalogu źródeł
-
-- 91 pozycji w `config/source_catalog.tsv`,
-- 14 źródeł A0,
-- 36 źródeł A1,
-- 24 źródła B,
-- 17 źródeł C,
-- obecnie zaimplementowane: OLX, Jooble, Adzuna.
-
-### Następne checkpointy M1
-
-- M1-06: dodać kolejne źródło API-first lub oficjalne A0/A1,
-- M1-07: przygotować fixture z realnego publicznego payloadu OLX i test kontraktowy,
-- M1-08: uruchomić kontrolowany benchmark 1000 ofert,
-- M1-09: mierzyć błędy per source oraz koszt/czas na firmę,
-- M1-10: **DONE** — pełny dataset eksportowy dla Faro (`companies.csv`, `job_postings.csv`, `contact_channels.csv`, `manifest.json`).
-
-## M2 — Company Resolution
-
-Status: **V1 + bezpieczna warstwa REVIEW zaimplementowane; automatyczny fuzzy-merge pozostaje wyłączony**.
-
-Cel: jedna firma = jeden rekord niezależnie od liczby ofert, źródeł i lokalizacji, bez agresywnego łączenia podmiotów tylko dlatego, że ich nazwy są podobne.
-
-### Zaimplementowany baseline V1
-
-- normalizacja nazw i wariantów prawnych,
-- rozszerzona normalizacja polskich i wybranych międzynarodowych form prawnych,
-- `company_aliases` zachowujące wszystkie zaobserwowane nazwy,
-- `company_locations` zachowujące wszystkie zaobserwowane miejscowości,
-- exact-match nazwy + lokalizacji jako najmocniejszy sygnał,
-- cross-city exact-match tylko dla charakterystycznej nazwy i wysokiego `identity_confidence`,
-- blokada automatycznego cross-city merge dla nazw krótkich lub ogólnych,
-- brak automatycznego fuzzy-matchingu,
-- stabilny fallback identity dla ofert bez lokalizacji,
-- `company_resolution_method` i `company_resolution_confidence` zapisane przy każdej ofercie,
-- metryki metod resolution w `benchmark`,
-- generator szablonu ground truth przez `export-ground-truth`,
-- pairwise ground-truth evaluator precision/recall/F1 przez `evaluate-resolution`,
-- `resolution-review` generujący fuzzy-kandydatów bez modyfikacji bazy,
-- blocking kandydatów po tokenach/prefiksach oraz wysoko zweryfikowanym hoście WWW,
-- score REVIEW uwzględniający podobieństwo nazw, token overlap, wspólną lokalizację, confidence tożsamości i zgodność domeny.
-
-Przykładowe metody automatycznego resolution:
+`JobPosting` może obecnie przenosić nie tylko podstawową ofertę, ale także:
 
 ```text
-new_company
-exact_name_city
-exact_name_cross_city
-exact_name_partial_location
-insufficient_cross_city_evidence
-ambiguous_exact_name
-stable_source_key
+company_name
+company_name_source
+company_name_confidence
+company_identifiers[]
+company_website_candidates[]
 ```
 
-### Ground truth
+#### Integracje wymagające konfiguracji partnera
 
-Szablon można wygenerować bezpośrednio z bazy:
+Careerjet wymaga prawidłowego kontekstu Publisher API. ePraca wymaga wartości `Partner` nadanej integratorowi przez właściwy system. Brak konfiguracji nie jest zastępowany sztucznymi danymi ani obchodzeniem autoryzacji.
 
-```bash
-agregator export-ground-truth \
-  --db agregator.sqlite3 \
-  --output company_ground_truth.csv \
-  --limit 1000
+#### Następny gate M1
+
+Nie dodajemy kolejnych adapterów tylko po to, aby zwiększać liczbę integracji. Najpierw benchmark ma określić:
+
+- które źródła realnie dostarczają nowe oferty,
+- które źródła dostarczają najlepszą identity data,
+- koszt/czas per source,
+- error rate,
+- overlap ofert między źródłami,
+- wartość dodatkowych identyfikatorów i URL-i firm.
+
+---
+
+## 4. M2 — Company Resolution
+
+Status: **V1 DONE; fuzzy auto-merge zablokowany; walidacja produkcyjna wymaga realnego ground truth**.
+
+### Zaimplementowany baseline
+
+- normalizacja nazw,
+- usuwanie/normalizacja form prawnych,
+- `company_aliases`,
+- `company_locations`,
+- exact name + city,
+- konserwatywny exact cross-city,
+- blokada ryzykownego cross-city merge dla nazw krótkich/ogólnych,
+- stabilny fallback dla brakującej lokalizacji,
+- `company_resolution_method`,
+- `company_resolution_confidence`,
+- fuzzy candidates do `resolution-review`,
+- brak fuzzy auto-merge,
+- pairwise evaluator TP/FP/FN/TN,
+- precision / recall / F1,
+- ground-truth template.
+
+### Jawne identyfikatory przedsiębiorstwa
+
+Status: **DONE — warstwa bazowa**.
+
+`CompanyIdentifier` przechowuje:
+
+```text
+kind
+value
+source
+confidence
 ```
 
-Kolumna `truth_company_id` pozostaje pusta do ręcznego oznaczenia. Pozostałe kolumny zawierają kontekst, aktualny `predicted_company_id`, metodę i confidence.
-
-Minimalny format ewaluatora:
-
-```csv
-source,source_id,truth_company_id
-olx,123,company-001
-jooble,ABC-7,company-001
-adzuna,987,company-002
-```
-
-Dla wszystkich dopasowanych rekordów evaluator porównuje pary ofert i liczy TP/FP/FN/TN oraz precision, recall i F1. Brakujące w bazie rekordy są raportowane osobno.
-
-### REVIEW fuzzy bez auto-merge
-
-```bash
-agregator resolution-review \
-  --db agregator.sqlite3 \
-  --min-score 0.82 \
-  --limit 100
-```
-
-Ta warstwa służy do obserwacji jakości kandydatów i budowy ground truth. Nie zmienia `company_id` i nie może automatycznie połączyć dwóch firm.
-
-### Sygnały planowane dla V2
-
-- jawne identyfikatory pracodawcy ze źródeł,
-- adres,
-- telefon publiczny,
-- NIP/KRS, jeśli jawnie występują,
-- profile i identyfikatory źródłowe,
-- zgodność danych między portalami,
-- zweryfikowana domena jako potencjalny sygnał automatycznego merge dopiero po benchmarku,
-- fuzzy similarity jako sygnał pomocniczy, nigdy samodzielny dowód,
-- ręczne decyzje REVIEW jako dane treningowe/regułowe do kalibracji progów.
-
-Wynik docelowy:
+Warstwa persistence przechowuje dodatkowo:
 
 ```text
 company_id
-canonical_name
-aliases[]
-locations[]
-domains[]
-job_count
-sources[]
-match_confidence
-resolution_method
+observation_count
+first_seen_at
+last_seen_at
 ```
 
-### Następne checkpointy M2
+Normalizowane są m.in.:
 
-- M2-02: dodać jawne identyfikatory pracodawcy ze źródeł, jeśli są dostępne,
-- M2-03: **PARTIAL** — zweryfikowana domena jest już mocnym sygnałem REVIEW; automatyczny merge pozostaje zablokowany do czasu ground truth,
-- M2-04: **DONE** — fuzzy kandydaci trafiają do REVIEW bez automatycznego merge,
-- M2-05: tooling **DONE**; zbudować rzeczywisty ręcznie oznaczony ground truth na próbce benchmarkowej,
-- M2-06: ustalić progi precision/recall przed rozszerzeniem reguł automatycznych.
+- NIP,
+- REGON,
+- KRS.
 
-## M3 — wyszukiwanie i weryfikacja oficjalnej WWW
+Oficjalny feed ePraca mapuje NIP i REGON z wysokim confidence.
 
-Status: **drugi etap weryfikacji treścią strony zaimplementowany jako baseline**.
+### Konflikty identyfikatorów
 
-Nie uznajemy pierwszego wyniku wyszukiwarki automatycznie.
+Jeśli jeden identyfikator występuje pod więcej niż jednym `company_id`:
 
-### Etap 1 — ranking wyników wyszukiwarki
+```text
+identifier conflict -> REVIEW / benchmark
+```
 
-Scoring kandydata bierze pod uwagę:
+Nie ma automatycznego merge na podstawie samego konfliktu.
 
-- zgodność tokenów nazwy,
-- miasto / region,
-- zgodność nazwy z hostem,
-- wykluczenie social mediów, katalogów i portali pracy,
-- sygnały typu oficjalna/kontakt.
+### Następny gate M2
 
-### Etap 2 — first-party verification
+Na ręcznie oznaczonej próbce trzeba potwierdzić:
 
-Dla najlepiej ocenionych kandydatów pipeline:
+- Company Resolution F1,
+- false-positive rate,
+- false-negative rate,
+- jakość fuzzy REVIEW,
+- częstość konfliktów NIP/REGON/KRS,
+- czy istnieje wystarczająco bezpieczna reguła wykorzystująca identyfikatory do auto-merge.
 
-1. odwiedza stronę zgodnie z zasadami crawlera,
-2. odczytuje treść first-party,
-3. mierzy pokrycie tokenów nazwy firmy,
-4. szuka pełnej znormalizowanej nazwy,
-5. uwzględnia zgodność hosta i miejscowości,
-6. łączy search score z content score,
-7. akceptuje domenę tylko przy wystarczającym wyniku **i** mocnym sygnale tożsamości,
-8. jeżeli pierwszy wynik jest fałszywy, może przejść do kolejnego kandydata zamiast automatycznie przyjąć pierwszy wynik.
+Dopiero po tym można rozważyć M2.1 z mocniejszymi automatycznymi regułami.
 
-Wynik `CompanyIdentity` zawiera `website_verification_signals`, a `website_confidence` dla automatycznie znalezionej strony jest wynikiem po drugiej fazie, nie samym search score.
+---
 
-### Następne checkpointy M3
+## 5. M3 — wyszukiwanie i weryfikacja oficjalnej WWW
 
-- M3-02: utrwalić website verification provenance w bazie jako osobny evidence/audit trail,
-- M3-03: dodać sygnały JSON-LD `Organization`, NIP/KRS/adres, jeśli jawnie dostępne,
-- M3-04: przygotować ground truth poprawnych/niepoprawnych domen i policzyć precision/recall,
-- M3-05: kalibracja wag i progów osobno dla krótkich i długich nazw firm.
+Status: **V1 DONE; source-candidate shortcut + search fallback + structured provenance zaimplementowane**.
 
-## M4 — crawler i classifier v2
+### M3.1 — search ranking
 
-Rozszerzenia:
+Zaimplementowano scoring kandydatów na podstawie m.in.:
 
-- sitemap.xml,
-- podstrony z menu i stopki,
-- priorytety: `/kontakt`, `/wspolpraca`, `/partnerzy`, `/b2b`, `/dla-firm`, `/dostawcy`, `/franczyza`,
-- obsługa obfuskowanych maili,
-- lepsza detekcja formularzy,
-- klasyfikacja semantyczna całego kontekstu,
-- snapshot dowodu (tekst + timestamp + hash treści).
+- tokenów nazwy firmy,
+- lokalizacji,
+- hosta,
+- sygnałów typu „oficjalna”, „kontakt”,
+- wykluczania oczywistych katalogów/social/job portals.
 
-## M5 — baza i API
+### M3.2 — first-party identity verification
 
-Docelowo PostgreSQL.
+Po rankingu sama pozycja w wyszukiwarce nie wystarcza. Kandydat jest crawlowany, a treść first-party jest używana do potwierdzenia tożsamości firmy.
 
-Główne encje:
+Verifier bierze pod uwagę m.in.:
 
-- `job_postings`,
-- `companies`,
-- `company_aliases`,
-- `company_locations`,
-- `company_websites`,
-- `contact_channels`,
-- `evidence`,
-- `crawl_runs`,
-- `source_runs`.
+- pełną nazwę,
+- coverage tokenów nazwy,
+- host,
+- miasto,
+- JSON-LD Organization/Corporation/LocalBusiness,
+- wynik search score + content score.
 
-Aktualny interoperacyjny bundle przed API/PostgreSQL:
+### M3.3 — source-provided website candidates
+
+Status: **DONE — baseline**.
+
+Źródła mogą dostarczyć `CompanyWebsiteCandidate`:
+
+```text
+url
+source
+confidence
+```
+
+Persistence zapisuje:
+
+```text
+company_id
+url
+host
+source
+confidence
+observation_count
+first_seen_at
+last_seen_at
+```
+
+Przykład:
+
+```text
+ePraca adresWww
+    │
+    ▼
+CompanyWebsiteCandidate
+    │
+    ▼
+first-party verification
+    │
+    ├── ACCEPT -> oficjalna WWW, bez search
+    │
+    └── REJECT -> Brave/SearchProvider fallback
+```
+
+### M3.4 — structured website provenance
+
+Status: **DONE**.
+
+Finalne rozwiązanie domeny zapisuje:
+
+```text
+website_resolution_origin
+website_resolution_source
+```
+
+Dozwolone origins:
+
+```text
+source_candidate
+search
+known_url
+```
+
+Przykładowe sources:
+
+```text
+official_feed.adresWww
+brave
+static
+scan_known_website
+```
+
+Każda `WebsiteVerificationAttempt` zachowuje także własne:
+
+```text
+origin
+source
+accepted
+score
+signals
+scanned_pages
+page_snapshots
+```
+
+Dzięki temu nie trzeba rekonstruować provenance przez parsowanie luźnych stringów sygnałów.
+
+### Następny gate M3
+
+Ręcznie oznaczony benchmark domen powinien zmierzyć:
+
+- precision,
+- recall,
+- F1,
+- false positive rate,
+- source-candidate acceptance rate,
+- search fallback rate,
+- skuteczność per `website_resolution_source`,
+- różnice dla krótkich i długich nazw firm.
+
+---
+
+## 6. M4 — crawler i classifier v2
+
+Status: **PARTIAL — mocne fundamenty gotowe, kalibracja i rozszerzenia pozostają otwarte**.
+
+### Zaimplementowane
+
+- `sitemap.xml`,
+- ograniczona obsługa sitemap index,
+- priorytety stron:
+  - `/kontakt`,
+  - `/wspolpraca`,
+  - `/partnerzy`,
+  - `/b2b`,
+  - `/dla-firm`,
+  - `/dostawcy`,
+  - `/franczyza`,
+- typowe obfuskowane adresy e-mail,
+- detekcja formularzy,
+- sygnały zgody na informacje handlowe jako REVIEW, nie automatyczne GREEN,
+- append-only `website_verification_runs`,
+- `contact_evidence_snapshots`,
+- SHA-256 evidence,
+- page snapshots,
+- audit każdej próby domeny,
+- migracja audit schema dla starszych baz SQLite.
+
+### Do zrobienia w M4
+
+- bogatsza semantyka formularzy,
+- więcej wariantów obfuskacji adresów,
+- pełniejsze snapshoty/hash całych stron lub kontrolowany content digest,
+- deduplikacja formularzy i aliasów URL,
+- kalibracja classifiera na realnych polskich stronach,
+- osobne statystyki classifiera wg typu kanału,
+- dokładniejszy model zmian evidence w czasie.
+
+### Gate zamykający M4
+
+M4 można uznać za produkcyjnie gotowe dopiero po ręcznym benchmarku kontaktów i osiągnięciu ustalonego progu macro F1 dla `GREEN / REVIEW / IGNORE`.
+
+Aktualny domyślny gate:
+
+```text
+Contact decision macro F1 >= 0.90
+```
+
+---
+
+## 7. Quality benchmark — najbliższy główny checkpoint
+
+Status: **TO DO na realnych danych**.
+
+Najbliższy pełny gate to kontrolowana próbka **1000 realnych ofert**.
+
+### Kolejność
+
+```text
+1. benchmark-collect
+2. benchmark
+3. enrichment
+4. export-quality-labels
+5. ręczny labeling
+6. evaluate-resolution
+7. evaluate-website
+8. evaluate-contacts
+9. quality-gate
+10. decyzja: kalibrować czy rozszerzać automatyzację
+```
+
+### Komendy bazowe
+
+```bash
+agregator benchmark-collect \
+  --db agregator.sqlite3 \
+  --sources olx,jooble,adzuna \
+  --target-jobs 1000 \
+  --max-rounds 100
+
+agregator benchmark --db agregator.sqlite3
+
+agregator enrich-db \
+  --db agregator.sqlite3 \
+  --limit 1000
+
+agregator export-quality-labels \
+  --db agregator.sqlite3 \
+  --output-dir benchmark/labels \
+  --job-limit 1000 \
+  --company-limit 1000 \
+  --contact-limit 1000
+```
+
+Po ręcznym oznaczeniu:
+
+```bash
+agregator quality-gate \
+  --db agregator.sqlite3 \
+  --resolution-truth benchmark/labels/company_resolution_truth.csv \
+  --website-truth benchmark/labels/website_resolution_truth.csv \
+  --contact-truth benchmark/labels/contact_classification_truth.csv \
+  --fail-on-error
+```
+
+### Aktualne domyślne progi
+
+```text
+Company Resolution F1 >= 0.95
+Website Resolution F1 >= 0.95
+Contact decision macro F1 >= 0.90
+```
+
+Progi są początkowymi założeniami technicznymi. Produkcyjne wartości należy zatwierdzić po realnym labelingu.
+
+---
+
+## 8. Metryki benchmarku
+
+Aktualny `benchmark` powinien być traktowany jako techniczny dashboard jakości i pokrycia.
+
+Obejmuje m.in.:
+
+### Agregacja
+
+```text
+jobs_total
+companies_total
+sources_total
+source_job_counts
+source_run_metrics
+```
+
+### Company Resolution
+
+```text
+company_resolution_counts
+company_identifiers_total
+companies_with_identifiers
+identifier_company_rate
+identifier_conflicts
+```
+
+### WWW
+
+```text
+websites_found
+website_find_rate
+website_candidates_total
+companies_with_website_candidates
+source_verified_websites
+source_website_candidate_company_rate
+source_verified_website_rate
+source_verified_share_of_found
+website_resolution_origin_counts
+source_verified_website_counts
+```
+
+### Kontakty
+
+```text
+contact_channels_total
+green_channels
+review_channels
+ignored_channels
+green_company_rate
+```
+
+### Biznesowa priorytetyzacja
+
+```text
+employer_score_average
+employer_score_ge_60
+employer_score_distribution
+```
+
+---
+
+## 9. Employer Discovery Score
+
+Status: **baseline zaimplementowany; wagi wymagają kalibracji po benchmarku**.
+
+Score służy do priorytetyzacji firm, nie do określania prawdziwości danych.
+
+Przykładowe sygnały:
+
+```text
++ aktywne oferty
++ wiele źródeł ofert
++ wysoka identity confidence
++ zweryfikowana oficjalna domena
++ strona współpracy/B2B
++ GREEN channel
+```
+
+Należy utrzymać ścisłe rozdzielenie:
+
+```text
+Employer Discovery Score != Company Resolution confidence
+Employer Discovery Score != Website confidence
+Employer Discovery Score != Contact confidence
+```
+
+---
+
+## 10. Eksport Faro
+
+Status: **schema v5**.
+
+Aktualny bundle:
 
 ```text
 companies.csv
 job_postings.csv
+company_identifiers.csv
+company_website_candidates.csv
 contact_channels.csv
+website_verification_runs.csv
+contact_evidence_snapshots.csv
 manifest.json
 ```
 
-API docelowe:
-
-- nowe firmy,
-- firmy aktywnie rekrutujące,
-- firmy z GREEN channel,
-- ręczna weryfikacja REVIEW,
-- eksport CSV/JSON.
-
-## Employer Discovery Score
-
-Przykładowe sygnały biznesowe:
+`website_verification_runs.csv` zawiera m.in.:
 
 ```text
-+25 >= 3 aktywne oferty
-+15 >= 2 źródła ofert
-+15 jednoznaczna oficjalna domena
-+20 jawna strona współpraca/B2B
-+20 jawny kanał współpracy
- +5 bardzo wysoka zgodność danych firmy
+outcome
+website_url
+website_confidence
+resolution_origin
+resolution_source
+verification_signals_json
+search_candidates_json
+website_attempts_json
+scanned_pages_json
 ```
 
-Score biznesowy jest osobny od `contact_confidence` i od technicznego confidence Company Resolution / Website Verification.
+Eksport jest obecnie interoperacyjną granicą między silnikiem discovery a przyszłą warstwą Faro/API.
 
-## Zasady bezpieczeństwa i jakości
+---
 
-- tylko publicznie dostępne dane,
-- brak obchodzenia logowania, CAPTCHA, paywalli i blokad technicznych,
-- respektowanie `robots.txt` dla crawlera stron firmowych,
-- rate limiting per host,
-- brak automatycznej wysyłki wiadomości,
-- każde źródło portalu przechodzi osobny review techniczny i regulaminowy,
-- każdy kontakt ma `evidence_url`, `evidence_text`, `verified_at` i confidence,
-- fuzzy Company Resolution działa w trybie REVIEW, a nie automatycznego merge,
-- wynik GREEN oznacza „mocny sygnał kontekstowy”, a nie automatyczną opinię prawną.
+## 11. M5 — persistence v2 i API
 
-## Benchmark przed skalowaniem
+Status: **PLANNED; nie zaczynać przed benchmarkiem jakości M0–M4**.
 
-Pierwszy test produkcyjny: 1000 realnych ofert.
+### Cel
 
-Mierzymy:
+Przenieść warstwę danych z lokalnego SQLite/bundle do produkcyjnego storage i stabilnego API.
 
-- liczbę unikalnych firm,
-- company/job ratio,
-- precision/recall/F1 Company Resolution na ręcznie oznaczonej próbce,
-- precision/recall poprawnego wyboru oficjalnej domeny,
-- % firm z poprawnie znalezioną domeną,
-- % wzbogaconych firm z kanałem GREEN/REVIEW,
-- precision klasyfikacji kanałów,
-- rozkład wyników per źródło,
-- liczbę błędów i retry per źródło,
-- średni koszt i czas na firmę.
+Preferowany kierunek:
 
-CLI `benchmark` zapewnia automatyczny snapshot metryk technicznych. CLI `export-ground-truth` przygotowuje próbkę do ręcznego oznaczenia, `evaluate-resolution` mierzy jakość deduplikacji, a `resolution-review` pokazuje fuzzy-kandydatów bez ingerencji w tożsamość firm.
+```text
+PostgreSQL
+    │
+    ├── immutable audit/event history
+    ├── current materialized state
+    ├── review queues
+    └── Faro API
+```
+
+### Docelowe encje
+
+```text
+companies
+company_aliases
+company_locations
+company_identifiers
+company_website_candidates
+job_postings
+contact_channels
+website_verification_runs
+contact_evidence_snapshots
+source_runs
+review_decisions
+```
+
+### API — pierwsza wersja
+
+Planowane read endpoints/use cases:
+
+```text
+companies actively recruiting
+company detail
+jobs by company
+companies with GREEN channel
+companies requiring REVIEW
+website verification history
+source health
+benchmark metrics
+```
+
+Write endpoints powinny najpierw obejmować ręczne decyzje REVIEW i labeling, a nie outreach.
+
+---
+
+## 12. M6 — review workspace i human-in-the-loop
+
+Status: **PLANNED**.
+
+Cel: zamienić istniejące kolejki REVIEW i CSV ground truth w wygodny workflow operatorski.
+
+Zakres:
+
+- review potencjalnych duplikatów firm,
+- review konfliktów identyfikatorów,
+- review domen,
+- review kontaktów,
+- zapisywanie decyzji operatora,
+- reason codes,
+- wersjonowanie decyzji,
+- możliwość ponownej ewaluacji modelu/reguł po zmianach.
+
+To powinno być źródłem przyszłych danych treningowych/regułowych do kalibracji.
+
+---
+
+## 13. M7 — rozszerzanie źródeł po benchmarku
+
+Status: **PLANNED**.
+
+Po benchmarku 1000 ofert źródła należy dodawać według wartości, a nie liczby.
+
+Priorytet źródła powinien uwzględniać:
+
+```text
+unikalne oferty
+identity quality
+jawne identyfikatory firmy
+jawny URL firmy
+stabilność integracji
+koszt requestów
+error rate
+warunki użycia
+pokrycie rynku polskiego
+```
+
+Źródło o wysokim overlap i niskiej jakości identity może być mniej wartościowe niż mniejsze źródło z NIP/REGON/WWW.
+
+---
+
+## 14. M8 — observability i operacje produkcyjne
+
+Status: **PLANNED**.
+
+Zakres docelowy:
+
+- health dashboard per source,
+- alerty spadku liczby ofert,
+- alerty wzrostu błędów,
+- latency i koszt per source,
+- latency i koszt per enrichment,
+- procent search fallback,
+- acceptance rate source website candidates,
+- drift klasyfikacji kontaktów,
+- drift Company Resolution,
+- audit retention policy,
+- backup/restore.
+
+---
+
+## 15. M9 — integracja z aplikacją Faro
+
+Status: **PLANNED po stabilizacji API**.
+
+Silnik agregatora powinien dostarczać Faro dane, ale nie przejmować odpowiedzialności interfejsu użytkownika.
+
+Przykładowe dane dla Faro:
+
+```text
+company
+job postings
+source provenance
+identity confidence
+verified website
+website resolution origin/source
+contact channels
+contact evidence
+Employer Discovery Score
+review flags
+```
+
+Oddzielenie silnika od aplikacji pozwala niezależnie rozwijać discovery, UI i model biznesowy.
+
+---
+
+## 16. Co robimy teraz
+
+Najbliższa kolejność rozwoju:
+
+```text
+P0  utrzymać CI GREEN
+ │
+ ▼
+P1  zamrozić obecny baseline M0–M4
+ │
+ ▼
+P2  zebrać kontrolowaną próbkę 1000 ofert
+ │
+ ▼
+P3  wykonać enrichment i benchmark techniczny
+ │
+ ▼
+P4  wyeksportować pakiet ground truth
+ │
+ ▼
+P5  ręcznie oznaczyć Company / Website / Contact truth
+ │
+ ▼
+P6  uruchomić quality-gate
+ │
+ ├── PASS ─► kalibracja wag + decyzja o M5/M7
+ │
+ └── FAIL ─► poprawki reguł + ponowny benchmark
+```
+
+Najważniejsza zasada na tym etapie: **nie zwiększać automatyzacji identity resolution przed pomiarem jej jakości na realnych danych**.
