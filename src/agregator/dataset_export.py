@@ -163,6 +163,7 @@ def export_dataset_bundle(
                     w.website_confidence,
                     w.verification_signals_json,
                     w.search_candidates_json,
+                    w.website_attempts_json,
                     w.scanned_pages_json,
                     w.captured_at
                 FROM website_verification_runs w
@@ -228,7 +229,7 @@ def export_dataset_bundle(
             ),
             "contact_decision": "green/review/ignore is preserved with evidence provenance",
             "website_audit": (
-                "website_verification_runs is append-only provenance for enrichment decisions"
+                "website_verification_runs keeps ranked candidates and per-candidate attempts"
             ),
             "evidence_hash": (
                 "contact_evidence_snapshots preserves immutable SHA-256 evidence snapshots"
@@ -333,6 +334,7 @@ def _website_verification_fields() -> list[str]:
         "website_confidence",
         "verification_signals_json",
         "search_candidates_json",
+        "website_attempts_json",
         "scanned_pages_json",
         "captured_at",
     ]
