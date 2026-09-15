@@ -50,6 +50,22 @@ class BenchmarkEnrichmentSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class BenchmarkReadiness:
+    collection_target_reached: bool
+    enrichment_complete: bool
+    dataset_exported: bool
+    ground_truth_templates_generated: bool
+    ready_for_manual_labeling: bool
+    manual_ground_truth_required: bool
+    blockers: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["blockers"] = list(self.blockers)
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
 class BenchmarkPipelineResult:
     output_dir: Path
     collection_path: Path
@@ -62,6 +78,7 @@ class BenchmarkPipelineResult:
     dataset: DatasetExportResult
     website_snapshots: WebsiteSnapshotExportResult
     quality_labels: QualityLabelBundle
+    readiness: BenchmarkReadiness
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -76,6 +93,7 @@ class BenchmarkPipelineResult:
             "dataset": self.dataset.to_dict(),
             "website_snapshots": self.website_snapshots.to_dict(),
             "quality_labels": self.quality_labels.to_dict(),
+            "readiness": self.readiness.to_dict(),
         }
 
 
@@ -153,9 +171,10 @@ async def run_benchmark_pipeline(
         company_limit=company_label_limit,
         contact_limit=contact_label_limit,
     )
+    readiness = _build_readiness(collection, enrichment)
 
     manifest = {
-        "schema_version": "2",
+        "schema_version": "3",
         "created_at": datetime.now(UTC).isoformat(),
         "database": str(store.path),
         "configuration": {
@@ -178,6 +197,7 @@ async def run_benchmark_pipeline(
         "dataset": dataset.to_dict(),
         "website_snapshots": website_snapshots.to_dict(),
         "quality_labels": quality_labels.to_dict(),
+        "readiness": readiness.to_dict(),
         "files": {
             "collection": collection_path.name,
             "enrichment": enrichment_path.name,
@@ -201,6 +221,7 @@ async def run_benchmark_pipeline(
         dataset=dataset,
         website_snapshots=website_snapshots,
         quality_labels=quality_labels,
+        readiness=readiness,
     )
 
 
@@ -241,6 +262,28 @@ async def _run_enrichment_batches(
         summary.stopped_reason = "max_enrichment_companies"
 
     return summary
+
+
+def _build_readiness(
+    collection: BenchmarkCollectionResult,
+    enrichment: BenchmarkEnrichmentSummary,
+) -> BenchmarkReadiness:
+    blockers: list[str] = []
+    if not collection.target_reached:
+        blockers.append("collection_target_not_reached")
+    enrichment_complete = enrichment.stopped_reason == "no_pending_companies"
+    if not enrichment_complete:
+        blockers.append(f"enrichment_incomplete:{enrichment.stopped_reason}")
+
+    return BenchmarkReadiness(
+        collection_target_reached=collection.target_reached,
+        enrichment_complete=enrichment_complete,
+        dataset_exported=True,
+        ground_truth_templates_generated=True,
+        ready_for_manual_labeling=not blockers,
+        manual_ground_truth_required=True,
+        blockers=tuple(blockers),
+    )
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
