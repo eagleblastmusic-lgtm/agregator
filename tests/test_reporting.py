@@ -49,31 +49,35 @@ def _seed(store: SQLiteStore) -> int:
     company_id = int(store.list_companies()[0]["id"])
     store.save_discovery_result(
         company_id,
-        DiscoveryResult(
-            company=CompanyIdentity(
-                name="Firma Testowa",
-                city="Gdynia",
-                website_url="https://firma.test",
-                domain="firma.test",
-                website_confidence=0.98,
-            ),
-            channels=[
-                ContactChannel(
-                    kind=ChannelKind.EMAIL,
-                    value="partnerzy@firma.test",
-                    purpose=ChannelPurpose.BUSINESS_PARTNERSHIP,
-                    decision=Decision.GREEN,
-                    confidence=0.99,
-                    evidence=Evidence(
-                        url="https://firma.test/partnerzy",
-                        text="Kontakt dla partnerów: partnerzy@firma.test",
-                        signal="partnerzy",
-                    ),
-                )
-            ],
-        ),
+        _contact_discovery("Kontakt dla partnerów: partnerzy@firma.test"),
     )
     return company_id
+
+
+def _contact_discovery(text: str) -> DiscoveryResult:
+    return DiscoveryResult(
+        company=CompanyIdentity(
+            name="Firma Testowa",
+            city="Gdynia",
+            website_url="https://firma.test",
+            domain="firma.test",
+            website_confidence=0.98,
+        ),
+        channels=[
+            ContactChannel(
+                kind=ChannelKind.EMAIL,
+                value="partnerzy@firma.test",
+                purpose=ChannelPurpose.BUSINESS_PARTNERSHIP,
+                decision=Decision.GREEN,
+                confidence=0.99,
+                evidence=Evidence(
+                    url="https://firma.test/partnerzy",
+                    text=text,
+                    signal="partnerzy",
+                ),
+            )
+        ],
+    )
 
 
 def _attempt(
@@ -129,6 +133,10 @@ def test_benchmark_report_counts_pipeline_outputs(tmp_path: Path) -> None:
     assert report.source_verified_website_counts == {}
     assert report.source_website_attempt_metrics == {}
     assert report.green_channels == 1
+    assert report.contact_evidence_snapshots_total == 0
+    assert report.contact_evidence_observations_total == 0
+    assert report.contact_evidence_changes_total == 0
+    assert report.changed_contact_channels == 0
     assert report.company_to_job_ratio == 0.5
     assert report.website_find_rate == 1.0
     assert report.green_company_rate == 1.0
@@ -145,6 +153,25 @@ def test_benchmark_report_counts_pipeline_outputs(tmp_path: Path) -> None:
         "exact_name_city": 1,
         "new_company": 1,
     }
+
+
+def test_benchmark_report_counts_contact_evidence_timeline(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "evidence-timeline.sqlite3")
+    company_id = _seed(store)
+
+    first = _contact_discovery("Kontakt dla partnerów: partnerzy@firma.test")
+    record_discovery_audit(store, company_id, first)
+
+    changed = _contact_discovery("Nowy kontakt dla partnerów: partnerzy@firma.test")
+    store.save_discovery_result(company_id, changed)
+    record_discovery_audit(store, company_id, changed)
+
+    report = build_benchmark_report(store)
+
+    assert report.contact_evidence_snapshots_total == 2
+    assert report.contact_evidence_observations_total == 2
+    assert report.contact_evidence_changes_total == 1
+    assert report.changed_contact_channels == 1
 
 
 def test_benchmark_report_measures_source_website_shortcut(tmp_path: Path) -> None:
