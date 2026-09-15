@@ -10,6 +10,7 @@ import typer
 from .catalog import catalog_summary, filter_catalog, load_source_catalog
 from .crawler import WebsiteCrawler
 from .enrich import enrich_pending_companies
+from .ground_truth import evaluate_company_resolution_csv
 from .importers import load_jobs_csv
 from .ingest import IngestResult, ingest_source
 from .pipeline import EmployerDiscoveryPipeline
@@ -314,6 +315,19 @@ def benchmark(
         store,
         high_confidence_threshold=high_confidence_threshold,
     )
+    typer.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+
+
+@app.command("evaluate-resolution")
+def evaluate_resolution(
+    path: str = typer.Option(..., "--path"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+) -> None:
+    store = SQLiteStore(db)
+    try:
+        report = evaluate_company_resolution_csv(store, path)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     typer.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
 
 
