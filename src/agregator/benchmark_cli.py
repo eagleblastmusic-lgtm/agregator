@@ -12,7 +12,12 @@ from .benchmark_preflight import build_benchmark_preflight
 from .crawler import WebsiteCrawler
 from .label_sampling import DEFAULT_SAMPLING_SEED
 from .label_status import build_label_bundle_status
-from .label_workflow import LabelKind, next_unlabeled_row, set_row_label
+from .label_workflow import (
+    LabelKind,
+    next_unlabeled_row,
+    prediction_reference_row,
+    set_row_label,
+)
 from .pipeline import EmployerDiscoveryPipeline
 from .search import BraveSearchProvider
 from .sources import default_registry
@@ -222,6 +227,20 @@ def label_set(
         raise typer.BadParameter(str(exc)) from exc
 
     typer.echo(json.dumps(update.to_dict(), ensure_ascii=False, indent=2))
+
+
+@app.command("label-reference")
+def label_reference(
+    kind: LabelKind = _REQUIRED_KIND_OPTION,
+    row_number: int = _REQUIRED_ROW_OPTION,
+    label_dir: str = typer.Option("benchmark/run/labels", "--label-dir"),
+) -> None:
+    try:
+        reference = prediction_reference_row(label_dir, kind, row_number)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    typer.echo(json.dumps(reference.to_dict(), ensure_ascii=False, indent=2))
 
 
 @app.command("evaluate")
