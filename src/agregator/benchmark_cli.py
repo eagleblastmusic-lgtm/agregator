@@ -10,6 +10,7 @@ from .benchmark_evaluation import evaluate_labeled_benchmark
 from .benchmark_pipeline import run_benchmark_pipeline
 from .benchmark_preflight import build_benchmark_preflight
 from .crawler import WebsiteCrawler
+from .label_sampling import DEFAULT_SAMPLING_SEED
 from .label_status import build_label_bundle_status
 from .pipeline import EmployerDiscoveryPipeline
 from .search import BraveSearchProvider
@@ -105,6 +106,11 @@ def run(
         min=1,
         max=100_000,
     ),
+    label_sampling_seed: str = typer.Option(
+        DEFAULT_SAMPLING_SEED,
+        "--label-sampling-seed",
+        help="Deterministyczny seed wyboru rekordów do ręcznego ground truth",
+    ),
     strict: bool = typer.Option(
         False,
         "--strict",
@@ -137,6 +143,7 @@ def run(
                 job_label_limit=job_label_limit,
                 company_label_limit=company_label_limit,
                 contact_label_limit=contact_label_limit,
+                label_sampling_seed=label_sampling_seed,
             )
         )
     except (KeyError, ValueError) as exc:
