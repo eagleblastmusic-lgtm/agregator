@@ -63,6 +63,11 @@ def test_parse_epraca_json_maps_official_fields() -> None:
     assert job.company_name_confidence == 0.995
     assert job.city == "Gdańsk"
     assert job.published_at == "2026-09-15"
+    assert [(item.kind, item.value) for item in job.company_identifiers] == [
+        ("nip", "1234567890"),
+        ("regon", "123456789"),
+    ]
+    assert all(item.confidence == 0.995 for item in job.company_identifiers)
 
 
 def test_parse_epraca_soap_response_extracts_zip_json() -> None:
