@@ -1,7 +1,7 @@
 import pytest
 
 from agregator.crawler import CrawlPage
-from agregator.models import SearchCandidate
+from agregator.models import SearchCandidate, WebsiteResolutionOrigin
 from agregator.pipeline import EmployerDiscoveryPipeline
 from agregator.search import StaticSearchProvider
 
@@ -69,6 +69,8 @@ async def test_discover_rejects_false_top_search_result_and_uses_verified_candid
 
     assert result.company.website_url == official_url
     assert result.company.website_confidence >= 0.55
+    assert result.company.website_resolution_origin == WebsiteResolutionOrigin.SEARCH
+    assert result.company.website_resolution_source == "search_provider"
     assert "accepted" in result.company.website_verification_signals
     assert crawler.calls == [false_url, official_url]
     assert result.scanned_pages == [official_url]
@@ -79,10 +81,13 @@ async def test_discover_rejects_false_top_search_result_and_uses_verified_candid
     assert len(result.website_attempts) == 2
     assert result.website_attempts[0].url == false_url
     assert result.website_attempts[0].accepted is False
+    assert result.website_attempts[0].origin == WebsiteResolutionOrigin.SEARCH
+    assert result.website_attempts[0].source == "search_provider"
     assert "identity_not_confirmed" in result.website_attempts[0].signals
     assert len(result.website_attempts[0].page_snapshots[0].content_sha256) == 64
     assert result.website_attempts[1].url == official_url
     assert result.website_attempts[1].accepted is True
+    assert result.website_attempts[1].origin == WebsiteResolutionOrigin.SEARCH
     assert result.website_attempts[1].scanned_pages == [official_url]
 
 
@@ -117,6 +122,7 @@ async def test_discover_returns_no_website_when_identity_cannot_be_confirmed() -
 
     assert result.company.website_url is None
     assert result.company.website_confidence == 0.0
+    assert result.company.website_resolution_origin is None
     assert result.company.website_verification_signals == [
         "no_verified_website_candidate"
     ]
@@ -124,6 +130,7 @@ async def test_discover_returns_no_website_when_identity_cannot_be_confirmed() -
     assert result.page_snapshots == []
     assert len(result.website_attempts) == 1
     assert result.website_attempts[0].accepted is False
+    assert result.website_attempts[0].origin == WebsiteResolutionOrigin.SEARCH
     assert result.website_attempts[0].resolved_url == candidate_url
     assert len(result.website_attempts[0].page_snapshots) == 1
 
@@ -155,16 +162,21 @@ async def test_source_website_candidate_is_verified_before_acceptance() -> None:
         "Gdańsk",
         candidate_confidence=0.98,
         source_signal="source_website_candidate:official_feed.adresWww",
+        resolution_source="official_feed.adresWww",
     )
 
     assert result.company.website_url == official_url
     assert result.company.website_confidence >= 0.55
+    assert result.company.website_resolution_origin == WebsiteResolutionOrigin.SOURCE_CANDIDATE
+    assert result.company.website_resolution_source == "official_feed.adresWww"
     assert result.company.website_verification_signals[0] == (
         "source_website_candidate:official_feed.adresWww"
     )
     assert "accepted" in result.company.website_verification_signals
     assert len(result.website_attempts) == 1
     assert result.website_attempts[0].accepted is True
+    assert result.website_attempts[0].origin == WebsiteResolutionOrigin.SOURCE_CANDIDATE
+    assert result.website_attempts[0].source == "official_feed.adresWww"
     assert crawler.calls == [official_url]
 
 
@@ -189,10 +201,14 @@ async def test_source_website_candidate_is_rejected_when_identity_does_not_match
         "Gdańsk",
         candidate_confidence=0.98,
         source_signal="source_website_candidate:official_feed.adresWww",
+        resolution_source="official_feed.adresWww",
     )
 
     assert result.company.website_url is None
+    assert result.company.website_resolution_origin is None
     assert "source_candidate_not_verified" in result.company.website_verification_signals
     assert len(result.website_attempts) == 1
     assert result.website_attempts[0].accepted is False
+    assert result.website_attempts[0].origin == WebsiteResolutionOrigin.SOURCE_CANDIDATE
+    assert result.website_attempts[0].source == "official_feed.adresWww"
     assert "identity_not_confirmed" in result.website_attempts[0].signals
