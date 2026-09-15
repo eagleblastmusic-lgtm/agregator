@@ -113,7 +113,10 @@ async def test_missing_search_provider_is_reported_without_failed_company(tmp_pa
             wrong_url: [
                 _page(
                     wrong_url,
-                    "<html><body><h1>Completely Different Company</h1><p>Warszawa</p></body></html>",
+                    (
+                        "<html><body><h1>Completely Different Company</h1>"
+                        "<p>Warszawa</p></body></html>"
+                    ),
                 )
             ]
         }
