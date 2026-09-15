@@ -1,0 +1,141 @@
+name: P10 OfertyPracy.edu Props Diagnostic
+
+on:
+  pull_request:
+    branches:
+      - feat/m0-employer-discovery-core
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Inspect public Inertia payloads
+        shell: bash
+        run: |
+          mkdir -p p10-ofertypracyedu-props
+          python - <<'PY'
+          import asyncio
+          import html as html_module
+          import json
+          import re
+          from pathlib import Path
+          from urllib.parse import urljoin
+
+          import httpx
+          from bs4 import BeautifulSoup
+
+          BASE = "https://ofertypracy.edu.pl"
+          UA = "FaroEmployerDiscovery/0.2"
+          OFFER_IDS = ["313542", "310370", "304845"]
+          root = Path("p10-ofertypracyedu-props")
+
+          def inertia(html: str):
+              soup = BeautifulSoup(html, "html.parser")
+              app = soup.select_one("#app[data-page]")
+              if app is None:
+                  return None, soup
+              raw = str(app.get("data-page") or "")
+              if not raw:
+                  return None, soup
+              return json.loads(html_module.unescape(raw)), soup
+
+          async def main():
+              async with httpx.AsyncClient(
+                  timeout=25,
+                  follow_redirects=True,
+                  headers={
+                      "Accept": "text/html,application/xhtml+xml",
+                      "Accept-Language": "pl-PL,pl;q=0.9",
+                      "User-Agent": UA,
+                  },
+              ) as client:
+                  listing = await client.get(BASE + "/")
+                  listing.raise_for_status()
+                  listing_payload, listing_soup = inertia(listing.text)
+                  scripts = [
+                      urljoin(str(listing.url), str(node.get("src") or ""))
+                      for node in listing_soup.find_all("script", src=True)
+                  ]
+                  search_url = next(
+                      (url for url in scripts if "SearchIndex" in url),
+                      None,
+                  )
+                  frontend = {}
+                  if search_url:
+                      search = await client.get(search_url)
+                      search.raise_for_status()
+                      root.joinpath("SearchIndex.js").write_text(
+                          search.text,
+                          encoding="utf-8",
+                      )
+                      match = re.search(r'from"(\./OfferSingle-[^"]+\.js)"', search.text)
+                      if match:
+                          offer_single_url = urljoin(search_url, match.group(1))
+                          component = await client.get(offer_single_url)
+                          component.raise_for_status()
+                          root.joinpath("OfferSingle.js").write_text(
+                              component.text,
+                              encoding="utf-8",
+                          )
+                          frontend = {
+                              "search_index_url": search_url,
+                              "offer_single_url": offer_single_url,
+                              "offer_single_chars": len(component.text),
+                          }
+
+                  candidates = []
+                  for offer_id in OFFER_IDS:
+                      url = f"{BASE}/oferty/{offer_id}"
+                      response = await client.get(url)
+                      payload, soup = inertia(response.text)
+                      row = {
+                          "id": offer_id,
+                          "status": response.status_code,
+                          "final_url": str(response.url),
+                          "component": payload.get("component") if payload else None,
+                          "props_keys": sorted((payload.get("props") or {}).keys()) if payload else [],
+                      }
+                      if payload:
+                          props = payload.get("props") or {}
+                          root.joinpath(f"candidate-{offer_id}.json").write_text(
+                              json.dumps(props, ensure_ascii=False, indent=2) + "\n",
+                              encoding="utf-8",
+                          )
+                          row["interesting"] = {
+                              key: props.get(key)
+                              for key in props
+                              if any(token in key.lower() for token in ("offer", "school", "rspo", "position"))
+                          }
+                      candidates.append(row)
+
+                  output = {
+                      "listing_component": listing_payload.get("component") if listing_payload else None,
+                      "listing_props_keys": sorted((listing_payload.get("props") or {}).keys()) if listing_payload else [],
+                      "frontend": frontend,
+                      "candidates": candidates,
+                  }
+                  root.joinpath("summary.json").write_text(
+                      json.dumps(output, ensure_ascii=False, indent=2) + "\n",
+                      encoding="utf-8",
+                  )
+                  print(json.dumps(output, ensure_ascii=False, indent=2))
+
+          asyncio.run(main())
+          PY
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: p10-ofertypracyedu-props-${{ github.run_id }}
+          path: p10-ofertypracyedu-props/
+          retention-days: 3
