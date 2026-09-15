@@ -1,10 +1,13 @@
 from pathlib import Path
 
+from typer.testing import CliRunner
+
 from agregator.models import JobPosting
 from agregator.sources.base import SourceBatch
 from agregator.sources.registry import SourceRegistry
 from agregator.storage import SQLiteStore, UpsertStats
 from agregator.validation import build_validation_report, render_validation_markdown
+from agregator.validation_cli import app
 
 
 class AlphaSource:
@@ -86,3 +89,27 @@ def test_validation_report_covers_all_implemented_sources(tmp_path: Path) -> Non
     assert "# Faro — P10 validation report" in markdown
     assert "| alpha | healthy | 1 | 1 | 1 |" in markdown
     assert "| beta | unexercised | 0 | 0 | 0 |" in markdown
+
+
+def test_validation_cli_keeps_report_subcommand(tmp_path: Path) -> None:
+    runner = CliRunner()
+    db = tmp_path / "cli.sqlite3"
+    output = tmp_path / "report.json"
+    markdown = tmp_path / "report.md"
+
+    result = runner.invoke(
+        app,
+        [
+            "report",
+            "--db",
+            str(db),
+            "--output",
+            str(output),
+            "--markdown",
+            str(markdown),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert output.exists()
+    assert markdown.exists()
