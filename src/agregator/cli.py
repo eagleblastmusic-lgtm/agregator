@@ -8,6 +8,10 @@ from dataclasses import asdict
 import typer
 
 from .catalog import catalog_summary, filter_catalog, load_source_catalog
+from .contact_ground_truth import (
+    evaluate_contact_classification_csv,
+    export_contact_ground_truth_template,
+)
 from .crawler import WebsiteCrawler
 from .dataset_export import export_dataset_bundle
 from .enrich import enrich_pending_companies
@@ -15,6 +19,8 @@ from .ground_truth import evaluate_company_resolution_csv, export_ground_truth_t
 from .importers import load_jobs_csv
 from .ingest import IngestResult, ingest_source
 from .pipeline import EmployerDiscoveryPipeline
+from .quality_gate import evaluate_quality_gate
+from .quality_labels import export_quality_label_bundle
 from .reporting import build_benchmark_report, export_green_channels
 from .resolution_review import build_resolution_review_queue
 from .search import BraveSearchProvider
@@ -22,6 +28,10 @@ from .sources import default_registry
 from .sources.adzuna import AdzunaApiSource
 from .sources.jooble import JoobleApiSource
 from .storage import SQLiteStore
+from .website_ground_truth import (
+    evaluate_website_resolution_csv,
+    export_website_ground_truth_template,
+)
 
 app = typer.Typer(help="Faro Employer Discovery Engine")
 
@@ -365,6 +375,111 @@ def evaluate_resolution(
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+
+
+@app.command("export-website-ground-truth")
+def export_website_ground_truth(
+    output: str = typer.Option(..., "--output"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    limit: int = typer.Option(1000, "--limit", min=1, max=100_000),
+) -> None:
+    store = SQLiteStore(db)
+    path = export_website_ground_truth_template(store, output, limit=limit)
+    typer.echo(str(path))
+
+
+@app.command("evaluate-website")
+def evaluate_website(
+    path: str = typer.Option(..., "--path"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+) -> None:
+    store = SQLiteStore(db)
+    try:
+        report = evaluate_website_resolution_csv(store, path)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+
+
+@app.command("export-contact-ground-truth")
+def export_contact_ground_truth(
+    output: str = typer.Option(..., "--output"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    limit: int = typer.Option(1000, "--limit", min=1, max=100_000),
+) -> None:
+    store = SQLiteStore(db)
+    path = export_contact_ground_truth_template(store, output, limit=limit)
+    typer.echo(str(path))
+
+
+@app.command("evaluate-contacts")
+def evaluate_contacts(
+    path: str = typer.Option(..., "--path"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+) -> None:
+    store = SQLiteStore(db)
+    try:
+        report = evaluate_contact_classification_csv(store, path)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+
+
+@app.command("export-quality-labels")
+def export_quality_labels(
+    output_dir: str = typer.Option(..., "--output-dir"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    job_limit: int = typer.Option(1000, "--job-limit", min=1, max=100_000),
+    company_limit: int = typer.Option(1000, "--company-limit", min=1, max=100_000),
+    contact_limit: int = typer.Option(1000, "--contact-limit", min=1, max=100_000),
+) -> None:
+    store = SQLiteStore(db)
+    bundle = export_quality_label_bundle(
+        store,
+        output_dir,
+        job_limit=job_limit,
+        company_limit=company_limit,
+        contact_limit=contact_limit,
+    )
+    typer.echo(json.dumps(bundle.to_dict(), ensure_ascii=False, indent=2))
+
+
+@app.command("quality-gate")
+def quality_gate(
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    resolution_truth: str | None = typer.Option(None, "--resolution-truth"),
+    website_truth: str | None = typer.Option(None, "--website-truth"),
+    contact_truth: str | None = typer.Option(None, "--contact-truth"),
+    min_resolution_f1: float = typer.Option(0.95, "--min-resolution-f1", min=0.0, max=1.0),
+    min_website_f1: float = typer.Option(0.95, "--min-website-f1", min=0.0, max=1.0),
+    min_contact_macro_f1: float = typer.Option(
+        0.90,
+        "--min-contact-macro-f1",
+        min=0.0,
+        max=1.0,
+    ),
+    fail_on_error: bool = typer.Option(False, "--fail-on-error"),
+) -> None:
+    if not any((resolution_truth, website_truth, contact_truth)):
+        raise typer.BadParameter("Podaj co najmniej jeden plik ground truth")
+
+    store = SQLiteStore(db)
+    try:
+        result = evaluate_quality_gate(
+            store,
+            resolution_truth=resolution_truth,
+            website_truth=website_truth,
+            contact_truth=contact_truth,
+            min_resolution_f1=min_resolution_f1,
+            min_website_f1=min_website_f1,
+            min_contact_macro_f1=min_contact_macro_f1,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    if fail_on_error and not result.passed:
+        raise typer.Exit(code=2)
 
 
 @app.command("export-green")
