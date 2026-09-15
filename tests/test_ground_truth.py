@@ -5,6 +5,7 @@ import pytest
 from agregator.ground_truth import (
     GroundTruthLabel,
     evaluate_company_resolution,
+    evaluate_company_resolution_csv,
     export_ground_truth_template,
     load_ground_truth_csv,
 )
@@ -61,6 +62,7 @@ def test_pairwise_resolution_metrics_detect_false_negative(tmp_path: Path) -> No
     assert report.precision == 0.0
     assert report.recall == 0.0
     assert report.f1 == 0.0
+    assert report.excluded_rows == 0
 
 
 def test_pairwise_resolution_metrics_for_correct_merge(tmp_path: Path) -> None:
@@ -139,3 +141,34 @@ def test_ground_truth_csv_loader_validates_columns_and_duplicates(tmp_path: Path
     missing.write_text("source,source_id\nolx,1\n", encoding="utf-8")
     with pytest.raises(ValueError, match="missing columns"):
         load_ground_truth_csv(missing)
+
+
+def test_company_resolution_exclusion_is_not_treated_as_company_label(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "excluded.sqlite3")
+    store.init_schema()
+    store.upsert_jobs(
+        [
+            _job("a", "1", "Alpha", "Gdańsk"),
+            _job("b", "2", "Beta", "Gdynia"),
+            _job("c", "3", "Gamma", "Sopot"),
+        ]
+    )
+    truth = tmp_path / "excluded_truth.csv"
+    truth.write_text(
+        "source,source_id,truth_company_id\n"
+        "a,1,truth-alpha\n"
+        "b,2,__exclude__\n"
+        "c,3,truth-gamma\n",
+        encoding="utf-8",
+    )
+
+    labels = load_ground_truth_csv(truth)
+    report = evaluate_company_resolution_csv(store, truth)
+
+    assert [label.source_id for label in labels] == ["1", "3"]
+    assert all(label.truth_company_id != "__exclude__" for label in labels)
+    assert report.labeled_rows == 2
+    assert report.excluded_rows == 1
+    assert report.evaluated_pairs == 1
