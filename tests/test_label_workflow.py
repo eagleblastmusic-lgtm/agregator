@@ -132,6 +132,33 @@ def test_exclude_is_explicit_and_clears_contact_purpose(tmp_path: Path) -> None:
     assert "2,__exclude__,,Beta,email,kontakt@beta.example" in text
 
 
+def test_exclude_sentinel_requires_explicit_flag(tmp_path: Path) -> None:
+    labels = tmp_path / "labels"
+    _write_label_files(labels)
+
+    with pytest.raises(ValueError, match="use exclude=True"):
+        set_row_label(
+            labels,
+            LabelKind.WEBSITE_RESOLUTION,
+            1,
+            value="__exclude__",
+        )
+
+
+def test_exclude_rejects_contact_purpose(tmp_path: Path) -> None:
+    labels = tmp_path / "labels"
+    _write_label_files(labels)
+
+    with pytest.raises(ValueError, match="purpose cannot be combined"):
+        set_row_label(
+            labels,
+            LabelKind.CONTACT_CLASSIFICATION,
+            1,
+            exclude=True,
+            purpose="generic",
+        )
+
+
 def test_label_modes_are_mutually_exclusive(tmp_path: Path) -> None:
     labels = tmp_path / "labels"
     _write_label_files(labels)
