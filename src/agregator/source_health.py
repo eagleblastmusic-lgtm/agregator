@@ -114,18 +114,21 @@ def _source_state(latest: Any) -> str:
 
     error_type = str(latest["error_type"] or "").lower()
     error_message = str(latest["error_message"] or "").lower()
-    access_markers = (
+    http_access_markers = (
         "401 unauthorized",
         "403 forbidden",
+        "406 not acceptable",
+    )
+    general_access_markers = (
         "access denied",
         "captcha",
         "robots.txt disallows",
         "robots disallows",
     )
     if error_type == "httpstatuserror" and any(
-        marker in error_message for marker in access_markers[:2]
+        marker in error_message for marker in http_access_markers
     ):
         return "access_blocked"
-    if any(marker in error_message for marker in access_markers[2:]):
+    if any(marker in error_message for marker in general_access_markers):
         return "access_blocked"
     return "failing"
