@@ -7,12 +7,27 @@ Szczegółowy plan i checkpointy: [`PLAN.md`](PLAN.md).
 ## Gotowe baseline'y
 
 - M0: crawler + evidence + GREEN/REVIEW/IGNORE.
-- M1: OLX, Jooble, Adzuna, source registry, resumowalne runy, katalog 91 źródeł, pełny bundle eksportowy dla Faro oraz kontrolowany `benchmark-collect` round-robin.
+- M1: OLX, Jooble, Adzuna i Careerjet Publisher API, source registry, resumowalne runy, katalog 91 źródeł, pełny bundle eksportowy dla Faro oraz kontrolowany `benchmark-collect` round-robin.
 - M2: konserwatywny Company Resolution v1, aliasy/lokalizacje, metody/confidence, ground truth, pairwise precision/recall/F1, fuzzy REVIEW bez automatycznego merge.
 - M3: ranking wyników wyszukiwarki + first-party content verification z fallbackiem do kolejnych kandydatów, JSON-LD Organization oraz zapis każdej próby weryfikacji kandydata.
 - M4 foundations: `sitemap.xml`, priorytety podstron współpracy/B2B, typowe obfuskowane e-maile, formularze ze zgodą na informacje handlowe, append-only evidence snapshots z SHA-256.
 - Quality benchmark: osobne ground truth i ewaluatory dla Company Resolution, wyboru oficjalnej domeny oraz klasyfikacji kontaktów.
 - Employer Discovery Score: niezależny od confidence ranking firm na podstawie liczby ofert, liczby źródeł, zweryfikowanej WWW, strony biznesowej, GREEN channel i jakości identity.
+
+## Careerjet Publisher API
+
+Adapter `careerjet` korzysta z oficjalnego endpointu Publisher API v4 i wymaga konfiguracji partnera. Nie wymyśla danych wymaganych przez Careerjet. Do uruchomienia potrzebne są:
+
+```text
+CAREERJET_API_KEY
+CAREERJET_REFERER
+CAREERJET_USER_IP
+CAREERJET_USER_AGENT
+```
+
+Dodatkowo można ustawić `CAREERJET_LOCALE`, `CAREERJET_KEYWORDS`, `CAREERJET_LOCATION`, `CAREERJET_PAGE_SIZE` i `CAREERJET_SORT`.
+
+Careerjet wymaga, aby `user_ip`, `user_agent` i `Referer` odpowiadały rzeczywistemu kontekstowi użycia Publisher API. Z tego powodu `careerjet` nie został dodany do domyślnej listy automatycznego benchmarku backendowego; powinien być używany tylko wtedy, gdy konkretny scenariusz integracji spełnia warunki konta Publisher.
 
 ## Kontrolowany benchmark
 
@@ -122,4 +137,5 @@ Próbka 1000 ofert ma dostarczyć danych do kalibracji:
 - formularz ze zgodą marketingową jest sygnałem REVIEW, a nie zgodą na automatyczny outreach,
 - quality gate nie zastępuje ręcznego labelingu — mierzy jakość względem etykiet,
 - źródła partnerskie/API nie są zastępowane obchodzeniem uwierzytelniania lub zabezpieczeń,
+- adaptery partnerskie są uruchamiane tylko w kontekście zgodnym z wymaganiami danego partnera,
 - outreach pozostaje poza zakresem repo.
