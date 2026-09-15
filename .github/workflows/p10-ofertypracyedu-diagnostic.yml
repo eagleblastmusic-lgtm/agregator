@@ -27,7 +27,7 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
 
-      - name: Compare public Inertia listing variants
+      - name: Probe regional public Inertia searches
         shell: bash
         run: |
           mkdir -p p10-ofertypracyedu-diagnostic
@@ -37,7 +37,6 @@ jobs:
           import json
           import urllib.robotparser
           from pathlib import Path
-          from urllib.parse import urljoin
 
           import httpx
           from bs4 import BeautifulSoup
@@ -45,58 +44,33 @@ jobs:
           BASE = "https://ofertypracy.edu.pl"
           UA = "FaroEmployerDiscovery/0.2"
           root = Path("p10-ofertypracyedu-diagnostic")
-          variants = [
-              BASE + "/",
-              BASE + "/?page=1",
-              BASE + "/?page=1&per_page=15&sort=-published_at",
-              BASE + "/?page=1&per_page=25&sort=-published_at",
-              BASE + "/?page=1&per_page=25&search=1&sort=-published_at",
-          ]
-          candidate_offer_ids = ["313542", "310370", "304845"]
 
-          def parse_inertia(html: str):
-              soup = BeautifulSoup(html, "html.parser")
+          def parse_inertia(text: str):
+              soup = BeautifulSoup(text, "html.parser")
               app = soup.select_one("#app[data-page]")
               if app is None:
-                  return None, soup
+                  return None
               raw = str(app.get("data-page") or "")
-              if not raw:
-                  return None, soup
-              return json.loads(html_module.unescape(raw)), soup
+              return json.loads(html_module.unescape(raw)) if raw else None
 
-          def compact_variant(url: str, response: httpx.Response, payload, soup):
-              result = {
-                  "requested_url": url,
-                  "status": response.status_code,
-                  "final_url": str(response.url),
-                  "content_type": response.headers.get("content-type"),
-                  "html_chars": len(response.text),
-                  "title": soup.title.get_text(" ", strip=True) if soup.title else None,
-                  "inertia": payload is not None,
-              }
-              if not payload:
-                  return result
-              props = payload.get("props") or {}
+          def summarize(payload):
+              props = (payload or {}).get("props") or {}
               offers = props.get("offers") or {}
               data = offers.get("data") or []
               meta = offers.get("meta") or {}
-              result.update(
-                  {
-                      "component": payload.get("component"),
-                      "payload_url": payload.get("url"),
-                      "sort": props.get("sort"),
-                      "perPage": props.get("perPage"),
-                      "filter": props.get("filter"),
-                      "defaultFilter": props.get("defaultFilter"),
-                      "offers_count": len(data),
-                      "offers_total": meta.get("total"),
-                      "offers_current_page": meta.get("current_page"),
-                      "offers_per_page": meta.get("per_page"),
-                      "offers_last_page": meta.get("last_page"),
-                      "first_offers": data[:3],
-                  }
-              )
-              return result
+              return {
+                  "component": (payload or {}).get("component"),
+                  "payload_url": (payload or {}).get("url"),
+                  "filter": props.get("filter"),
+                  "sort": props.get("sort"),
+                  "perPage": props.get("perPage"),
+                  "count": len(data),
+                  "total": meta.get("total"),
+                  "current_page": meta.get("current_page"),
+                  "last_page": meta.get("last_page"),
+                  "meta_per_page": meta.get("per_page"),
+                  "first_offers": data[:3],
+              }
 
           async def main():
               async with httpx.AsyncClient(
@@ -110,10 +84,6 @@ jobs:
               ) as client:
                   robots_url = BASE + "/robots.txt"
                   robots_response = await client.get(robots_url)
-                  root.joinpath("robots.txt").write_text(
-                      robots_response.text,
-                      encoding="utf-8",
-                  )
                   parser = urllib.robotparser.RobotFileParser()
                   parser.set_url(robots_url)
                   if robots_response.status_code in {401, 403}:
@@ -124,93 +94,64 @@ jobs:
                       robots_response.raise_for_status()
                       parser.parse(robots_response.text.splitlines())
 
+                  home = await client.get(BASE + "/")
+                  home.raise_for_status()
+                  home_payload = parse_inertia(home.text)
+                  home_props = (home_payload or {}).get("props") or {}
+                  voivodeships = home_props.get("voivodeships") or []
+
                   rows = []
-                  script_urls = set()
-                  for index, url in enumerate(variants):
-                      if not parser.can_fetch(UA, url):
-                          rows.append({"requested_url": url, "robots_allowed": False})
+                  for voivodeship in voivodeships:
+                      region_id = str(voivodeship.get("id") or "").strip()
+                      region_name = str(voivodeship.get("name") or "").strip()
+                      if not region_id:
                           continue
-                      response = await client.get(url)
-                      response.raise_for_status()
-                      payload, soup = parse_inertia(response.text)
-                      row = compact_variant(url, response, payload, soup)
-                      row["robots_allowed"] = True
-                      rows.append(row)
-                      root.joinpath(f"variant-{index}.html").write_text(
-                          response.text,
-                          encoding="utf-8",
-                      )
-                      for script in soup.find_all("script", src=True):
-                          src = str(script.get("src") or "").strip()
-                          if src:
-                              script_urls.add(urljoin(str(response.url), src))
-
-                  js_rows = []
-                  for script_url in sorted(script_urls):
-                      if "SearchIndex" not in script_url:
-                          continue
-                      response = await client.get(script_url)
-                      response.raise_for_status()
-                      text = response.text
-                      root.joinpath("SearchIndex.js").write_text(text, encoding="utf-8")
-                      snippets = {}
-                      for needle in (
-                          "search",
-                          "per_page",
-                          "sort",
-                          "filter",
-                          "router.get",
-                          "search.index",
-                          "published_at",
-                      ):
-                          pos = text.find(needle)
-                          if pos >= 0:
-                              snippets[needle] = text[max(0, pos - 500) : pos + 1200]
-                      js_rows.append(
-                          {
-                              "url": script_url,
-                              "status": response.status_code,
-                              "chars": len(text),
-                              "snippets": snippets,
-                          }
-                      )
-
-                  candidate_rows = []
-                  for offer_id in candidate_offer_ids:
-                      url = f"{BASE}/oferty/{offer_id}"
+                      params = {
+                          "filter[rspo.voivodeship_id]": region_id,
+                          "sort": "-published_at",
+                          "per_page": "25",
+                          "search": "1",
+                      }
+                      request = client.build_request("GET", BASE + "/", params=params)
+                      url = str(request.url)
                       if not parser.can_fetch(UA, url):
-                          candidate_rows.append(
-                              {"id": offer_id, "robots_allowed": False}
+                          rows.append(
+                              {
+                                  "id": region_id,
+                                  "name": region_name,
+                                  "robots_allowed": False,
+                                  "url": url,
+                              }
                           )
                           continue
-                      response = await client.get(url)
-                      soup = BeautifulSoup(response.text, "html.parser")
-                      candidate_rows.append(
-                          {
-                              "id": offer_id,
-                              "robots_allowed": True,
-                              "status": response.status_code,
-                              "final_url": str(response.url),
-                              "title": (
-                                  soup.title.get_text(" ", strip=True)
-                                  if soup.title
-                                  else None
-                              ),
-                              "h3": (
-                                  soup.find("h3").get_text(" ", strip=True)
-                                  if soup.find("h3")
-                                  else None
-                              ),
-                          }
-                      )
+                      response = await client.send(request)
+                      response.raise_for_status()
+                      payload = parse_inertia(response.text)
+                      row = {
+                          "id": region_id,
+                          "name": region_name,
+                          "robots_allowed": True,
+                          "status": response.status_code,
+                          "url": str(response.url),
+                      }
+                      row.update(summarize(payload))
+                      rows.append(row)
 
                   output = {
                       "robots_status": robots_response.status_code,
-                      "variants": rows,
-                      "frontend": js_rows,
-                      "candidate_offer_pages": candidate_rows,
+                      "home": summarize(home_payload),
+                      "voivodeships": voivodeships,
+                      "regions": rows,
+                      "regions_with_offers": [
+                          row
+                          for row in rows
+                          if int(row.get("total") or 0) > 0
+                      ],
+                      "offers_total_sum": sum(
+                          int(row.get("total") or 0) for row in rows
+                      ),
                   }
-                  root.joinpath("variants.json").write_text(
+                  root.joinpath("regions.json").write_text(
                       json.dumps(output, ensure_ascii=False, indent=2) + "\n",
                       encoding="utf-8",
                   )
