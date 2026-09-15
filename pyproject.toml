@@ -28,6 +28,7 @@ agregator = "agregator.cli:app"
 agregator-benchmark = "agregator.benchmark_cli:app"
 agregator-collect = "agregator.collection_cli:app"
 agregator-export = "agregator.lead_cli:app"
+agregator-scrape = "agregator.scrape_cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agregator"]
