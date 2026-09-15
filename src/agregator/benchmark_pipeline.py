@@ -184,7 +184,7 @@ async def run_benchmark_pipeline(
     readiness = _build_readiness(collection, enrichment)
 
     manifest = {
-        "schema_version": "4",
+        "schema_version": "5",
         "created_at": datetime.now(UTC).isoformat(),
         "database": str(store.path),
         "configuration": {
@@ -217,6 +217,16 @@ async def run_benchmark_pipeline(
             "website_page_snapshots": "dataset/website_page_snapshots.csv",
             "labels_dir": "labels",
             "label_sampling_manifest": "labels/sampling_manifest.json",
+            "prediction_reference_dir": "labels/prediction_reference",
+            "company_resolution_reference": (
+                "labels/prediction_reference/company_resolution_reference.csv"
+            ),
+            "website_resolution_reference": (
+                "labels/prediction_reference/website_resolution_reference.csv"
+            ),
+            "contact_classification_reference": (
+                "labels/prediction_reference/contact_classification_reference.csv"
+            ),
         },
     }
     _write_json(run_manifest_path, manifest)
