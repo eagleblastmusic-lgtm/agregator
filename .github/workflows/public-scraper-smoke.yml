@@ -1,0 +1,132 @@
+name: Public Scraper Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Comma-separated public scraper sources or all"
+        required: true
+        default: "kprm"
+        type: string
+      pages_per_source:
+        description: "Pages/chunks per source"
+        required: true
+        default: "1"
+        type: string
+      strict:
+        description: "Fail workflow if any selected source fails"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faro-public-scraper-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Prepare output
+        run: mkdir -p scraper-smoke
+
+      - name: List public sources
+        run: agregator-scrape sources | tee scraper-smoke/sources.json
+
+      - name: Run public scraper smoke
+        id: scrape
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          args=(
+            run
+            --sources "${{ inputs.sources }}"
+            --pages-per-source "${{ inputs.pages_per_source }}"
+            --db scraper-smoke/scrape.sqlite3
+            --fresh
+          )
+          if [[ "${{ inputs.strict }}" == "true" ]]; then
+            args+=(--strict)
+          fi
+          agregator-scrape "${args[@]}" | tee scraper-smoke/result.json
+          code=${PIPESTATUS[0]}
+          echo "$code" > scraper-smoke/exit_code.txt
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Write step summary
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          result_path = Path("scraper-smoke/result.json")
+          lines = ["## Faro public scraper smoke", ""]
+          if result_path.exists():
+              try:
+                  payload = json.loads(result_path.read_text(encoding="utf-8"))
+              except Exception as exc:
+                  lines.append(f"Result JSON parse error: `{exc}`")
+              else:
+                  lines.extend(
+                      [
+                          f"- Requested: `{', '.join(payload.get('requested_sources', []))}`",
+                          f"- Successful: `{', '.join(payload.get('successful_sources', [])) or 'none'}`",
+                          f"- Failed: `{', '.join(payload.get('failed_sources', [])) or 'none'}`",
+                          "",
+                          "| Source | Status | Seen | Inserted | Updated | Error |",
+                          "|---|---:|---:|---:|---:|---|",
+                      ]
+                  )
+                  for item in payload.get("results", []):
+                      lines.append(
+                          "| {source} | {status} | {seen} | {inserted} | {updated} | {error} |".format(
+                              source=item.get("source", ""),
+                              status=item.get("status", ""),
+                              seen=item.get("jobs_seen", 0),
+                              inserted=item.get("jobs_inserted", 0),
+                              updated=item.get("jobs_updated", 0),
+                              error=str(item.get("error", "")).replace("|", "\\|"),
+                          )
+                      )
+          else:
+              lines.append("No result.json was produced.")
+
+          Path("summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload scraper artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: faro-public-scraper-smoke-${{ github.run_id }}
+          path: scraper-smoke/
+          retention-days: 7
+
+      - name: Enforce result
+        if: always()
+        shell: bash
+        run: |
+          code="$(cat scraper-smoke/exit_code.txt 2>/dev/null || echo 1)"
+          if [[ "$code" != "0" ]]; then
+            echo "Public scraper smoke failed with exit code $code"
+            exit "$code"
+          fi
