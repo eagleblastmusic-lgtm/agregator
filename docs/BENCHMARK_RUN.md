@@ -11,7 +11,7 @@ zbieranie ofert
     -> raport benchmarku
     -> eksport datasetu
     -> offline snapshoty stron i timeline evidence
-    -> pakiet do ręcznego ground truth
+    -> deterministycznie próbkowany pakiet do ręcznego ground truth
 ```
 
 Nie wykonuje outreachu ani wysyłki wiadomości.
@@ -44,12 +44,15 @@ agregator-benchmark run \
   --target-jobs 1000 \
   --max-rounds 100 \
   --enrichment-batch-size 25 \
-  --max-enrichment-companies 1000
+  --max-enrichment-companies 1000 \
+  --label-sampling-seed faro-ground-truth-v1
 ```
 
 `target_jobs=1000` oznacza całkowitą liczbę ofert w bazie benchmarkowej. Jeżeli baza ma już co najmniej target, collection kończy się jako `target_already_reached` i workflow idzie dalej.
 
 `--fresh-collection` resetuje kursory wybranych źródeł, ale nie kasuje rekordów z bazy. Do całkowicie nowego benchmarku najlepiej użyć nowej ścieżki SQLite.
+
+`--label-sampling-seed` steruje deterministycznym doborem rekordów do ręcznego ground truth. Ten sam dataset, te same limity i ten sam seed dają tę samą próbkę. Seed jest zapisywany w `benchmark_run_manifest.json` oraz `labels/sampling_manifest.json`.
 
 ### Tryb strict
 
@@ -98,10 +101,34 @@ benchmark/run/
 └── labels/
     ├── company_resolution_truth.csv
     ├── website_resolution_truth.csv
-    └── contact_classification_truth.csv
+    ├── contact_classification_truth.csv
+    └── sampling_manifest.json
 ```
 
-`dataset/manifest.json` ma schema version `7`.
+`dataset/manifest.json` ma schema version `7`. `benchmark_run_manifest.json` ma schema version `4` i zapisuje m.in. seed oraz ścieżkę do manifestu samplingu.
+
+## Deterministyczny sampling ground truth
+
+Eksport labeli nie bierze już po prostu pierwszych N rekordów z SQLite. Najpierw budowana jest pełna pula kandydatów, a następnie — jeśli populacja przekracza limit — dobierana jest próbka warstwowa.
+
+Warstwy są definiowane osobno dla trzech zadań:
+
+- Company Resolution: `source + resolution method + confidence band`,
+- Website Resolution: `resolution origin + verification outcome + confidence band + obecność source website candidate`,
+- Contact Classification: `kind + predicted decision + confidence band`.
+
+Gdy budżet próbki na to pozwala, każda obserwowana warstwa dostaje co najmniej jeden rekord, a pozostały budżet jest dzielony proporcjonalnie do liczebności warstw. Remisy są rozstrzygane deterministycznym hashem zależnym od seeda.
+
+Dla Company Resolution część próbki jest rezerwowana na **pairwise anchors**: po dwa rekordy z wybranych przewidywanych `company_id`, które mają co najmniej dwie oferty. Dzięki temu ewaluacja pairwise nie kończy się sztucznie na zbiorze złożonym wyłącznie z singletonów.
+
+`labels/sampling_manifest.json` zapisuje:
+
+- seed i nazwę strategii,
+- rozmiar pełnej populacji i próbki dla każdego zadania,
+- liczebność każdej warstwy przed i po samplingu,
+- liczbę firm i wierszy wykorzystanych jako pairwise anchors dla Company Resolution.
+
+Manifest samplingu jest elementem provenance benchmarku. Zmiana seeda jest dozwolona np. dla niezależnej próbki kontrolnej, ale przy porównywaniu dwóch wersji algorytmu należy zachować ten sam dataset, limity i seed.
 
 ## Offline evidence stron WWW
 
@@ -156,7 +183,7 @@ agregator-benchmark status \
   --strict
 ```
 
-`--strict` zwraca kod `2`, dopóki wszystkie trzy pliki ground truth nie istnieją, mają prawidłową kolumnę etykiety, nie są puste i nie są w pełni oznaczone.
+`--strict` zwraca kod `2`, dopóki wszystkie trzy pliki ground truth nie istnieją, mają prawidłową kolumnę etykiety, nie są puste i nie są w pełni oznaczone. `sampling_manifest.json` nie jest czwartym plikiem do ręcznego oznaczania — służy wyłącznie jako audit/provenance próbki.
 
 ## Następny krok: ręczny ground truth
 
@@ -165,6 +192,8 @@ Po benchmarku nie należy automatycznie podnosić progów ani rozszerzać auto-m
 - `company_resolution_truth.csv`,
 - `website_resolution_truth.csv`,
 - `contact_classification_truth.csv`.
+
+Przed labelingiem warto sprawdzić `sampling_manifest.json`, czy istotne warstwy mają wystarczający support. Sam sampling nie gwarantuje statystycznej reprezentatywności dla każdej rzadkiej kategorii — jego zadaniem jest uniknięcie oczywistego biasu „pierwszych N rekordów” i zachowanie audytowalnego, powtarzalnego wyboru.
 
 Gdy `agregator-benchmark status --strict` przejdzie, można wykonać zintegrowaną ewaluację:
 
