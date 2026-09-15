@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from agregator.label_workflow import LabelKind, next_unlabeled_row, set_row_label
+from agregator.label_workflow import (
+    LabelKind,
+    next_unlabeled_row,
+    prediction_reference_row,
+    set_row_label,
+)
 
 
 def _write_label_files(directory: Path) -> None:
@@ -27,6 +32,37 @@ def _write_label_files(directory: Path) -> None:
         "Kontakt dla partnerów: partnerzy@alpha.example,1,abc,2026-09-15\n"
         "2,review,,Beta,email,kontakt@beta.example,https://beta.example/kontakt,"
         "Kontakt: kontakt@beta.example,2,def,2026-09-15\n",
+        encoding="utf-8-sig",
+    )
+
+
+def _write_prediction_references(directory: Path) -> None:
+    reference = directory / "prediction_reference"
+    reference.mkdir()
+    (reference / "company_resolution_reference.csv").write_text(
+        "source,source_id,truth_company_id,company_name_raw,city,url,"
+        "predicted_company_id,company_resolution_method,company_resolution_confidence\n"
+        "a,1,,Alpha,Gdańsk,https://jobs.test/1,10,exact_name_city,0.99\n"
+        "a,2,,Beta,Gdynia,https://jobs.test/2,20,new_company,0.99\n",
+        encoding="utf-8-sig",
+    )
+    (reference / "website_resolution_reference.csv").write_text(
+        "company_id,truth_domain,canonical_name,city,job_count,sources,"
+        "predicted_domain,predicted_website_url,website_confidence\n"
+        "10,,Alpha,Gdańsk,2,a,alpha.example,https://alpha.example,0.98\n"
+        "20,,Beta,Gdynia,1,b,, ,0.20\n",
+        encoding="utf-8-sig",
+    )
+    (reference / "contact_classification_reference.csv").write_text(
+        "contact_id,truth_decision,truth_purpose,canonical_name,kind,value,"
+        "evidence_url,evidence_text,latest_evidence_snapshot_id,"
+        "evidence_content_sha256,evidence_captured_at,predicted_decision,"
+        "predicted_purpose,predicted_confidence,evidence_signal\n"
+        "1,,,Alpha,email,partnerzy@alpha.example,https://alpha.example/partnerzy,"
+        "Kontakt dla partnerów: partnerzy@alpha.example,1,abc,2026-09-15,"
+        "green,business_partnership,0.99,partnerzy\n"
+        "2,,,Beta,email,kontakt@beta.example,https://beta.example/kontakt,"
+        "Kontakt: kontakt@beta.example,2,def,2026-09-15,review,generic,0.65,kontakt\n",
         encoding="utf-8-sig",
     )
 
@@ -184,3 +220,74 @@ def test_company_label_rejects_website_none_sentinel(tmp_path: Path) -> None:
             1,
             value="__none__",
         )
+
+
+def test_prediction_reference_is_blocked_before_independent_label(tmp_path: Path) -> None:
+    labels = tmp_path / "labels"
+    _write_label_files(labels)
+    _write_prediction_references(labels)
+
+    with pytest.raises(ValueError, match="must be independently labeled"):
+        prediction_reference_row(labels, LabelKind.COMPANY_RESOLUTION, 1)
+
+
+def test_prediction_reference_opens_after_truth_and_preserves_prediction(tmp_path: Path) -> None:
+    labels = tmp_path / "labels"
+    _write_label_files(labels)
+    _write_prediction_references(labels)
+    set_row_label(
+        labels,
+        LabelKind.COMPANY_RESOLUTION,
+        1,
+        value="truth-alpha",
+    )
+
+    reference = prediction_reference_row(labels, LabelKind.COMPANY_RESOLUTION, 1)
+
+    assert reference.truth_value == "truth-alpha"
+    assert reference.truth_purpose is None
+    assert reference.prediction["predicted_company_id"] == "10"
+    assert reference.prediction["company_resolution_method"] == "exact_name_city"
+    assert reference.reference_path.name == "company_resolution_reference.csv"
+
+
+def test_prediction_reference_returns_contact_truth_purpose(tmp_path: Path) -> None:
+    labels = tmp_path / "labels"
+    _write_label_files(labels)
+    _write_prediction_references(labels)
+    set_row_label(
+        labels,
+        LabelKind.CONTACT_CLASSIFICATION,
+        1,
+        value="review",
+        purpose="generic",
+    )
+
+    reference = prediction_reference_row(labels, LabelKind.CONTACT_CLASSIFICATION, 1)
+
+    assert reference.truth_value == "review"
+    assert reference.truth_purpose == "generic"
+    assert reference.prediction["predicted_decision"] == "green"
+    assert reference.prediction["predicted_purpose"] == "business_partnership"
+
+
+def test_prediction_reference_detects_reference_alignment_drift(tmp_path: Path) -> None:
+    labels = tmp_path / "labels"
+    _write_label_files(labels)
+    _write_prediction_references(labels)
+    set_row_label(
+        labels,
+        LabelKind.COMPANY_RESOLUTION,
+        1,
+        value="truth-alpha",
+    )
+
+    reference_path = labels / "prediction_reference" / "company_resolution_reference.csv"
+    text = reference_path.read_text(encoding="utf-8-sig")
+    reference_path.write_text(
+        text.replace("a,1,,Alpha", "a,999,,Alpha", 1),
+        encoding="utf-8-sig",
+    )
+
+    with pytest.raises(ValueError, match="prediction reference misalignment"):
+        prediction_reference_row(labels, LabelKind.COMPANY_RESOLUTION, 1)
