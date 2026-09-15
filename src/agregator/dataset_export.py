@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .audit import init_audit_schema
 from .storage import SQLiteStore
 
-EXPORT_SCHEMA_VERSION = "1"
+EXPORT_SCHEMA_VERSION = "2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,10 +18,14 @@ class DatasetExportResult:
     companies_path: Path
     jobs_path: Path
     contacts_path: Path
+    website_verifications_path: Path
+    evidence_snapshots_path: Path
     manifest_path: Path
     companies: int
     jobs: int
     contacts: int
+    website_verifications: int
+    evidence_snapshots: int
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -28,10 +33,14 @@ class DatasetExportResult:
             "companies_path": str(self.companies_path),
             "jobs_path": str(self.jobs_path),
             "contacts_path": str(self.contacts_path),
+            "website_verifications_path": str(self.website_verifications_path),
+            "evidence_snapshots_path": str(self.evidence_snapshots_path),
             "manifest_path": str(self.manifest_path),
             "companies": self.companies,
             "jobs": self.jobs,
             "contacts": self.contacts,
+            "website_verifications": self.website_verifications,
+            "evidence_snapshots": self.evidence_snapshots,
             "schema_version": EXPORT_SCHEMA_VERSION,
         }
 
@@ -40,15 +49,18 @@ def export_dataset_bundle(
     store: SQLiteStore,
     output_dir: str | Path,
 ) -> DatasetExportResult:
-    """Export normalized companies, jobs and contact evidence for Faro integration."""
+    """Export normalized current state plus immutable audit evidence for Faro."""
 
     store.init_schema()
+    init_audit_schema(store)
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
 
     companies_path = directory / "companies.csv"
     jobs_path = directory / "job_postings.csv"
     contacts_path = directory / "contact_channels.csv"
+    website_verifications_path = directory / "website_verification_runs.csv"
+    evidence_snapshots_path = directory / "contact_evidence_snapshots.csv"
     manifest_path = directory / "manifest.json"
 
     with store.connect() as connection:
@@ -138,10 +150,61 @@ def export_dataset_bundle(
                 """
             ).fetchall()
         ]
+        website_verifications = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT
+                    w.id AS verification_id,
+                    w.company_id,
+                    c.canonical_name,
+                    w.outcome,
+                    w.website_url,
+                    w.website_confidence,
+                    w.verification_signals_json,
+                    w.search_candidates_json,
+                    w.scanned_pages_json,
+                    w.captured_at
+                FROM website_verification_runs w
+                JOIN companies c ON c.id = w.company_id
+                ORDER BY w.id ASC
+                """
+            ).fetchall()
+        ]
+        evidence_snapshots = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT
+                    e.id AS snapshot_id,
+                    e.contact_channel_id,
+                    e.company_id,
+                    c.canonical_name,
+                    e.evidence_url,
+                    e.evidence_text,
+                    e.evidence_signal,
+                    e.content_sha256,
+                    e.captured_at
+                FROM contact_evidence_snapshots e
+                JOIN companies c ON c.id = e.company_id
+                ORDER BY e.id ASC
+                """
+            ).fetchall()
+        ]
 
     _write_csv(companies_path, companies, _company_fields())
     _write_csv(jobs_path, jobs, _job_fields())
     _write_csv(contacts_path, contacts, _contact_fields())
+    _write_csv(
+        website_verifications_path,
+        website_verifications,
+        _website_verification_fields(),
+    )
+    _write_csv(
+        evidence_snapshots_path,
+        evidence_snapshots,
+        _evidence_snapshot_fields(),
+    )
 
     manifest = {
         "schema_version": EXPORT_SCHEMA_VERSION,
@@ -149,17 +212,27 @@ def export_dataset_bundle(
             "companies": companies_path.name,
             "job_postings": jobs_path.name,
             "contact_channels": contacts_path.name,
+            "website_verification_runs": website_verifications_path.name,
+            "contact_evidence_snapshots": evidence_snapshots_path.name,
         },
         "counts": {
             "companies": len(companies),
             "job_postings": len(jobs),
             "contact_channels": len(contacts),
+            "website_verification_runs": len(website_verifications),
+            "contact_evidence_snapshots": len(evidence_snapshots),
         },
         "notes": {
             "company_resolution": (
                 "company_resolution_method/confidence describe automatic identity resolution"
             ),
             "contact_decision": "green/review/ignore is preserved with evidence provenance",
+            "website_audit": (
+                "website_verification_runs is append-only provenance for enrichment decisions"
+            ),
+            "evidence_hash": (
+                "contact_evidence_snapshots preserves immutable SHA-256 evidence snapshots"
+            ),
         },
     }
     manifest_path.write_text(
@@ -172,10 +245,14 @@ def export_dataset_bundle(
         companies_path=companies_path,
         jobs_path=jobs_path,
         contacts_path=contacts_path,
+        website_verifications_path=website_verifications_path,
+        evidence_snapshots_path=evidence_snapshots_path,
         manifest_path=manifest_path,
         companies=len(companies),
         jobs=len(jobs),
         contacts=len(contacts),
+        website_verifications=len(website_verifications),
+        evidence_snapshots=len(evidence_snapshots),
     )
 
 
@@ -243,4 +320,33 @@ def _contact_fields() -> list[str]:
         "evidence_text",
         "evidence_signal",
         "verified_at",
+    ]
+
+
+def _website_verification_fields() -> list[str]:
+    return [
+        "verification_id",
+        "company_id",
+        "canonical_name",
+        "outcome",
+        "website_url",
+        "website_confidence",
+        "verification_signals_json",
+        "search_candidates_json",
+        "scanned_pages_json",
+        "captured_at",
+    ]
+
+
+def _evidence_snapshot_fields() -> list[str]:
+    return [
+        "snapshot_id",
+        "contact_channel_id",
+        "company_id",
+        "canonical_name",
+        "evidence_url",
+        "evidence_text",
+        "evidence_signal",
+        "content_sha256",
+        "captured_at",
     ]
