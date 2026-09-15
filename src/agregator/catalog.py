@@ -19,6 +19,7 @@ IMPLEMENTED_ADAPTERS: dict[int, str] = {
     21: "kprm",
     30: "jooble",
     32: "careerjet",
+    33: "randstad",
     48: "ngo",
     50: "karierawfinansach",
     53: "skillshot",
