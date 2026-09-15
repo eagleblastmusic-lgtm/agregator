@@ -5,6 +5,7 @@ import pytest
 from agregator.ground_truth import (
     GroundTruthLabel,
     evaluate_company_resolution,
+    export_ground_truth_template,
     load_ground_truth_csv,
 )
 from agregator.models import JobPosting
@@ -89,6 +90,26 @@ def test_pairwise_resolution_metrics_for_correct_merge(tmp_path: Path) -> None:
     assert report.precision == 1.0
     assert report.recall == 1.0
     assert report.f1 == 1.0
+
+
+def test_export_ground_truth_template_contains_prediction_context(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "template.sqlite3")
+    store.init_schema()
+    store.upsert_jobs(
+        [
+            _job("olx", "1", "ACME Logistics", "Gdańsk"),
+            _job("jooble", "2", "ACME Logistics Sp. z o.o.", "Warszawa"),
+        ]
+    )
+
+    path = export_ground_truth_template(store, tmp_path / "truth-template.csv")
+    text = path.read_text(encoding="utf-8-sig")
+
+    assert "truth_company_id" in text
+    assert "predicted_company_id" in text
+    assert "company_resolution_method" in text
+    assert "ACME Logistics" in text
+    assert "exact_name_cross_city" in text
 
 
 def test_ground_truth_csv_loader_validates_columns_and_duplicates(tmp_path: Path) -> None:
