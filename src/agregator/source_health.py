@@ -110,7 +110,7 @@ def build_source_health(
 
 def _source_state(latest: Any) -> str:
     if latest["status"] == "success":
-        return "healthy"
+        return "healthy" if int(latest["jobs_seen"] or 0) > 0 else "empty"
 
     error_type = str(latest["error_type"] or "").lower()
     error_message = str(latest["error_message"] or "").lower()
