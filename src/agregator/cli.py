@@ -10,10 +10,11 @@ import typer
 from .crawler import WebsiteCrawler
 from .enrich import enrich_pending_companies
 from .importers import load_jobs_csv
-from .ingest import ingest_source
+from .ingest import IngestResult, ingest_source
 from .pipeline import EmployerDiscoveryPipeline
 from .search import BraveSearchProvider
 from .sources import default_registry
+from .sources.adzuna import AdzunaApiSource
 from .sources.jooble import JoobleApiSource
 from .storage import SQLiteStore
 
@@ -35,7 +36,7 @@ def _search_provider() -> BraveSearchProvider:
     return BraveSearchProvider(api_key)
 
 
-def _source_result(result: object, db: str) -> dict[str, object]:
+def _source_result(result: IngestResult, db: str) -> dict[str, object]:
     return {
         "run_id": result.run_id,
         "source": result.source,
@@ -153,6 +154,37 @@ def collect_jooble(
             location=location,
             result_on_page=result_on_page,
             radius=radius,
+        )
+        result = await ingest_source(source, store, pages=pages, resume=not fresh)
+        typer.echo(json.dumps(_source_result(result, db), ensure_ascii=False, indent=2))
+
+    asyncio.run(run())
+
+
+@app.command("collect-adzuna")
+def collect_adzuna(
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    pages: int = typer.Option(1, "--pages", min=1, max=20),
+    what: str | None = typer.Option(None, "--what"),
+    where: str | None = typer.Option(None, "--where"),
+    country: str = typer.Option("pl", "--country"),
+    results_per_page: int = typer.Option(20, "--results-per-page", min=1, max=50),
+    fresh: bool = typer.Option(False, "--fresh"),
+) -> None:
+    app_id = os.getenv("ADZUNA_APP_ID", "")
+    app_key = os.getenv("ADZUNA_APP_KEY", "")
+    if not app_id or not app_key:
+        raise typer.BadParameter("Ustaw ADZUNA_APP_ID i ADZUNA_APP_KEY")
+
+    async def run() -> None:
+        store = SQLiteStore(db)
+        source = AdzunaApiSource(
+            app_id,
+            app_key,
+            country=country,
+            what=what,
+            where=where,
+            results_per_page=results_per_page,
         )
         result = await ingest_source(source, store, pages=pages, resume=not fresh)
         typer.echo(json.dumps(_source_result(result, db), ensure_ascii=False, indent=2))
