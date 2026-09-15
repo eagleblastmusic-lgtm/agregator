@@ -17,6 +17,8 @@ class EnrichmentStats:
     channels_found: int = 0
     green_channels: int = 0
     evidence_snapshots: int = 0
+    evidence_observations: int = 0
+    evidence_changes: int = 0
     source_website_candidates_checked: int = 0
     source_website_candidates_verified: int = 0
     search_fallbacks: int = 0
@@ -60,6 +62,8 @@ async def enrich_pending_companies(
 
         stats.enriched += 1
         stats.evidence_snapshots += audit_stats.evidence_snapshots_recorded
+        stats.evidence_observations += audit_stats.evidence_observations_recorded
+        stats.evidence_changes += audit_stats.evidence_changes_recorded
         if result.company.website_url:
             stats.websites_found += 1
         stats.channels_found += len(result.channels)
