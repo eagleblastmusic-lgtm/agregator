@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from dataclasses import dataclass
 
 from .models import DiscoveryResult
@@ -34,6 +35,7 @@ def init_audit_schema(store: SQLiteStore) -> None:
                 website_confidence REAL NOT NULL DEFAULT 0,
                 verification_signals_json TEXT NOT NULL,
                 search_candidates_json TEXT NOT NULL,
+                website_attempts_json TEXT NOT NULL DEFAULT '[]',
                 scanned_pages_json TEXT NOT NULL,
                 captured_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(company_id) REFERENCES companies(id)
@@ -60,6 +62,12 @@ def init_audit_schema(store: SQLiteStore) -> None:
                 ON contact_evidence_snapshots(company_id, captured_at DESC);
             """
         )
+        _ensure_column(
+            connection,
+            "website_verification_runs",
+            "website_attempts_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
 
 
 def record_discovery_audit(
@@ -74,6 +82,7 @@ def record_discovery_audit(
     snapshots = 0
 
     candidates = [candidate.model_dump(mode="json") for candidate in result.search_candidates]
+    attempts = [attempt.model_dump(mode="json") for attempt in result.website_attempts]
     outcome = "verified" if result.company.website_url else "not_verified"
 
     with store.connect() as connection:
@@ -86,8 +95,9 @@ def record_discovery_audit(
                 website_confidence,
                 verification_signals_json,
                 search_candidates_json,
+                website_attempts_json,
                 scanned_pages_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 company_id,
@@ -100,6 +110,7 @@ def record_discovery_audit(
                     separators=(",", ":"),
                 ),
                 json.dumps(candidates, ensure_ascii=False, separators=(",", ":")),
+                json.dumps(attempts, ensure_ascii=False, separators=(",", ":")),
                 json.dumps(result.scanned_pages, ensure_ascii=False, separators=(",", ":")),
             ),
         )
@@ -144,3 +155,17 @@ def record_discovery_audit(
         website_runs_recorded=website_run,
         evidence_snapshots_recorded=snapshots,
     )
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    table: str,
+    column: str,
+    declaration: str,
+) -> None:
+    columns = {
+        str(row["name"])
+        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    if column not in columns:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
