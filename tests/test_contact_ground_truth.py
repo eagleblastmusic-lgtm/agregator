@@ -5,6 +5,7 @@ import pytest
 from agregator.contact_ground_truth import (
     ContactGroundTruthLabel,
     evaluate_contact_classification,
+    evaluate_contact_classification_csv,
     export_contact_ground_truth_template,
     load_contact_ground_truth_csv,
 )
@@ -143,6 +144,7 @@ def test_contact_evaluation_reports_confusion_and_macro_f1(tmp_path: Path) -> No
     assert "form" not in report.decision_by_kind
     assert report.purpose_labeled_rows == 2
     assert report.purpose_accuracy == 1.0
+    assert report.excluded_rows == 0
 
 
 def test_contact_evaluation_reports_metrics_separately_by_kind(tmp_path: Path) -> None:
@@ -198,3 +200,27 @@ def test_contact_ground_truth_template_and_loader(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="invalid truth_decision"):
         load_contact_ground_truth_csv(invalid)
+
+
+def test_contact_ground_truth_exclusion_is_omitted_from_scoring(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "excluded.sqlite3")
+    ids = _seed(store)
+    truth = tmp_path / "excluded_truth.csv"
+    truth.write_text(
+        "contact_id,truth_decision,truth_purpose\n"
+        f"{ids['partnerzy@firma.test']},green,business_partnership\n"
+        f"{ids['kontakt@firma.test']},__exclude__,\n"
+        f"{ids['rodo@firma.test']},ignore,privacy\n",
+        encoding="utf-8",
+    )
+
+    labels = load_contact_ground_truth_csv(truth)
+    report = evaluate_contact_classification_csv(store, truth)
+
+    assert len(labels) == 2
+    assert [label.truth_decision for label in labels] == [Decision.GREEN, Decision.IGNORE]
+    assert report.labeled_rows == 2
+    assert report.excluded_rows == 1
+    assert report.matched_rows == 2
+    assert report.decision_accuracy == 1.0
+    assert report.decision_macro_f1 == 1.0
