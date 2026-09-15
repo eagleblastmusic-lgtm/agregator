@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from .audit import init_audit_schema
+from .ground_truth_common import EXCLUDE_LABEL, count_excluded_labels
 from .models import ChannelKind, ChannelPurpose, Decision
 from .storage import SQLiteStore
 
@@ -60,6 +61,7 @@ class ContactEvaluation:
     decision_by_kind: dict[str, DecisionSliceMetrics]
     purpose_labeled_rows: int
     purpose_accuracy: float
+    excluded_rows: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -77,6 +79,7 @@ class ContactEvaluation:
             },
             "purpose_labeled_rows": self.purpose_labeled_rows,
             "purpose_accuracy": self.purpose_accuracy,
+            "excluded_rows": self.excluded_rows,
         }
 
 
@@ -98,10 +101,6 @@ def load_contact_ground_truth_csv(path: str | Path) -> list[ContactGroundTruthLa
             raw_decision = (row.get("truth_decision") or "").strip().lower()
             if not raw_decision:
                 continue
-            if raw_decision not in valid_decisions:
-                raise ValueError(
-                    f"contact ground truth CSV has invalid truth_decision at line {line_number}"
-                )
 
             raw_contact_id = (row.get("contact_id") or "").strip()
             try:
@@ -119,6 +118,13 @@ def load_contact_ground_truth_csv(path: str | Path) -> list[ContactGroundTruthLa
                     f"duplicate contact ground truth row at line {line_number}: {contact_id}"
                 )
             seen.add(contact_id)
+
+            if raw_decision == EXCLUDE_LABEL:
+                continue
+            if raw_decision not in valid_decisions:
+                raise ValueError(
+                    f"contact ground truth CSV has invalid truth_decision at line {line_number}"
+                )
 
             raw_purpose = (row.get("truth_purpose") or "").strip().lower()
             if raw_purpose and raw_purpose not in valid_purposes:
@@ -272,7 +278,9 @@ def evaluate_contact_classification(
     overall = _decision_slice_metrics(decision_rows)
     by_kind = {
         kind.value: _decision_slice_metrics(rows)
-        for kind, rows in sorted(decision_rows_by_kind.items(), key=lambda item: item[0].value)
+        for kind, rows in sorted(
+            decision_rows_by_kind.items(), key=lambda item: item[0].value
+        )
     }
 
     matched_rows = len(predictions)
@@ -294,7 +302,11 @@ def evaluate_contact_classification_csv(
     store: SQLiteStore,
     path: str | Path,
 ) -> ContactEvaluation:
-    return evaluate_contact_classification(store, load_contact_ground_truth_csv(path))
+    result = evaluate_contact_classification(store, load_contact_ground_truth_csv(path))
+    return replace(
+        result,
+        excluded_rows=count_excluded_labels(path, "truth_decision"),
+    )
 
 
 def _decision_slice_metrics(
