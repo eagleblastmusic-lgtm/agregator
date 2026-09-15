@@ -6,6 +6,7 @@ from typing import Any
 
 from .contact_ground_truth import export_contact_ground_truth_template
 from .ground_truth import export_ground_truth_template
+from .label_blinding import blind_quality_label_files
 from .label_sampling import (
     DEFAULT_SAMPLING_SEED,
     sample_quality_label_files,
@@ -22,6 +23,10 @@ class QualityLabelBundle:
     website_resolution_path: Path
     contact_classification_path: Path
     sampling_manifest_path: Path
+    prediction_reference_dir: Path
+    company_resolution_reference_path: Path
+    website_resolution_reference_path: Path
+    contact_classification_reference_path: Path
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -37,17 +42,19 @@ def export_quality_label_bundle(
     contact_limit: int = 1000,
     sampling_seed: str = DEFAULT_SAMPLING_SEED,
 ) -> QualityLabelBundle:
-    """Export deterministic, stratified manual-label templates.
+    """Export deterministic, stratified and blind manual-label templates.
 
-    The source exporters first create complete candidate pools. The pools are then
-    deterministically sampled so a benchmark is not accidentally dominated by the
-    first rows inserted into SQLite. The sampling manifest records population and
-    sample counts per stratum for auditability.
+    Complete prediction-rich candidate pools are exported first and sampled
+    deterministically. The selected rich rows are then copied to a separate
+    prediction-reference directory while the primary CSVs are rewritten without
+    model predictions. This reduces confirmation bias during primary annotation
+    without losing prediction provenance needed for later adjudication.
     """
 
     if min(job_limit, company_limit, contact_limit) < 1:
         raise ValueError("quality label limits must be >= 1")
-    if not sampling_seed.strip():
+    normalized_sampling_seed = sampling_seed.strip()
+    if not normalized_sampling_seed:
         raise ValueError("sampling_seed cannot be empty")
 
     directory = Path(output_dir)
@@ -82,11 +89,18 @@ def export_quality_label_bundle(
         job_limit=job_limit,
         company_limit=company_limit,
         contact_limit=contact_limit,
-        seed=sampling_seed.strip(),
+        seed=normalized_sampling_seed,
     )
     sampling_manifest_path = write_sampling_manifest(
         directory / "sampling_manifest.json",
         sampling_manifest,
+    )
+
+    blinding = blind_quality_label_files(
+        company_resolution_path,
+        website_resolution_path,
+        contact_classification_path,
+        reference_dir=directory / "prediction_reference",
     )
 
     return QualityLabelBundle(
@@ -95,6 +109,12 @@ def export_quality_label_bundle(
         website_resolution_path=website_resolution_path,
         contact_classification_path=contact_classification_path,
         sampling_manifest_path=sampling_manifest_path,
+        prediction_reference_dir=blinding.reference_dir,
+        company_resolution_reference_path=blinding.company_resolution_reference_path,
+        website_resolution_reference_path=blinding.website_resolution_reference_path,
+        contact_classification_reference_path=(
+            blinding.contact_classification_reference_path
+        ),
     )
 
 
