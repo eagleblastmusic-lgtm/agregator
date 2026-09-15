@@ -43,6 +43,8 @@ class BenchmarkReport:
     employer_score_distribution: dict[str, int]
     source_job_counts: dict[str, int]
     company_resolution_counts: dict[str, int]
+    website_resolution_origin_counts: dict[str, int]
+    source_verified_website_counts: dict[str, int]
     source_run_metrics: dict[str, dict[str, int | float]]
 
     def to_dict(self) -> dict[str, Any]:
@@ -106,21 +108,20 @@ def build_benchmark_report(
             connection,
             "SELECT COUNT(DISTINCT company_id) FROM company_website_candidates",
         )
-        source_verified_websites = _scalar(
-            connection,
+        latest_website_rows = connection.execute(
             """
-            SELECT COUNT(*)
+            SELECT
+                w.outcome,
+                COALESCE(w.resolution_origin, 'legacy') AS resolution_origin,
+                COALESCE(w.resolution_source, '') AS resolution_source
             FROM website_verification_runs w
             JOIN (
                 SELECT company_id, MAX(id) AS latest_id
                 FROM website_verification_runs
                 GROUP BY company_id
             ) latest ON latest.latest_id = w.id
-            WHERE w.outcome = 'verified'
-              AND w.search_candidates_json = '[]'
-              AND w.verification_signals_json LIKE '%source_website_candidate:%'
-            """,
-        )
+            """
+        ).fetchall()
         contact_channels_total = _scalar(
             connection,
             "SELECT COUNT(*) FROM contact_channels",
@@ -196,6 +197,22 @@ def build_benchmark_report(
     company_resolution_counts = {
         str(row["method"]): int(row["jobs"]) for row in resolution_rows
     }
+    website_resolution_origin_counts: dict[str, int] = {}
+    source_verified_website_counts: dict[str, int] = {}
+    for row in latest_website_rows:
+        if str(row["outcome"]) != "verified":
+            continue
+        origin = str(row["resolution_origin"])
+        website_resolution_origin_counts[origin] = (
+            website_resolution_origin_counts.get(origin, 0) + 1
+        )
+        if origin == "source_candidate":
+            source = str(row["resolution_source"] or "unknown")
+            source_verified_website_counts[source] = (
+                source_verified_website_counts.get(source, 0) + 1
+            )
+    source_verified_websites = sum(source_verified_website_counts.values())
+
     source_run_metrics = _source_run_metrics(run_rows)
     employer_scores = rank_companies(store, min_score=0, limit=max(1, companies_total))
     score_values = [item.score for item in employer_scores]
@@ -238,6 +255,8 @@ def build_benchmark_report(
         employer_score_distribution=_score_distribution(score_values),
         source_job_counts=source_job_counts,
         company_resolution_counts=company_resolution_counts,
+        website_resolution_origin_counts=website_resolution_origin_counts,
+        source_verified_website_counts=source_verified_website_counts,
         source_run_metrics=source_run_metrics,
     )
 
