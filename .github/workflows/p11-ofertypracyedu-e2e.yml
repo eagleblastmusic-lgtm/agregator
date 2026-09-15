@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 60
     env:
       AGREGATOR_USER_AGENT: FaroEmployerDiscoveryP11/0.1
-      AGREGATOR_MAX_PAGES: "8"
+      AGREGATOR_MAX_PAGES: "5"
       AGREGATOR_REQUEST_DELAY: "0.5"
 
     steps:
@@ -50,7 +50,7 @@ jobs:
           agregator-run run \
             --sources ofertypracyedu \
             --pages-per-source 1 \
-            --enrichment-limit 25 \
+            --enrichment-limit 10 \
             --fresh-sources \
             --db p11/ofertypracyedu.sqlite3 \
             --output p11/ofertypracyedu-leads.xlsx \
