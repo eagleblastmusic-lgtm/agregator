@@ -100,11 +100,36 @@ def _epraca_from_env() -> EPracaSource:
 
 def default_registry() -> SourceRegistry:
     registry = SourceRegistry()
-    registry.register("olx", OlxPublicSource)
-    registry.register("jooble", _jooble_from_env)
-    registry.register("adzuna", _adzuna_from_env)
-    registry.register("careerjet", _careerjet_from_env)
-    registry.register("epraca", _epraca_from_env)
+    registry.register(
+        "olx",
+        OlxPublicSource,
+        access_mode="public_web_endpoint",
+        experimental=True,
+        notes=(
+            "Uses a public read endpoint outside the documented partner API contract; "
+            "revalidate source terms/access before production use."
+        ),
+    )
+    registry.register(
+        "jooble",
+        _jooble_from_env,
+        access_mode="partner_api",
+    )
+    registry.register(
+        "adzuna",
+        _adzuna_from_env,
+        access_mode="partner_api",
+    )
+    registry.register(
+        "careerjet",
+        _careerjet_from_env,
+        access_mode="partner_api",
+    )
+    registry.register(
+        "epraca",
+        _epraca_from_env,
+        access_mode="official_partner_feed",
+    )
     return registry
 
 
