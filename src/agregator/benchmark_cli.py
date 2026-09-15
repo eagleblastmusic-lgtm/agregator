@@ -28,6 +28,7 @@ from .storage import SQLiteStore
 app = typer.Typer(help="Faro controlled benchmark runner")
 _REQUIRED_KIND_OPTION = typer.Option(..., "--kind")
 _REQUIRED_ROW_OPTION = typer.Option(..., "--row", min=1)
+_DEFAULT_BENCHMARK_SOURCES = "jooble,adzuna"
 
 
 def _crawler() -> WebsiteCrawler:
@@ -53,7 +54,12 @@ def _source_names(value: str) -> list[str]:
 
 @app.command("preflight")
 def preflight(
-    sources: str = typer.Option("olx,jooble,adzuna", "--sources"),
+    sources: str = typer.Option(_DEFAULT_BENCHMARK_SOURCES, "--sources"),
+    allow_experimental_sources: bool = typer.Option(
+        False,
+        "--allow-experimental-sources",
+        help="Jawnie zezwól na źródła oznaczone jako experimental",
+    ),
     strict: bool = typer.Option(
         False,
         "--strict",
@@ -64,6 +70,7 @@ def preflight(
         default_registry(),
         _source_names(sources),
         search_provider_ready=bool(os.getenv("BRAVE_SEARCH_API_KEY", "")),
+        allow_experimental_sources=allow_experimental_sources,
     )
     typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     if strict and not result.ready:
@@ -74,7 +81,7 @@ def preflight(
 def run(
     output_dir: str = typer.Option("benchmark/run", "--output-dir"),
     db: str = typer.Option("benchmark/benchmark.sqlite3", "--db"),
-    sources: str = typer.Option("olx,jooble,adzuna", "--sources"),
+    sources: str = typer.Option(_DEFAULT_BENCHMARK_SOURCES, "--sources"),
     target_jobs: int = typer.Option(1000, "--target-jobs", min=1, max=1_000_000),
     max_rounds: int = typer.Option(100, "--max-rounds", min=1, max=10_000),
     max_errors_per_source: int = typer.Option(
@@ -121,6 +128,11 @@ def run(
         "--label-sampling-seed",
         help="Deterministyczny seed wyboru rekordów do ręcznego ground truth",
     ),
+    allow_experimental_sources: bool = typer.Option(
+        False,
+        "--allow-experimental-sources",
+        help="Jawnie zezwól na źródła oznaczone jako experimental",
+    ),
     strict: bool = typer.Option(
         False,
         "--strict",
@@ -128,6 +140,17 @@ def run(
     ),
 ) -> None:
     source_names = _source_names(sources)
+    registry = default_registry()
+    preflight_result = build_benchmark_preflight(
+        registry,
+        source_names,
+        search_provider_ready=bool(os.getenv("BRAVE_SEARCH_API_KEY", "")),
+        allow_experimental_sources=allow_experimental_sources,
+    )
+    if not preflight_result.ready:
+        blockers = ", ".join(preflight_result.blockers) or "unknown"
+        raise typer.BadParameter(f"benchmark preflight blockers: {blockers}")
+
     store = SQLiteStore(db)
     pipeline = EmployerDiscoveryPipeline(
         crawler=_crawler(),
@@ -138,7 +161,7 @@ def run(
         result = asyncio.run(
             run_benchmark_pipeline(
                 store,
-                default_registry(),
+                registry,
                 pipeline,
                 source_names,
                 output_dir,
