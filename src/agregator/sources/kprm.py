@@ -12,18 +12,20 @@ from ..models import JobPosting
 from .base import SourceBatch
 
 KPRM_BASE_URL = "https://nabory.kprm.gov.pl"
-KPRM_LISTING_URL = "https://nabory.kprm.gov.pl/?page={page}&per-page=20"
+KPRM_XML_URL = "https://nabory.kprm.gov.pl/pls/serwis/app.xml"
 _DETAIL_PATH = re.compile(r"^/[^/]+/[^/]+/[^,]+,\d+,v\d+$", re.IGNORECASE)
+_XML_OFFER_URL = re.compile(
+    r"https?://nabory\.kprm\.gov\.pl/[^\s<>\"']+?,\d+,v\d+",
+    re.IGNORECASE,
+)
 _ANNOUNCEMENT = re.compile(r"Ogłoszenie\s+nr\s+(\d+)\s*/\s*(\d{2}\.\d{2}\.\d{4})", re.I)
 
 
 class KprmPublicSource:
-    """Scrape public civil-service recruitment listings and detail pages.
+    """Collect public civil-service notices from the official KPRM XML export.
 
-    KPRM exposes recruitment notices publicly and also advertises an XML export in
-    the site footer. This adapter starts with the public HTML representation because
-    it lets Faro preserve the human-visible notice text without depending on an
-    undocumented interpretation of the XML schema.
+    The XML endpoint is linked by the official service and contains current notice URLs.
+    Detail pages remain the evidence source for the human-visible notice text.
     """
 
     name = "kprm"
@@ -39,27 +41,29 @@ class KprmPublicSource:
         self._client = client
         self.user_agent = user_agent
         self.request_delay = max(0.0, request_delay)
-        self.max_details_per_page = max(1, min(max_details_per_page, 20))
+        self.max_details_per_page = max(1, min(max_details_per_page, 100))
         self._robots: urllib.robotparser.RobotFileParser | None = None
 
     async def collect(self, cursor: str | None = None) -> SourceBatch:
         page = self._parse_page(cursor)
-        listing_url = KPRM_LISTING_URL.format(page=page)
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(
             timeout=25,
             follow_redirects=True,
             headers={
-                "Accept": "text/html,application/xhtml+xml",
+                "Accept": "application/xml,text/xml,text/html;q=0.9,*/*;q=0.8",
                 "Accept-Language": "pl-PL,pl;q=0.9",
                 "User-Agent": self.user_agent,
             },
         )
         try:
-            await self._assert_allowed(client, listing_url)
-            listing = await self._get_text(client, listing_url)
-            links = extract_kprm_offer_links(listing_url, listing)
-            links = links[: self.max_details_per_page]
+            await self._assert_allowed(client, KPRM_XML_URL)
+            xml = await self._get_text(client, KPRM_XML_URL)
+            all_links = extract_kprm_offer_links(KPRM_XML_URL, xml)
+            start = (page - 1) * self.max_details_per_page
+            end = start + self.max_details_per_page
+            links = all_links[start:end]
+
             jobs: list[JobPosting] = []
             for index, url in enumerate(links):
                 await self._assert_allowed(client, url)
@@ -76,7 +80,7 @@ class KprmPublicSource:
             if owns_client:
                 await client.aclose()
 
-        next_cursor = str(page + 1) if links else None
+        next_cursor = str(page + 1) if end < len(all_links) else None
         return SourceBatch(jobs=jobs, next_cursor=next_cursor)
 
     @staticmethod
@@ -116,25 +120,28 @@ class KprmPublicSource:
 
 
 def extract_kprm_offer_links(listing_url: str, html: str) -> list[str]:
-    soup = BeautifulSoup(html, "html.parser")
     output: list[str] = []
     seen: set[str] = set()
-    for anchor in soup.select("a[href]"):
-        raw = str(anchor.get("href") or "").strip()
-        if not raw:
-            continue
-        absolute = urljoin(listing_url, raw)
+
+    def add(raw_url: str) -> None:
+        absolute = urljoin(listing_url, raw_url.strip())
         parsed = urlparse(absolute)
         if parsed.netloc.lower() != urlparse(KPRM_BASE_URL).netloc.lower():
-            continue
+            return
         path = unquote(parsed.path)
         if not _DETAIL_PATH.match(path):
-            continue
+            return
         normalized = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
         if normalized in seen:
-            continue
+            return
         seen.add(normalized)
         output.append(normalized)
+
+    soup = BeautifulSoup(html, "html.parser")
+    for anchor in soup.select("a[href]"):
+        add(str(anchor.get("href") or ""))
+    for match in _XML_OFFER_URL.finditer(html):
+        add(match.group(0))
     return output
 
 
@@ -152,7 +159,7 @@ def parse_kprm_detail(url: str, html: str) -> JobPosting | None:
     if not source_id:
         return None
 
-    company_name = _company_before_announcement(lines)
+    company_name = _company_before_announcement(lines) or _company_from_document_title(soup, title)
     if not company_name:
         return None
 
@@ -166,7 +173,9 @@ def parse_kprm_detail(url: str, html: str) -> JobPosting | None:
         url=url,
         title=title,
         company_name=company_name,
-        company_name_source="kprm.detail.header",
+        company_name_source=(
+            "kprm.detail.header" if _company_before_announcement(lines) else "kprm.document_title"
+        ),
         company_name_confidence=0.99,
         city=city,
         description=full_text,
@@ -176,6 +185,7 @@ def parse_kprm_detail(url: str, html: str) -> JobPosting | None:
             "publication_date": published_at,
             "visible_text": full_text,
             "recruitment_contact_phones": contact_phones,
+            "discovery_source": KPRM_XML_URL,
         },
     )
 
@@ -188,6 +198,22 @@ def _company_before_announcement(lines: list[str]) -> str | None:
                     continue
                 if len(candidate) >= 4:
                     return candidate
+    return None
+
+
+def _company_from_document_title(soup: BeautifulSoup, job_title: str) -> str | None:
+    title_node = soup.find("title")
+    if title_node is None:
+        return None
+    parts = [part.strip() for part in title_node.get_text(" ", strip=True).split("|")]
+    if len(parts) < 2:
+        return None
+    for part in parts[1:]:
+        if not part or part.casefold() == job_title.casefold():
+            continue
+        if "praca w służbie cywilnej" in part.casefold():
+            continue
+        return part
     return None
 
 
