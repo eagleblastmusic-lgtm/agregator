@@ -23,12 +23,18 @@ on:
         required: true
         default: false
         type: boolean
+  pull_request:
+    branches:
+      - feat/m0-employer-discovery-core
+    paths:
+      - ".github/workflows/collection-smoke.yml"
+      - ".github/p10-smoke-trigger.txt"
 
 permissions:
   contents: read
 
 concurrency:
-  group: faro-collection-smoke
+  group: faro-collection-smoke-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -75,12 +81,15 @@ jobs:
         shell: bash
         run: |
           set +e
+          sources="${{ inputs.sources }}"
+          [[ -n "$sources" ]] || sources="jooble,adzuna,careerjet,epraca"
+          allow_experimental="${{ inputs.allow_experimental_sources }}"
           extra_args=()
-          if [ "${{ inputs.allow_experimental_sources }}" = "true" ]; then
+          if [ "$allow_experimental" = "true" ]; then
             extra_args+=(--allow-experimental-sources)
           fi
           agregator-collect preflight \
-            --sources "${{ inputs.sources }}" \
+            --sources "$sources" \
             "${extra_args[@]}" \
             --strict \
             > benchmark/collection-smoke/preflight.json
@@ -94,16 +103,23 @@ jobs:
         shell: bash
         run: |
           set +e
+          sources="${{ inputs.sources }}"
+          target_jobs="${{ inputs.target_jobs }}"
+          max_rounds="${{ inputs.max_rounds }}"
+          allow_experimental="${{ inputs.allow_experimental_sources }}"
+          [[ -n "$sources" ]] || sources="jooble,adzuna,careerjet,epraca"
+          [[ -n "$target_jobs" ]] || target_jobs="20"
+          [[ -n "$max_rounds" ]] || max_rounds="1"
           extra_args=()
-          if [ "${{ inputs.allow_experimental_sources }}" = "true" ]; then
+          if [ "$allow_experimental" = "true" ]; then
             extra_args+=(--allow-experimental-sources)
           fi
           agregator-collect run \
             --db benchmark/collection-smoke/collection.sqlite3 \
             --output-dir benchmark/collection-smoke/run \
-            --sources "${{ inputs.sources }}" \
-            --target-jobs "${{ inputs.target_jobs }}" \
-            --max-rounds "${{ inputs.max_rounds }}" \
+            --sources "$sources" \
+            --target-jobs "$target_jobs" \
+            --max-rounds "$max_rounds" \
             "${extra_args[@]}" \
             --strict \
             > benchmark/collection-smoke/run_result.json
