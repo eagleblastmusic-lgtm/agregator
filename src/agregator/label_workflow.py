@@ -77,6 +77,8 @@ _SPECS = {
 
 
 def next_unlabeled_row(label_dir: str | Path, kind: LabelKind | str) -> LabelRow | None:
+    """Return the first unlabeled blind-primary row without consulting predictions."""
+
     label_kind = LabelKind(kind)
     path, fieldnames, rows = _read_rows(label_dir, label_kind)
     del fieldnames
@@ -100,20 +102,24 @@ def set_row_label(
     *,
     value: str | None = None,
     purpose: str | None = None,
-    accept_predicted: bool = False,
     exclude: bool = False,
     overwrite: bool = False,
 ) -> LabelUpdate:
+    """Persist one independent truth decision into the blind primary CSV.
+
+    Predictions are intentionally unavailable here. The benchmark keeps model outputs in
+    `prediction_reference/`; this workflow edits only primary ground-truth files so the
+    operator cannot accidentally accept a prediction while creating the independent label.
+    """
+
     label_kind = LabelKind(kind)
     if row_number < 1:
         raise ValueError("row_number must be >= 1")
 
     explicit_value = (value or "").strip()
-    modes = int(bool(explicit_value)) + int(accept_predicted) + int(exclude)
+    modes = int(bool(explicit_value)) + int(exclude)
     if modes != 1:
-        raise ValueError(
-            "choose exactly one labeling mode: value, accept_predicted or exclude"
-        )
+        raise ValueError("choose exactly one labeling mode: value or exclude")
 
     path, fieldnames, rows = _read_rows(label_dir, label_kind)
     if row_number > len(rows):
@@ -129,10 +135,8 @@ def set_row_label(
 
     new_value, purpose_value = _resolve_label(
         label_kind,
-        row,
         explicit_value=explicit_value,
         purpose=purpose,
-        accept_predicted=accept_predicted,
         exclude=exclude,
     )
     row[spec.label_field] = new_value
@@ -159,11 +163,9 @@ def set_row_label(
 
 def _resolve_label(
     kind: LabelKind,
-    row: dict[str, str],
     *,
     explicit_value: str,
     purpose: str | None,
-    accept_predicted: bool,
     exclude: bool,
 ) -> tuple[str, str | None]:
     if exclude:
@@ -172,25 +174,16 @@ def _resolve_label(
     if kind == LabelKind.COMPANY_RESOLUTION:
         if purpose:
             raise ValueError("purpose is only valid for contact_classification")
-        resolved = (
-            (row.get("predicted_company_id") or "").strip()
-            if accept_predicted
-            else explicit_value
-        )
-        if not resolved:
+        if not explicit_value:
             raise ValueError("company truth label cannot be empty")
-        return resolved, None
+        if explicit_value.lower() == NO_WEBSITE:
+            raise ValueError("__none__ is not valid for company_resolution")
+        return explicit_value, None
 
     if kind == LabelKind.WEBSITE_RESOLUTION:
         if purpose:
             raise ValueError("purpose is only valid for contact_classification")
-        raw = (
-            (row.get("predicted_domain") or "").strip()
-            if accept_predicted
-            else explicit_value
-        )
-        if accept_predicted and not raw:
-            return NO_WEBSITE, None
+        raw = explicit_value
         if raw.lower() == NO_WEBSITE:
             return NO_WEBSITE, None
         if raw.lower() == EXCLUDE_LABEL:
@@ -201,11 +194,7 @@ def _resolve_label(
         return domain, None
 
     if kind == LabelKind.CONTACT_CLASSIFICATION:
-        decision_text = (
-            (row.get("predicted_decision") or "").strip().lower()
-            if accept_predicted
-            else explicit_value.lower()
-        )
+        decision_text = explicit_value.lower()
         valid_decisions = {item.value for item in Decision}
         if decision_text not in valid_decisions:
             raise ValueError(
@@ -213,11 +202,7 @@ def _resolve_label(
                 f"expected one of {sorted(valid_decisions)}"
             )
 
-        raw_purpose = (
-            (row.get("predicted_purpose") or "").strip().lower()
-            if accept_predicted
-            else (purpose or "").strip().lower()
-        )
+        raw_purpose = (purpose or "").strip().lower()
         if raw_purpose:
             valid_purposes = {item.value for item in ChannelPurpose}
             if raw_purpose not in valid_purposes:
