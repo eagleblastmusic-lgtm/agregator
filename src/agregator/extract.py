@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 
 from .models import ChannelKind, ContactChannel, Evidence
 from .signals import classify_context, contains_discovery_signal
+from .url_utils import canonicalize_http_url
 
 EMAIL_RE = re.compile(r"(?<![\w.+-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})(?![\w.-])", re.I)
 OBFUSCATED_EMAIL_RE = re.compile(
@@ -23,6 +24,19 @@ OBFUSCATED_AT_RE = re.compile(
     r"(?P<domain>[A-Z0-9-]+(?:\.[A-Z0-9-]+)+)",
     re.I,
 )
+WORD_OBFUSCATED_EMAIL_RE = re.compile(
+    r"(?P<local>[A-Z0-9._%+-]{1,64})\s+"
+    r"(?:at|malpa|małpa)\s+"
+    r"(?P<domain>[A-Z0-9-]+(?:\s+(?:dot|kropka)\s+[A-Z0-9-]+)+)",
+    re.I,
+)
+WORD_OBFUSCATED_AT_RE = re.compile(
+    r"(?P<local>[A-Z0-9._%+-]{1,64})\s+"
+    r"(?:at|malpa|małpa)\s+"
+    r"(?P<domain>[A-Z0-9-]+(?:\.[A-Z0-9-]+)+)",
+    re.I,
+)
+WORD_DOT_RE = re.compile(r"\s+(?:dot|kropka)\s+", re.I)
 
 
 def _clean_text(soup: BeautifulSoup) -> str:
@@ -57,8 +71,77 @@ def _obfuscated_emails(text: str) -> dict[str, str]:
             continue
         email = f"{match.group('local')}@{match.group('domain')}".lower()
         found[email] = match.group(0)
+        occupied.append(match.span())
+
+    for match in WORD_OBFUSCATED_EMAIL_RE.finditer(text):
+        start, end = match.span()
+        if any(start >= left and end <= right for left, right in occupied):
+            continue
+        domain = WORD_DOT_RE.sub(".", match.group("domain"))
+        email = f"{match.group('local')}@{domain}".lower()
+        found[email] = match.group(0)
+        occupied.append(match.span())
+
+    for match in WORD_OBFUSCATED_AT_RE.finditer(text):
+        start, end = match.span()
+        if any(start >= left and end <= right for left, right in occupied):
+            continue
+        email = f"{match.group('local')}@{match.group('domain')}".lower()
+        found[email] = match.group(0)
 
     return found
+
+
+def _attribute_text(tag: Tag, name: str) -> str:
+    value = tag.get(name)
+    if isinstance(value, list):
+        return " ".join(str(item) for item in value if item)
+    return str(value or "").strip()
+
+
+def _form_semantics(form: Tag) -> str:
+    """Collect visible and structural form semantics without user-entered values."""
+
+    parts: list[str] = []
+    visible = " ".join(form.stripped_strings).strip()
+    if visible:
+        parts.append(visible)
+
+    for attribute in ("id", "name", "aria-label", "title", "data-purpose", "data-form-type"):
+        value = _attribute_text(form, attribute)
+        if value:
+            parts.append(value)
+
+    action = _attribute_text(form, "action")
+    method = _attribute_text(form, "method")
+    if action:
+        parts.append(action)
+    if method:
+        parts.append(method)
+
+    for control in form.find_all(("input", "textarea", "select", "button")):
+        if not isinstance(control, Tag):
+            continue
+        for attribute in ("name", "id", "placeholder", "aria-label", "title"):
+            value = _attribute_text(control, attribute)
+            if value:
+                parts.append(value)
+        control_type = _attribute_text(control, "type").lower()
+        if control.name == "input" and control_type in {"submit", "button"}:
+            value = _attribute_text(control, "value")
+            if value:
+                parts.append(value)
+
+    deduplicated = list(dict.fromkeys(part.strip() for part in parts if part.strip()))
+    return " ".join(deduplicated)[:4000]
+
+
+def _channel_url(raw: str, page_url: str) -> str | None:
+    return canonicalize_http_url(raw, base_url=page_url)
+
+
+def _page_channel_url(page_url: str) -> str:
+    return canonicalize_http_url(page_url) or page_url
 
 
 def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
@@ -91,11 +174,14 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
         found[(channel.kind.value, channel.value)] = channel
 
     for form in soup.find_all("form"):
-        form_text = " ".join(form.stripped_strings)
+        if not isinstance(form, Tag):
+            continue
+        form_text = _form_semantics(form)
         if not contains_discovery_signal(form_text):
             continue
-        action = form.get("action") or page_url
-        value = urljoin(page_url, action)
+        raw_action = _attribute_text(form, "action")
+        value = _channel_url(raw_action, page_url) if raw_action else None
+        value = value or _page_channel_url(page_url)
         purpose, decision, confidence, signal = classify_context(form_text, value)
         found[(ChannelKind.FORM.value, value)] = ContactChannel(
             kind=ChannelKind.FORM,
@@ -103,18 +189,24 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
             purpose=purpose,
             decision=decision,
             confidence=confidence,
-            evidence=Evidence(url=page_url, text=form_text[:500], signal=signal),
+            evidence=Evidence(url=page_url, text=form_text[:1000], signal=signal),
         )
 
     for anchor in soup.find_all("a", href=True):
+        if not isinstance(anchor, Tag):
+            continue
         label = " ".join(anchor.stripped_strings)
-        href = anchor["href"]
+        href = _attribute_text(anchor, "href")
         combined = f"{label} {href}"
         if not contains_discovery_signal(combined):
             continue
-        if href.startswith("mailto:"):
+        if href.lower().startswith("mailto:"):
             continue
-        value = urljoin(page_url, href)
+        value = _channel_url(href, page_url)
+        if value is None and href.startswith("#"):
+            value = _page_channel_url(page_url)
+        if value is None:
+            continue
         purpose, decision, confidence, signal = classify_context(combined, value)
         key = (ChannelKind.FORM.value, value)
         found.setdefault(
