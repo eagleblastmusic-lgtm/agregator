@@ -48,17 +48,17 @@ Database / Export / API
 
 ## M0 — rdzeń enrichmentu
 
-Status: rozpoczęty.
+Status: **funkcjonalny baseline gotowy**.
 
-Zakres:
+Zaimplementowano:
 
 - modele danych,
 - wymienny `SearchProvider`,
 - resolver oficjalnej domeny,
 - crawler stron firmowych,
 - `robots.txt`, limity i opóźnienie między requestami,
-- ekstrakcja e-maili i formularzy,
-- klasyfikacja `GREEN / REVIEW / IGNORE`,
+- ekstrakcję e-maili i formularzy,
+- klasyfikację `GREEN / REVIEW / IGNORE`,
 - provenance/evidence,
 - CLI,
 - testy i CI.
@@ -75,12 +75,27 @@ Zakres:
 
 ## M1 — agregacja ofert pracy
 
+Status: **w realizacji**.
+
+Zaimplementowano fundament:
+
+- wspólny kontrakt `JobSource`,
+- `SourceRegistry` pod kolejne portale,
+- pierwszy adapter `OlxPublicSource`,
+- cursor/offset i resumowalne pobieranie,
+- SQLite z tabelami `companies`, `job_postings`, `contact_channels`, `source_state`,
+- podstawową normalizację i deduplikację firm,
+- provenance nazwy pracodawcy oraz `identity_confidence`,
+- kolejkę firm do enrichmentu,
+- trwały zapis wyników i dowodów,
+- CLI `collect`, `collect-olx`, `companies`, `enrich-db`, `green`.
+
 ### Interfejs adaptera źródła
 
 Każde źródło implementuje ten sam kontrakt:
 
 ```text
-collect(since_cursor) -> JobPosting[] + next_cursor
+collect(cursor) -> JobPosting[] + next_cursor
 ```
 
 Minimalne dane:
@@ -90,11 +105,12 @@ Minimalne dane:
 - URL oferty,
 - tytuł,
 - nazwa firmy,
+- provenance i confidence nazwy,
 - lokalizacja,
 - opis,
 - data publikacji / odświeżenia, jeśli dostępna.
 
-### Kolejność wdrażania
+### Kolejność wdrażania kolejnych źródeł
 
 1. źródła z oficjalnym API/feedem,
 2. strony firmowe / careers,
@@ -102,6 +118,14 @@ Minimalne dane:
 4. źródła dynamiczne przez Playwright tylko tam, gdzie jest to konieczne i zgodne z zasadami dostępu.
 
 Każdy adapter jest izolowany w `src/agregator/sources/<source>.py` i może zostać wyłączony bez wpływu na pozostałe.
+
+### Następne checkpointy M1
+
+- M1-01: potwierdzić adapter OLX na realnej próbce i dodać fixture z aktualnym payloadem,
+- M1-02: dodać import benchmarku CSV/JSONL,
+- M1-03: dodać drugi portal i sprawdzić kontrakt wieloźródłowy,
+- M1-04: dodać historię runów i metryki błędów,
+- M1-05: benchmark 1000 ofert.
 
 ## M2 — Company Resolution
 
@@ -129,6 +153,8 @@ job_count
 sources[]
 match_confidence
 ```
+
+Obecna deduplikacja M1 jest celowo konserwatywna i nie zastępuje pełnego Company Resolution.
 
 ## M3 — wyszukiwanie i weryfikacja oficjalnej WWW
 
