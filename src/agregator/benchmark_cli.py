@@ -12,6 +12,7 @@ from .benchmark_preflight import build_benchmark_preflight
 from .crawler import WebsiteCrawler
 from .label_sampling import DEFAULT_SAMPLING_SEED
 from .label_status import build_label_bundle_status
+from .label_workflow import LabelKind, next_unlabeled_row, set_row_label
 from .pipeline import EmployerDiscoveryPipeline
 from .search import BraveSearchProvider
 from .sources import default_registry
@@ -167,6 +168,60 @@ def status(
     typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     if strict and not result.ready_for_quality_gate:
         raise typer.Exit(code=2)
+
+
+@app.command("label-next")
+def label_next(
+    kind: LabelKind = typer.Option(..., "--kind"),
+    label_dir: str = typer.Option("benchmark/run/labels", "--label-dir"),
+) -> None:
+    try:
+        row = next_unlabeled_row(label_dir, kind)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    payload: dict[str, object]
+    if row is None:
+        payload = {
+            "kind": kind.value,
+            "complete": True,
+            "next": None,
+        }
+    else:
+        payload = {
+            "kind": kind.value,
+            "complete": False,
+            "next": row.to_dict(),
+        }
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+@app.command("label-set")
+def label_set(
+    kind: LabelKind = typer.Option(..., "--kind"),
+    row_number: int = typer.Option(..., "--row", min=1),
+    label_dir: str = typer.Option("benchmark/run/labels", "--label-dir"),
+    value: str | None = typer.Option(None, "--value"),
+    purpose: str | None = typer.Option(None, "--purpose"),
+    accept_predicted: bool = typer.Option(False, "--accept-predicted"),
+    exclude: bool = typer.Option(False, "--exclude"),
+    overwrite: bool = typer.Option(False, "--overwrite"),
+) -> None:
+    try:
+        update = set_row_label(
+            label_dir,
+            kind,
+            row_number,
+            value=value,
+            purpose=purpose,
+            accept_predicted=accept_predicted,
+            exclude=exclude,
+            overwrite=overwrite,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    typer.echo(json.dumps(update.to_dict(), ensure_ascii=False, indent=2))
 
 
 @app.command("evaluate")
