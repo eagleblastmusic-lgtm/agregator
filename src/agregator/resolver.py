@@ -47,7 +47,11 @@ def _blocked(host: str) -> bool:
     return any(host == blocked or host.endswith(f".{blocked}") for blocked in BLOCKED_HOSTS)
 
 
-def score_candidate(candidate: SearchCandidate, company_name: str, city: str | None = None) -> float:
+def score_candidate(
+    candidate: SearchCandidate,
+    company_name: str,
+    city: str | None = None,
+) -> float:
     host = _host(candidate.url)
     if not host or _blocked(host):
         return 0.0
@@ -62,15 +66,18 @@ def score_candidate(candidate: SearchCandidate, company_name: str, city: str | N
 
     host_flat = normalize_text(host).replace("-", "").replace(".", "")
     company_flat = "".join(sorted(company_tokens))
-    if any(token in host_flat for token in company_tokens if len(token) >= 4):
-        score += 0.20
-    elif company_flat and company_flat in host_flat:
+    host_matches_company = any(
+        token in host_flat for token in company_tokens if len(token) >= 4
+    ) or bool(company_flat and company_flat in host_flat)
+    if host_matches_company:
         score += 0.20
 
-    if city and normalize_text(city) in normalize_text(f"{candidate.title} {candidate.snippet}"):
+    candidate_text = normalize_text(f"{candidate.title} {candidate.snippet}")
+    if city and normalize_text(city) in candidate_text:
         score += 0.12
 
-    if any(word in normalize_text(candidate.title) for word in ("kontakt", "oficjalna", "official")):
+    title = normalize_text(candidate.title)
+    if any(word in title for word in ("kontakt", "oficjalna", "official")):
         score += 0.04
 
     return min(score, 1.0)
