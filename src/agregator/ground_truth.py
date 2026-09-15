@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from itertools import combinations
 from pathlib import Path
 from typing import Any
 
+from .ground_truth_common import EXCLUDE_LABEL, count_excluded_labels
 from .storage import SQLiteStore
 
 
@@ -29,6 +30,7 @@ class ResolutionEvaluation:
     precision: float
     recall: float
     f1: float
+    excluded_rows: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -58,6 +60,10 @@ def load_ground_truth_csv(path: str | Path) -> list[GroundTruthLabel]:
                     f"duplicate ground truth job at line {line_number}: {source}/{source_id}"
                 )
             seen.add(key)
+
+            if truth_company_id.lower() == EXCLUDE_LABEL:
+                continue
+
             labels.append(
                 GroundTruthLabel(
                     source=source,
@@ -192,7 +198,11 @@ def evaluate_company_resolution_csv(
     store: SQLiteStore,
     path: str | Path,
 ) -> ResolutionEvaluation:
-    return evaluate_company_resolution(store, load_ground_truth_csv(path))
+    result = evaluate_company_resolution(store, load_ground_truth_csv(path))
+    return replace(
+        result,
+        excluded_rows=count_excluded_labels(path, "truth_company_id"),
+    )
 
 
 def _safe_ratio(numerator: float, denominator: float) -> float:
