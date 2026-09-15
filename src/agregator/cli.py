@@ -12,7 +12,7 @@ from .enrich import enrich_pending_companies
 from .ingest import ingest_source
 from .pipeline import EmployerDiscoveryPipeline
 from .search import BraveSearchProvider
-from .sources.olx import OlxPublicSource
+from .sources import default_registry
 from .storage import SQLiteStore
 
 app = typer.Typer(help="Faro Employer Discovery Engine")
@@ -31,6 +31,32 @@ def _search_provider() -> BraveSearchProvider:
     if not api_key:
         raise typer.BadParameter("Ustaw BRAVE_SEARCH_API_KEY przed użyciem wyszukiwania")
     return BraveSearchProvider(api_key)
+
+
+async def _collect(
+    source_name: str,
+    db: str,
+    pages: int,
+    fresh: bool,
+) -> dict[str, object]:
+    registry = default_registry()
+    try:
+        source = registry.create(source_name)
+    except KeyError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    store = SQLiteStore(db)
+    result = await ingest_source(source, store, pages=pages, resume=not fresh)
+    return {
+        "source": result.source,
+        "pages": result.pages,
+        "next_cursor": result.next_cursor,
+        "jobs_seen": result.stats.jobs_seen,
+        "jobs_inserted": result.stats.jobs_inserted,
+        "jobs_updated": result.stats.jobs_updated,
+        "companies_created": result.stats.companies_created,
+        "db": db,
+    }
 
 
 @app.command("scan-url")
@@ -72,34 +98,30 @@ def db_init(
     typer.echo(f"Baza gotowa: {db}")
 
 
+@app.command("sources")
+def sources() -> None:
+    typer.echo(json.dumps(default_registry().names(), ensure_ascii=False, indent=2))
+
+
+@app.command("collect")
+def collect_source(
+    source: str = typer.Option(..., "--source"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    pages: int = typer.Option(1, "--pages", min=1, max=20),
+    fresh: bool = typer.Option(False, "--fresh", help="Zacznij od początku źródła"),
+) -> None:
+    result = asyncio.run(_collect(source, db, pages, fresh))
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 @app.command("collect-olx")
 def collect_olx(
     db: str = typer.Option("agregator.sqlite3", "--db"),
     pages: int = typer.Option(1, "--pages", min=1, max=20),
     fresh: bool = typer.Option(False, "--fresh", help="Zacznij od offsetu 0"),
 ) -> None:
-    async def run() -> None:
-        store = SQLiteStore(db)
-        source = OlxPublicSource()
-        result = await ingest_source(source, store, pages=pages, resume=not fresh)
-        typer.echo(
-            json.dumps(
-                {
-                    "source": result.source,
-                    "pages": result.pages,
-                    "next_cursor": result.next_cursor,
-                    "jobs_seen": result.stats.jobs_seen,
-                    "jobs_inserted": result.stats.jobs_inserted,
-                    "jobs_updated": result.stats.jobs_updated,
-                    "companies_created": result.stats.companies_created,
-                    "db": db,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-
-    asyncio.run(run())
+    result = asyncio.run(_collect("olx", db, pages, fresh))
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 @app.command("enrich-db")
