@@ -91,6 +91,7 @@ async def _discover_company(
                 city,
                 candidate_confidence=float(candidate["confidence"]),
                 source_signal=f"source_website_candidate:{source}",
+                resolution_source=source,
             )
         except Exception:
             continue
