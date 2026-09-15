@@ -62,7 +62,10 @@ def run(
     strict: bool = typer.Option(
         False,
         "--strict",
-        help="Kod wyjścia 2, jeśli target ofert nie został osiągnięty",
+        help=(
+            "Kod wyjścia 2, jeśli target ofert nie został osiągnięty albo któreś "
+            "żądane źródło nie zostało skutecznie przećwiczone"
+        ),
     ),
 ) -> None:
     source_names = _source_names(sources)
@@ -97,7 +100,7 @@ def run(
         raise typer.BadParameter(str(exc)) from exc
 
     typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
-    if strict and not result.collection.target_reached:
+    if strict and not result.ready_for_full_enrichment_benchmark:
         raise typer.Exit(code=2)
 
 
