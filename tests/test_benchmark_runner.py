@@ -73,6 +73,31 @@ async def test_benchmark_collector_stops_when_sources_are_exhausted(tmp_path: Pa
     )
 
     assert result.target_reached is False
-    assert result.stopped_reason == "sources_exhausted"
+    assert result.stopped_reason == "sources_exhausted_or_disabled"
     assert result.jobs_after == 2
     assert result.sources["a"].exhausted is True
+
+
+async def test_benchmark_collector_disables_unconfigured_source(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "disabled.sqlite3")
+    registry = SourceRegistry()
+
+    def unavailable() -> FakeSource:
+        raise ValueError("missing API key")
+
+    registry.register("api", unavailable)
+
+    result = await collect_benchmark(
+        store,
+        registry,
+        ["api"],
+        target_jobs=10,
+        max_rounds=10,
+    )
+
+    assert result.target_reached is False
+    assert result.rounds == 1
+    assert result.stopped_reason == "sources_exhausted_or_disabled"
+    assert result.sources["api"].disabled is True
+    assert result.sources["api"].errors == 1
+    assert "missing API key" in (result.sources["api"].last_error or "")
