@@ -13,6 +13,8 @@ from .storage import SQLiteStore
 class DiscoveryAuditStats:
     website_runs_recorded: int = 0
     evidence_snapshots_recorded: int = 0
+    evidence_observations_recorded: int = 0
+    evidence_changes_recorded: int = 0
 
 
 def init_audit_schema(store: SQLiteStore) -> None:
@@ -20,7 +22,8 @@ def init_audit_schema(store: SQLiteStore) -> None:
 
     These tables intentionally live outside the mutable current-state rows. They
     preserve what the resolver saw at a specific point in time, including rejected
-    website discovery attempts and immutable hashes of contact evidence.
+    website discovery attempts, immutable contact-evidence snapshots and the full
+    observation timeline linking each contact classification to a discovery run.
     """
 
     store.init_schema()
@@ -63,6 +66,32 @@ def init_audit_schema(store: SQLiteStore) -> None:
 
             CREATE INDEX IF NOT EXISTS idx_contact_evidence_snapshots_company
                 ON contact_evidence_snapshots(company_id, captured_at DESC);
+
+            CREATE TABLE IF NOT EXISTS contact_evidence_observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_verification_run_id INTEGER NOT NULL,
+                contact_channel_id INTEGER NOT NULL,
+                company_id INTEGER NOT NULL,
+                snapshot_id INTEGER NOT NULL,
+                decision TEXT NOT NULL,
+                purpose TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                evidence_url TEXT NOT NULL,
+                evidence_signal TEXT,
+                snapshot_changed INTEGER NOT NULL DEFAULT 0,
+                captured_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(website_verification_run_id) REFERENCES website_verification_runs(id),
+                FOREIGN KEY(contact_channel_id) REFERENCES contact_channels(id),
+                FOREIGN KEY(company_id) REFERENCES companies(id),
+                FOREIGN KEY(snapshot_id) REFERENCES contact_evidence_snapshots(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_contact_evidence_observations_channel
+                ON contact_evidence_observations(contact_channel_id, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_contact_evidence_observations_company
+                ON contact_evidence_observations(company_id, captured_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_contact_evidence_observations_run
+                ON contact_evidence_observations(website_verification_run_id);
             """
         )
         _ensure_column(
@@ -102,11 +131,13 @@ def record_discovery_audit(
     company_id: int,
     result: DiscoveryResult,
 ) -> DiscoveryAuditStats:
-    """Persist one discovery decision and immutable snapshots of its contact evidence."""
+    """Persist one discovery decision and immutable contact-evidence observations."""
 
     init_audit_schema(store)
     website_run = 0
     snapshots = 0
+    observations = 0
+    changes = 0
 
     candidates = [candidate.model_dump(mode="json") for candidate in result.search_candidates]
     attempts = [attempt.model_dump(mode="json") for attempt in result.website_attempts]
@@ -119,7 +150,7 @@ def record_discovery_audit(
     )
 
     with store.connect() as connection:
-        connection.execute(
+        run_cursor = connection.execute(
             """
             INSERT INTO website_verification_runs(
                 company_id,
@@ -153,6 +184,7 @@ def record_discovery_audit(
                 json.dumps(page_snapshots, ensure_ascii=False, separators=(",", ":")),
             ),
         )
+        website_run_id = int(run_cursor.lastrowid)
         website_run = 1
 
         for channel in result.channels:
@@ -167,8 +199,9 @@ def record_discovery_audit(
             if row is None:
                 continue
 
+            contact_channel_id = int(row["id"])
             digest = hashlib.sha256(channel.evidence.text.encode("utf-8")).hexdigest()
-            cursor = connection.execute(
+            snapshot_cursor = connection.execute(
                 """
                 INSERT OR IGNORE INTO contact_evidence_snapshots(
                     contact_channel_id,
@@ -180,7 +213,7 @@ def record_discovery_audit(
                 ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    int(row["id"]),
+                    contact_channel_id,
                     company_id,
                     channel.evidence.url,
                     channel.evidence.text,
@@ -188,11 +221,70 @@ def record_discovery_audit(
                     digest,
                 ),
             )
-            snapshots += int(cursor.rowcount > 0)
+            snapshots += int(snapshot_cursor.rowcount > 0)
+
+            snapshot_row = connection.execute(
+                """
+                SELECT id
+                FROM contact_evidence_snapshots
+                WHERE contact_channel_id = ? AND content_sha256 = ?
+                """,
+                (contact_channel_id, digest),
+            ).fetchone()
+            if snapshot_row is None:
+                continue
+            snapshot_id = int(snapshot_row["id"])
+
+            previous = connection.execute(
+                """
+                SELECT snapshot_id
+                FROM contact_evidence_observations
+                WHERE contact_channel_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (contact_channel_id,),
+            ).fetchone()
+            snapshot_changed = int(
+                previous is not None and int(previous["snapshot_id"]) != snapshot_id
+            )
+
+            connection.execute(
+                """
+                INSERT INTO contact_evidence_observations(
+                    website_verification_run_id,
+                    contact_channel_id,
+                    company_id,
+                    snapshot_id,
+                    decision,
+                    purpose,
+                    confidence,
+                    evidence_url,
+                    evidence_signal,
+                    snapshot_changed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    website_run_id,
+                    contact_channel_id,
+                    company_id,
+                    snapshot_id,
+                    channel.decision.value,
+                    channel.purpose.value,
+                    channel.confidence,
+                    channel.evidence.url,
+                    channel.evidence.signal,
+                    snapshot_changed,
+                ),
+            )
+            observations += 1
+            changes += snapshot_changed
 
     return DiscoveryAuditStats(
         website_runs_recorded=website_run,
         evidence_snapshots_recorded=snapshots,
+        evidence_observations_recorded=observations,
+        evidence_changes_recorded=changes,
     )
 
 
