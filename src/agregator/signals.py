@@ -16,6 +16,17 @@ def normalize_text(value: str) -> str:
     return value.strip()
 
 
+def _contains_phrase(text: str, phrase: str) -> bool:
+    """Match normalized phrases without treating `praca` as part of `wspolpraca`."""
+
+    if not phrase:
+        return False
+    if "@" in phrase:
+        return phrase in text
+    pattern = r"(?<!\w)" + re.escape(phrase).replace(r"\ ", r"\s+") + r"(?!\w)"
+    return re.search(pattern, text) is not None
+
+
 EXPLICIT_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("propozycje wspolpracy", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("oferty wspolpracy", ChannelPurpose.BUSINESS_PARTNERSHIP),
@@ -32,6 +43,8 @@ EXPLICIT_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("partnership enquiries", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("partnership inquiries", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("partnership proposals", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("business development enquiries", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("business development inquiries", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("oferty handlowe", ChannelPurpose.SALES),
     ("kontakt handlowy", ChannelPurpose.SALES),
     ("dzial handlowy", ChannelPurpose.SALES),
@@ -43,6 +56,8 @@ EXPLICIT_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("wspolpraca z dostawcami", ChannelPurpose.SUPPLIER),
     ("supplier enquiries", ChannelPurpose.SUPPLIER),
     ("supplier inquiries", ChannelPurpose.SUPPLIER),
+    ("vendor enquiries", ChannelPurpose.SUPPLIER),
+    ("vendor inquiries", ChannelPurpose.SUPPLIER),
     ("franczyza", ChannelPurpose.FRANCHISE),
     ("franchise enquiries", ChannelPurpose.FRANCHISE),
     ("franchise inquiries", ChannelPurpose.FRANCHISE),
@@ -63,14 +78,23 @@ REVIEW_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("partnerzy", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("partner", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("partnership", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("partnerships", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("cooperation", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("wspolpraca", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("dla firm", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("kontakt biznesowy", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("business contact", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("business development", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("biznes", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("sprzedaz", ChannelPurpose.SALES),
     ("sales", ChannelPurpose.SALES),
+    ("commercial", ChannelPurpose.SALES),
+    ("zakupy", ChannelPurpose.SUPPLIER),
+    ("procurement", ChannelPurpose.SUPPLIER),
     ("supplier", ChannelPurpose.SUPPLIER),
+    ("suppliers", ChannelPurpose.SUPPLIER),
     ("vendor", ChannelPurpose.SUPPLIER),
+    ("vendors", ChannelPurpose.SUPPLIER),
     ("franchise", ChannelPurpose.FRANCHISE),
 ]
 
@@ -118,15 +142,24 @@ SUPPORT_SIGNALS = [
 
 LOCAL_PART_PURPOSES = {
     "wspolpraca": ChannelPurpose.BUSINESS_PARTNERSHIP,
+    "wspolpracab2b": ChannelPurpose.BUSINESS_PARTNERSHIP,
     "partnerzy": ChannelPurpose.BUSINESS_PARTNERSHIP,
     "partner": ChannelPurpose.BUSINESS_PARTNERSHIP,
+    "partners": ChannelPurpose.BUSINESS_PARTNERSHIP,
     "partnership": ChannelPurpose.BUSINESS_PARTNERSHIP,
     "partnerships": ChannelPurpose.BUSINESS_PARTNERSHIP,
     "b2b": ChannelPurpose.BUSINESS_PARTNERSHIP,
+    "biznes": ChannelPurpose.BUSINESS_PARTNERSHIP,
+    "business": ChannelPurpose.BUSINESS_PARTNERSHIP,
+    "oferty": ChannelPurpose.SALES,
+    "ofertyhandlowe": ChannelPurpose.SALES,
     "handel": ChannelPurpose.SALES,
     "handlowy": ChannelPurpose.SALES,
     "sprzedaz": ChannelPurpose.SALES,
     "sales": ChannelPurpose.SALES,
+    "commercial": ChannelPurpose.SALES,
+    "zakupy": ChannelPurpose.SUPPLIER,
+    "procurement": ChannelPurpose.SUPPLIER,
     "dostawcy": ChannelPurpose.SUPPLIER,
     "supplier": ChannelPurpose.SUPPLIER,
     "suppliers": ChannelPurpose.SUPPLIER,
@@ -137,37 +170,52 @@ LOCAL_PART_PURPOSES = {
 }
 
 
+def _local_part_purpose(value: str) -> tuple[ChannelPurpose | None, str | None]:
+    if "@" not in value:
+        return None, None
+    local_part = normalize_text(value.split("@", 1)[0])
+    compact = re.sub(r"[^a-z0-9]", "", local_part)
+    if compact in LOCAL_PART_PURPOSES:
+        return LOCAL_PART_PURPOSES[compact], compact
+    for token in re.split(r"[._+\-\s]+", local_part):
+        compact_token = re.sub(r"[^a-z0-9]", "", token)
+        if compact_token in LOCAL_PART_PURPOSES:
+            return LOCAL_PART_PURPOSES[compact_token], compact_token
+    return None, None
+
+
 def classify_context(context: str, value: str = "") -> tuple[ChannelPurpose, Decision, float, str]:
     normalized = normalize_text(f"{context} {value}")
 
     for phrase in NEGATIVE_SIGNALS:
-        if phrase in normalized:
+        if _contains_phrase(normalized, phrase):
             return ChannelPurpose.NEGATIVE, Decision.IGNORE, 0.99, phrase
 
-    if any(signal in normalized for signal in PRIVACY_SIGNALS):
+    if any(_contains_phrase(normalized, signal) for signal in PRIVACY_SIGNALS):
         return ChannelPurpose.PRIVACY, Decision.IGNORE, 0.98, "privacy"
 
     for phrase, purpose in EXPLICIT_SIGNALS:
-        if phrase in normalized:
+        if _contains_phrase(normalized, phrase):
             return purpose, Decision.GREEN, 0.95, phrase
 
     for phrase in COMMERCIAL_CONSENT_SIGNALS:
-        if phrase in normalized:
+        if _contains_phrase(normalized, phrase):
             return ChannelPurpose.SALES, Decision.REVIEW, 0.78, phrase
 
-    local_part = value.split("@", 1)[0].lower() if "@" in value else ""
-    local_part_purpose = LOCAL_PART_PURPOSES.get(local_part)
-    if local_part_purpose is not None:
-        return local_part_purpose, Decision.REVIEW, 0.82, f"localpart:{local_part}"
-
-    if any(signal in normalized for signal in RECRUITMENT_SIGNALS):
+    # Strong page/context negatives win over mailbox naming. This prevents addresses such
+    # as oferty@... on a careers page from being treated as a business lead.
+    if any(_contains_phrase(normalized, signal) for signal in RECRUITMENT_SIGNALS):
         return ChannelPurpose.RECRUITMENT, Decision.IGNORE, 0.94, "recruitment"
 
-    if any(signal in normalized for signal in SUPPORT_SIGNALS):
+    if any(_contains_phrase(normalized, signal) for signal in SUPPORT_SIGNALS):
         return ChannelPurpose.SUPPORT, Decision.IGNORE, 0.90, "support"
 
+    local_part_purpose, local_part = _local_part_purpose(value)
+    if local_part_purpose is not None and local_part is not None:
+        return local_part_purpose, Decision.REVIEW, 0.82, f"localpart:{local_part}"
+
     for phrase, purpose in REVIEW_SIGNALS:
-        if phrase in normalized:
+        if _contains_phrase(normalized, phrase):
             return purpose, Decision.REVIEW, 0.72, phrase
 
     return ChannelPurpose.GENERIC, Decision.REVIEW, 0.40, "generic"
@@ -178,4 +226,4 @@ def contains_discovery_signal(text: str) -> bool:
     phrases = [phrase for phrase, _ in EXPLICIT_SIGNALS + REVIEW_SIGNALS]
     phrases.extend(COMMERCIAL_CONSENT_SIGNALS)
     phrases.extend(NEGATIVE_SIGNALS)
-    return any(phrase in normalized for phrase in phrases)
+    return any(_contains_phrase(normalized, phrase) for phrase in phrases)
