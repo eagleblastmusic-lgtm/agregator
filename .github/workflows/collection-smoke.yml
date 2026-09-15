@@ -118,6 +118,64 @@ jobs:
           echo "Collection smoke skipped because preflight failed." \
             > benchmark/collection-smoke/run_skipped.txt
 
+      - name: Write collection summary
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("benchmark/collection-smoke")
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+
+          def load(name):
+              path = root / name
+              if not path.exists():
+                  return None
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"))
+              except json.JSONDecodeError:
+                  return None
+
+          preflight = load("preflight.json")
+          result = load("run_result.json")
+
+          lines = ["## Faro collection smoke", ""]
+          if preflight is not None:
+              lines.extend([
+                  f"- Preflight ready: `{preflight.get('ready')}`",
+                  f"- Search provider required: `{preflight.get('search_provider_required')}`",
+              ])
+              blockers = preflight.get("blockers") or []
+              if blockers:
+                  lines.append("- Preflight blockers: `" + ", ".join(map(str, blockers)) + "`")
+
+          if result is not None:
+              collection = result.get("collection") or {}
+              lines.extend([
+                  f"- Target reached: `{collection.get('target_reached')}`",
+                  f"- Source health ready: `{collection.get('source_health_ready')}`",
+                  f"- Jobs after: `{collection.get('jobs_after')}`",
+                  f"- Rounds: `{collection.get('rounds')}`",
+                  f"- Ready for full enrichment benchmark: `{result.get('ready_for_full_enrichment_benchmark')}`",
+                  "",
+                  "### Sources",
+                  "",
+                  "| Source | Runs | Jobs seen | Inserted | Errors | Disabled |",
+                  "| --- | ---: | ---: | ---: | ---: | --- |",
+              ])
+              for source, stats in sorted((collection.get("sources") or {}).items()):
+                  lines.append(
+                      f"| {source} | {stats.get('runs', 0)} | {stats.get('jobs_seen', 0)} | "
+                      f"{stats.get('jobs_inserted', 0)} | {stats.get('errors', 0)} | "
+                      f"{stats.get('disabled', False)} |"
+                  )
+
+          summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
       - name: Upload collection smoke artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -146,6 +204,6 @@ jobs:
           fi
 
           if [ "$run_code" -ne 0 ]; then
-            echo "Collection smoke did not reach its requested target (exit code: $run_code)."
+            echo "Collection smoke did not pass strict readiness (exit code: $run_code)."
             exit "$run_code"
           fi
