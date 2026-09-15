@@ -10,6 +10,7 @@ from agregator.sources.epraca import (
     EPracaSource,
     build_epraca_soap_request,
     parse_epraca_json,
+    parse_epraca_response,
     parse_epraca_soap_response,
 )
 
@@ -70,6 +71,15 @@ def test_parse_epraca_soap_response_extracts_zip_json() -> None:
     jobs = parse_epraca_soap_response(_soap_response("Poprawny", archive))
 
     assert [job.source_id for job in jobs] == ["EPRACA-1", "EPRACA-2"]
+
+
+def test_parse_epraca_response_accepts_direct_zip_body() -> None:
+    archive = _zip_payload([_offer(3)])
+
+    jobs = parse_epraca_response(archive)
+
+    assert len(jobs) == 1
+    assert jobs[0].source_id == "EPRACA-3"
 
 
 def test_parse_epraca_no_data_status_returns_empty_list() -> None:
