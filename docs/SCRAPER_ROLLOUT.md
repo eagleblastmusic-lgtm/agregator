@@ -6,7 +6,7 @@ Głównym zadaniem kolektora Faro jest odczytanie możliwie szerokiego zestawu *
 
 API nie jest wymaganiem produktu. Jeżeli dane źródło ma użyteczny oficjalny feed/API, może być dodatkowym adapterem, ale brak klucza API nie może zatrzymywać rozwoju scraperów publicznych stron innych serwisów.
 
-Nie obchodzimy logowania, CAPTCHA, paywalli ani innych kontroli dostępu.
+Nie obchodzimy logowania, CAPTCHA, paywalli, anty-botów ani innych kontroli dostępu.
 
 ## Niezmiennik danych
 
@@ -33,8 +33,8 @@ Master catalog: **91 źródeł**.
 Aktualnie:
 
 ```text
-adaptery zaimplementowane: 12
-pozostałe:                79
+adaptery zaimplementowane: 14
+pozostałe:                77
 ```
 
 Zaimplementowane adaptery:
@@ -48,28 +48,31 @@ Zaimplementowane adaptery:
 | RocketJobs | `rocketjobs` | public HTML | experimental |
 | ePraca / CBOP | `epraca` | official partner feed | implemented |
 | Nabory KPRM | `kprm` | official public HTML | experimental |
-| Jooble Polska | `jooble` | partner API | implemented, optional source method |
-| Careerjet Polska | `careerjet` | publisher API | implemented, optional source method |
+| Jooble Polska | `jooble` | partner API | optional source method |
+| Careerjet Polska | `careerjet` | publisher API | optional source method |
+| NGO.pl — praca i współpraca | `ngo` | public HTML | experimental |
 | Kariera w Finansach | `karierawfinansach` | public HTML | experimental |
 | Skillshot.pl | `skillshot` | public HTML | experimental |
-| Adzuna Polska | `adzuna` | partner API | implemented, optional source method |
+| OfertyPracy.edu.pl | `ofertypracyedu` | official public HTML | experimental |
+| Adzuna Polska | `adzuna` | partner API | optional source method |
 
-`experimental` oznacza, że parser istnieje, ale przed uznaniem integracji za produkcyjnie stabilną trzeba potwierdzić aktualne reguły dostępu, warunki źródła, paginację i jakość parsera na realnych danych.
+`experimental` oznacza, że parser istnieje, ale przed uznaniem integracji za produkcyjnie stabilną trzeba potwierdzić aktualne reguły dostępu, paginację i jakość parsera na realnych danych.
 
-## A0 — aktualny priorytet
+## A0 — stan po batchu S2
 
-W katalogu jest 14 źródeł A0. Po wdrożeniu KPRM **4 A0 pozostają bez aktywnego adaptera**:
+W katalogu jest 14 źródeł A0. Dla publicznie/dozwolenie dostępnych ścieżek, które wybraliśmy, mamy już adaptery m.in. dla Pracuj, OLX, Just Join IT, No Fluff Jobs, RocketJobs, ePraca, KPRM, Jooble, Kariera w Finansach, Skillshot i OfertyPracy.edu.pl.
+
+**3 A0 pozostają bez adaptera i są świadomie na HOLD:**
 
 | Źródło | Decyzja bieżąca |
 |---|---|
-| Praca.pl | HOLD — przed scraperem wymagana pozytywna weryfikacja uprawnienia/warunków; publiczna stopka obecnie zawiera zakaz powielania/kopiowania/rozpowszechniania materiałów |
-| LinkedIn Jobs | HOLD — nie opieramy Faro na obchodzeniu ograniczeń LinkedIn; wymaga dozwolonej ścieżki/partnerstwa/publicznego dostępu zgodnego z zasadami |
-| Indeed Polska | HOLD — nie obchodzimy anty-bot/login; preferowana dozwolona ścieżka partnerska/feed albo publiczna ścieżka po audycie |
-| OfertyPracy.edu.pl | NEXT — publiczny serwis MEN/SIO dla osób szukających pracy; potrzebna walidacja robots, listingu i paginacji |
+| Praca.pl | HOLD — przed scraperem wymagana pozytywna weryfikacja warunków/uprawnienia do planowanego wykorzystania |
+| LinkedIn Jobs | HOLD — brak obchodzenia ograniczeń LinkedIn; potrzebna dozwolona ścieżka publiczna/partnerska |
+| Indeed Polska | HOLD — brak obchodzenia anty-bot/login; potrzebna dozwolona ścieżka publiczna/partnerska |
 
-## Kolejność rollout
+To kończy pierwszy przebieg A0 bez prób obchodzenia ograniczeń. Rollout przechodzi teraz na **A1**.
 
-### Batch S1 — DONE baseline
+## Batch S1 — DONE baseline
 
 - wspólny `PublicHtmlJobSource`,
 - robots check,
@@ -81,23 +84,55 @@ W katalogu jest 14 źródeł A0. Po wdrożeniu KPRM **4 A0 pozostają bez aktywn
 - sitemap walker z resumowalnym cursorem,
 - Pracuj / Skillshot / NFJ / JustJoinIT / RocketJobs / Kariera w Finansach.
 
-### Batch S2 — IN PROGRESS
+## Batch S2 — DONE baseline
 
-- Nabory KPRM: adapter publicznego HTML wdrożony; zachowuje pełny widoczny tekst ogłoszenia, numer ogłoszenia, datę, urząd i source-specific payload. Publiczny serwis sam pokazuje w stopce eksport `XML`; XML pozostaje kandydatem do późniejszego porównania/uzupełnienia danych.
-- OfertyPracy.edu.pl: następny A0 po technicznym audycie listingu/robots/paginacji.
-- Praca.pl pozostaje HOLD, dopóki warunki/uprawnienie nie pozwolą na taki sposób wykorzystania.
-- Potem A1 zaczynając od stron server-rendered i źródeł oficjalnych/agencji z czytelną strukturą.
+### Nabory KPRM
 
-### Batch S3+
+Adapter `kprm`:
 
-Kolejne źródła wybieramy z A1 -> B -> C według:
+- publiczny listing i szczegóły,
+- robots check,
+- numer ogłoszenia,
+- urząd/pracodawca,
+- stanowisko, miasto i data,
+- pełny widoczny tekst w `source_payload`,
+- kontakty rekrutacyjne zachowywane jako raw evidence, a nie jako GREEN B2B.
 
-- publicznej dostępności,
-- możliwości pełnej paginacji,
-- jakości danych pracodawcy,
-- stabilności HTML/feedu,
-- ograniczeń robots/warunków,
-- kosztu i niezawodności kolektora.
+### OfertyPracy.edu.pl
+
+Adapter `ofertypracyedu`:
+
+- publiczny listing MEN/SIO i paginacja,
+- publiczne szczegóły `/oferty/<id>`,
+- nazwa placówki, stanowisko, miasto,
+- portal ID + oficjalny numer oferty,
+- publiczne kandydatury WWW placówki,
+- widoczny e-mail/telefon rekrutacyjny w `source_payload`,
+- brak automatycznego promowania kontaktu rekrutacyjnego do GREEN.
+
+## Batch S3 — IN PROGRESS
+
+### NGO.pl
+
+Adapter `ngo` został dodany jako pierwszy nowy A1:
+
+- publiczna kategoria `Organizacja oferuje pracę, współpracę`,
+- jawna paginacja `?page=N`,
+- publiczne szczegóły ogłoszeń,
+- `Ogłoszeniodawca` jako źródłowa nazwa firmy/organizacji,
+- źródłowa strona WWW organizacji jako kandydat do późniejszej weryfikacji,
+- pełny tekst ogłoszenia zachowany w `source_payload`,
+- kontakt rekrutacyjny pozostaje raw evidence i nie jest automatycznie GREEN.
+
+### Następne A1
+
+Priorytet mają źródła oficjalne/publiczne i server-rendered, w których można zebrać dużo danych o pracodawcy bez obchodzenia ograniczeń. Kandydaci do audytu:
+
+1. EURAXESS / aktualna publiczna baza ofert naukowych,
+2. Akademicka Baza Ogłoszeń MNiSW — przed wykorzystaniem biznesowym trzeba rozstrzygnąć zakres licencji publikowanych treści,
+3. BIP-y / źródła publiczne,
+4. publiczne serwisy agencji zatrudnienia,
+5. pozostałe portale A1 z czytelnym publicznym listingiem i detailem.
 
 ## CLI scraper-first
 
@@ -107,12 +142,12 @@ Lista źródeł publicznych:
 agregator-scrape sources
 ```
 
-Pobranie jednego źródła:
+Pobranie wybranych źródeł:
 
 ```bash
 agregator-scrape run \
-  --sources kprm \
-  --pages-per-source 5 \
+  --sources kprm,ofertypracyedu,ngo \
+  --pages-per-source 1 \
   --db agregator.sqlite3 \
   --strict
 ```
@@ -128,7 +163,7 @@ agregator-scrape run \
 
 `agregator-scrape` celowo nie wybiera `partner_api`. Dzięki temu publiczny scraping nie jest uzależniony od JOOBLE/ADZUNA/CAREERJET credentials.
 
-Manualny GitHub Actions workflow `.github/workflows/public-scraper-smoke.yml` pozwala wykonać kontrolowany realny smoke publicznych adapterów bez sekretów. Domyślnie wskazuje oficjalny serwis KPRM i zapisuje bazę oraz wynik jako artifact.
+Manualny GitHub Actions workflow `.github/workflows/public-scraper-smoke.yml` wykonuje kontrolowany realny smoke publicznych adapterów bez sekretów. Domyślny zestaw smoke to `kprm,ofertypracyedu,ngo`.
 
 ## Definition of Done dla pojedynczego źródła
 
@@ -161,4 +196,4 @@ raw source observations
      tylko kwalifikowane kontakty GREEN
 ```
 
-Benchmark jakości pozostaje ważny, ale pełni rolę kontroli jakości systemu; nie jest już blokadą przed rozszerzaniem legalnie/publicznie dostępnych scraperów.
+Benchmark jakości pozostaje ważny, ale pełni rolę kontroli jakości systemu; nie jest blokadą przed rozszerzaniem publicznie/dozwolenie dostępnych scraperów.
