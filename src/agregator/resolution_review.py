@@ -50,8 +50,8 @@ def build_resolution_review_queue(
     """Return possible duplicate companies for manual review only.
 
     This function never mutates company IDs and never merges records. Candidate
-    generation is blocked by shared tokens / prefixes so it remains useful on
-    benchmark-sized datasets without evaluating every possible company pair.
+    generation is blocked by shared tokens / prefixes / verified website hosts so
+    it remains useful on benchmark-sized datasets without evaluating every pair.
     """
 
     store.init_schema()
@@ -186,6 +186,9 @@ def _blocking_keys(profile: CompanyReviewProfile) -> set[str]:
         if len(compact) >= 6:
             keys.add(f"prefix:{compact[:4]}")
             keys.add(f"suffix:{compact[-4:]}")
+
+    if profile.website_url:
+        keys.add(f"website:{_website_host(profile.website_url)}")
     return keys
 
 
