@@ -40,7 +40,7 @@ EPRACA_PARTNER
 
 Należy skonfigurować wyłącznie sekrety potrzebne dla źródeł wybranych w `sources`. `BRAVE_SEARCH_API_KEY` jest wymagany przez pełny enrichment/search benchmark.
 
-Workflow nie wypisuje wartości sekretów. Pierwszym krokiem jest `agregator-benchmark preflight --strict`; jeśli wybrane źródło nie ma wymaganej konfiguracji, benchmark kończy się przed kolekcją.
+Workflow nie wypisuje wartości sekretów. Pierwszym krokiem merytorycznym jest `agregator-benchmark preflight --strict`; jeśli wybrane źródło nie ma wymaganej konfiguracji, właściwy benchmark nie startuje.
 
 ## Przebieg
 
@@ -51,19 +51,28 @@ manual dispatch
 install
    │
    ▼
+initialize benchmark workspace
+   │
+   ▼
 preflight --strict
    │
-   ▼
+   ├── FAIL -> zapisz preflight.json + exit code -> artifact -> FAIL workflow
+   │
+   └── PASS
+          │
+          ▼
 controlled benchmark --strict
-   │
-   ▼
+          │
+          ▼
 upload workspace artifact
-   │
-   ▼
+          │
+          ▼
 enforce exit code
 ```
 
-Sam run benchmarku zapisuje exit code do `benchmark/exit_code.txt`, a upload artefaktu jest wykonywany również po nieudanym/niekompletnym runie. Dzięki temu diagnostyczny workspace nie znika tylko dlatego, że strict gate zwrócił kod różny od zera.
+Workspace jest inicjalizowany **przed** preflightem. Dzięki temu nawet błąd konfiguracji pozostawia audytowalny artifact z `preflight.json`, `preflight_exit_code.txt` i informacją, że właściwy run został pominięty.
+
+Sam run benchmarku zapisuje swój kod wyjścia do `benchmark/exit_code.txt`. Standardowy JSON zwracany przez CLI trafia do `benchmark/run_result.json`; właściwe dane benchmarku są nadal zapisywane w `benchmark/run/` przez samą aplikację.
 
 ## Artifact
 
@@ -73,9 +82,14 @@ Artifact ma nazwę:
 faro-controlled-benchmark-<github.run_id>
 ```
 
-oraz retencję 14 dni. Obejmuje katalog `benchmark/`, czyli m.in.:
+oraz retencję 14 dni. Obejmuje katalog `benchmark/`, czyli zależnie od etapu m.in.:
 
 ```text
+preflight.json
+preflight_exit_code.txt
+exit_code.txt
+run_result.json
+run_skipped.txt
 benchmark.sqlite3
 run/collection.json
 run/enrichment.json
@@ -84,6 +98,8 @@ run/benchmark_run_manifest.json
 run/dataset/*
 run/labels/*
 ```
+
+`run_skipped.txt` występuje tylko wtedy, gdy preflight nie przeszedł. `run_result.json` i katalog `run/` powstają dopiero po wejściu we właściwy benchmark.
 
 Baza i eksport zawierają dane pozyskane podczas benchmarku, dlatego artefaktu nie należy traktować jako pliku do publicznego rozpowszechniania bez wcześniejszego przeglądu danych i warunków źródeł.
 
@@ -105,8 +121,10 @@ Przed pierwszym pełnym runem warto uruchomić lokalny `agregator-benchmark pref
 
 - workflow ma tylko `contents: read`,
 - nie wykonuje outreachu,
-- nie zapisuje sekretów do artefaktu,
+- nie zapisuje wartości sekretów do generowanych plików,
 - nie uruchamia się automatycznie,
+- właściwy benchmark jest blokowany po nieudanym preflight,
+- artifact powstaje również dla nieudanego preflightu lub niekompletnego strict runu,
 - concurrency blokuje dwa równoległe pełne benchmarki,
 - limit joba to 180 minut,
 - brakujące autoryzacje nie są zastępowane scrapingiem obchodzącym kontrolę dostępu.
