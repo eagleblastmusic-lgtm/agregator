@@ -4,10 +4,16 @@ from urllib.parse import urlparse
 
 from .crawler import CrawlPage, WebsiteCrawler
 from .extract import extract_channels
-from .models import CompanyIdentity, ContactChannel, DiscoveryResult, SearchCandidate
+from .models import (
+    CompanyIdentity,
+    ContactChannel,
+    DiscoveryResult,
+    SearchCandidate,
+    WebsiteVerificationAttempt,
+)
 from .resolver import score_candidate
 from .search import SearchProvider
-from .website_verification import verify_company_website
+from .website_verification import WebsiteVerification, verify_company_website
 
 
 class EmployerDiscoveryPipeline:
@@ -34,6 +40,25 @@ class EmployerDiscoveryPipeline:
                 best[key] = channel
         return sorted(best.values(), key=lambda item: item.confidence, reverse=True)
 
+    @staticmethod
+    def _verification_attempt(
+        candidate: SearchCandidate,
+        resolved_url: str,
+        pages: list[CrawlPage],
+        verification: WebsiteVerification,
+    ) -> WebsiteVerificationAttempt:
+        return WebsiteVerificationAttempt(
+            url=candidate.url,
+            resolved_url=resolved_url,
+            accepted=verification.accepted,
+            score=verification.score,
+            search_score=verification.search_score,
+            content_score=verification.content_score,
+            name_coverage=verification.name_coverage,
+            signals=list(verification.signals),
+            scanned_pages=[page.url for page in pages],
+        )
+
     def _result_from_pages(
         self,
         *,
@@ -44,6 +69,7 @@ class EmployerDiscoveryPipeline:
         pages: list[CrawlPage],
         search_candidates: list[SearchCandidate] | None = None,
         verification_signals: list[str] | None = None,
+        website_attempts: list[WebsiteVerificationAttempt] | None = None,
     ) -> DiscoveryResult:
         channels: list[ContactChannel] = []
         for page in pages:
@@ -63,6 +89,7 @@ class EmployerDiscoveryPipeline:
             channels=self._deduplicate(channels),
             scanned_pages=[page.url for page in pages],
             search_candidates=search_candidates or [],
+            website_attempts=website_attempts or [],
         )
 
     async def scan_known_website(
@@ -103,6 +130,7 @@ class EmployerDiscoveryPipeline:
             for candidate in ranked
             if candidate.score >= self.minimum_search_score
         ][: self.max_website_candidates]
+        attempts: list[WebsiteVerificationAttempt] = []
 
         for candidate in eligible:
             pages = await self.crawler.crawl(candidate.url)
@@ -113,6 +141,14 @@ class EmployerDiscoveryPipeline:
                 resolved_url,
                 pages,
                 search_score=candidate.score,
+            )
+            attempts.append(
+                self._verification_attempt(
+                    candidate,
+                    resolved_url,
+                    pages,
+                    verification,
+                )
             )
             if not verification.accepted:
                 continue
@@ -125,6 +161,7 @@ class EmployerDiscoveryPipeline:
                 pages=pages,
                 search_candidates=ranked,
                 verification_signals=list(verification.signals),
+                website_attempts=attempts,
             )
 
         return DiscoveryResult(
@@ -136,4 +173,5 @@ class EmployerDiscoveryPipeline:
             channels=[],
             scanned_pages=[],
             search_candidates=ranked,
+            website_attempts=attempts,
         )
