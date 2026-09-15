@@ -8,7 +8,11 @@ from .models import SearchCandidate
 
 
 class SearchProvider(Protocol):
-    async def search_company(self, company_name: str, city: str | None = None) -> list[SearchCandidate]: ...
+    async def search_company(
+        self,
+        company_name: str,
+        city: str | None = None,
+    ) -> list[SearchCandidate]: ...
 
 
 class BraveSearchProvider:
@@ -27,7 +31,11 @@ class BraveSearchProvider:
         self.timeout = timeout
         self.count = count
 
-    async def search_company(self, company_name: str, city: str | None = None) -> list[SearchCandidate]:
+    async def search_company(
+        self,
+        company_name: str,
+        city: str | None = None,
+    ) -> list[SearchCandidate]:
         query = f'"{company_name}"'
         if city:
             query += f" {city}"
@@ -37,7 +45,12 @@ class BraveSearchProvider:
             "Accept": "application/json",
             "X-Subscription-Token": self.api_key,
         }
-        params = {"q": query, "count": self.count, "country": "PL", "search_lang": "pl"}
+        params = {
+            "q": query,
+            "count": self.count,
+            "country": "PL",
+            "search_lang": "pl",
+        }
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.get(self.endpoint, headers=headers, params=params)
             response.raise_for_status()
@@ -61,5 +74,9 @@ class StaticSearchProvider:
     def __init__(self, candidates: list[SearchCandidate]) -> None:
         self.candidates = candidates
 
-    async def search_company(self, company_name: str, city: str | None = None) -> list[SearchCandidate]:
+    async def search_company(
+        self,
+        company_name: str,
+        city: str | None = None,
+    ) -> list[SearchCandidate]:
         return list(self.candidates)
