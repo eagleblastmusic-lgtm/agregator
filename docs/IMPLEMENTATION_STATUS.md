@@ -2,6 +2,8 @@
 
 Aktualny zakres PR obejmuje M0–M3: enrichment kontaktów, agregację ofert, Company Resolution oraz dwuetapową weryfikację oficjalnej strony WWW.
 
+Szczegółowy plan i checkpointy: [`PLAN.md`](PLAN.md).
+
 ## Gotowe baseline'y
 
 - M0: crawler + evidence + GREEN/REVIEW/IGNORE.
