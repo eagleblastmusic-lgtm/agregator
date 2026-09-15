@@ -110,16 +110,23 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert result.benchmark_report_path.exists()
     assert result.run_manifest_path.exists()
     assert result.dataset.manifest_path.exists()
+    assert result.website_snapshots.path.exists()
+    assert result.website_snapshots.rows == 1
+    assert result.website_snapshots.parse_errors == 0
     assert result.quality_labels.company_resolution_path.exists()
     assert result.quality_labels.website_resolution_path.exists()
     assert result.quality_labels.contact_classification_path.exists()
 
     manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "1"
+    assert manifest["schema_version"] == "2"
     assert manifest["collection"]["target_reached"] is True
     assert manifest["enrichment"]["enriched"] == 1
     assert manifest["benchmark"]["websites_found"] == 1
+    assert manifest["website_snapshots"]["rows"] == 1
     assert manifest["files"]["dataset_dir"] == "dataset"
+    assert manifest["files"]["website_page_snapshots"] == (
+        "dataset/website_page_snapshots.csv"
+    )
     assert manifest["files"]["labels_dir"] == "labels"
 
 
@@ -160,4 +167,5 @@ async def test_benchmark_pipeline_stops_after_all_failed_enrichment_batch(tmp_pa
     assert result.enrichment.enriched == 0
     assert result.enrichment.failed == 1
     assert result.enrichment.stopped_reason == "batch_all_failed"
+    assert result.website_snapshots.rows == 0
     assert result.run_manifest_path.exists()
