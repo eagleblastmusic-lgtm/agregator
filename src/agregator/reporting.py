@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .company_identifiers import init_company_identifier_schema
 from .employer_score import rank_companies
 from .storage import SQLiteStore
 
@@ -18,12 +19,16 @@ class BenchmarkReport:
     high_confidence_companies: int
     enriched_companies: int
     websites_found: int
+    company_identifiers_total: int
+    companies_with_identifiers: int
+    identifier_conflicts: int
     contact_channels_total: int
     green_channels: int
     review_channels: int
     ignored_channels: int
     company_to_job_ratio: float
     website_find_rate: float
+    identifier_company_rate: float
     green_company_rate: float
     employer_score_average: float
     employer_score_ge_60: int
@@ -42,6 +47,7 @@ def build_benchmark_report(
     high_confidence_threshold: float = 0.7,
 ) -> BenchmarkReport:
     store.init_schema()
+    init_company_identifier_schema(store)
     with store.connect() as connection:
         jobs_total = _scalar(connection, "SELECT COUNT(*) FROM job_postings")
         companies_total = _scalar(connection, "SELECT COUNT(*) FROM companies")
@@ -61,6 +67,26 @@ def build_benchmark_report(
         websites_found = _scalar(
             connection,
             "SELECT COUNT(*) FROM companies WHERE website_url IS NOT NULL",
+        )
+        company_identifiers_total = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM company_identifiers",
+        )
+        companies_with_identifiers = _scalar(
+            connection,
+            "SELECT COUNT(DISTINCT company_id) FROM company_identifiers",
+        )
+        identifier_conflicts = _scalar(
+            connection,
+            """
+            SELECT COUNT(*)
+            FROM (
+                SELECT kind, value
+                FROM company_identifiers
+                GROUP BY kind, value
+                HAVING COUNT(DISTINCT company_id) > 1
+            ) conflicts
+            """,
         )
         contact_channels_total = _scalar(
             connection,
@@ -148,12 +174,16 @@ def build_benchmark_report(
         high_confidence_companies=high_confidence_companies,
         enriched_companies=enriched_companies,
         websites_found=websites_found,
+        company_identifiers_total=company_identifiers_total,
+        companies_with_identifiers=companies_with_identifiers,
+        identifier_conflicts=identifier_conflicts,
         contact_channels_total=contact_channels_total,
         green_channels=green_channels,
         review_channels=review_channels,
         ignored_channels=ignored_channels,
         company_to_job_ratio=_ratio(companies_total, jobs_total),
         website_find_rate=_ratio(websites_found, enriched_companies),
+        identifier_company_rate=_ratio(companies_with_identifiers, companies_total),
         green_company_rate=_ratio(green_companies, enriched_companies),
         employer_score_average=_average(score_values),
         employer_score_ge_60=sum(1 for score in score_values if score >= 60),
