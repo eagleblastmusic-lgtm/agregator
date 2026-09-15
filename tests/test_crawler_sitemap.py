@@ -38,3 +38,25 @@ def test_priority_prefers_business_contact_paths() -> None:
     assert WebsiteCrawler._priority("https://example.pl/wspolpraca") == 0
     assert WebsiteCrawler._priority("https://example.pl/dla-firm") == 0
     assert WebsiteCrawler._priority("https://example.pl/blog/aktualnosci") == 10
+
+
+def test_links_deduplicate_tracking_aliases_before_queueing() -> None:
+    crawler = WebsiteCrawler()
+    html = """
+    <html><body>
+      <a href="/partner?utm_source=footer#form">Partnerzy</a>
+      <a href="https://EXAMPLE.pl:443/partner?fbclid=abc">Współpraca</a>
+      <a href="/partner?mode=b2b&utm_campaign=spring">B2B wariant</a>
+    </body></html>
+    """
+
+    links = crawler._links(
+        html,
+        "https://example.pl/kontakt?utm_source=search",
+        "https://example.pl",
+    )
+
+    assert links == [
+        (0, "https://example.pl/partner"),
+        (0, "https://example.pl/partner?mode=b2b"),
+    ]
