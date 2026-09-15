@@ -203,7 +203,6 @@ def label_set(
     label_dir: str = typer.Option("benchmark/run/labels", "--label-dir"),
     value: str | None = typer.Option(None, "--value"),
     purpose: str | None = typer.Option(None, "--purpose"),
-    accept_predicted: bool = typer.Option(False, "--accept-predicted"),
     exclude: bool = typer.Option(False, "--exclude"),
     overwrite: bool = typer.Option(False, "--overwrite"),
 ) -> None:
@@ -214,7 +213,6 @@ def label_set(
             row_number,
             value=value,
             purpose=purpose,
-            accept_predicted=accept_predicted,
             exclude=exclude,
             overwrite=overwrite,
         )
