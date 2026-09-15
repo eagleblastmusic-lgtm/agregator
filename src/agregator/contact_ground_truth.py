@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .audit import init_audit_schema
 from .models import ChannelPurpose, Decision
 from .storage import SQLiteStore
 
@@ -118,10 +119,20 @@ def export_contact_ground_truth_template(
     limit: int = 1000,
 ) -> Path:
     store.init_schema()
+    init_audit_schema(store)
     path = Path(output)
     with store.connect() as connection:
         rows = connection.execute(
             """
+            WITH latest_evidence AS (
+                SELECT e.*
+                FROM contact_evidence_snapshots e
+                JOIN (
+                    SELECT contact_channel_id, MAX(id) AS latest_id
+                    FROM contact_evidence_snapshots
+                    GROUP BY contact_channel_id
+                ) latest ON latest.latest_id = e.id
+            )
             SELECT
                 cc.id AS contact_id,
                 c.canonical_name,
@@ -132,9 +143,13 @@ def export_contact_ground_truth_template(
                 cc.confidence AS predicted_confidence,
                 cc.evidence_url,
                 cc.evidence_text,
-                cc.evidence_signal
+                cc.evidence_signal,
+                le.id AS latest_evidence_snapshot_id,
+                le.content_sha256 AS evidence_content_sha256,
+                le.captured_at AS evidence_captured_at
             FROM contact_channels cc
             JOIN companies c ON c.id = cc.company_id
+            LEFT JOIN latest_evidence le ON le.contact_channel_id = cc.id
             ORDER BY
                 CASE cc.decision
                     WHEN 'green' THEN 0
@@ -161,6 +176,9 @@ def export_contact_ground_truth_template(
         "evidence_url",
         "evidence_text",
         "evidence_signal",
+        "latest_evidence_snapshot_id",
+        "evidence_content_sha256",
+        "evidence_captured_at",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -181,6 +199,9 @@ def export_contact_ground_truth_template(
                     "evidence_url": row["evidence_url"],
                     "evidence_text": row["evidence_text"],
                     "evidence_signal": row["evidence_signal"],
+                    "latest_evidence_snapshot_id": row["latest_evidence_snapshot_id"],
+                    "evidence_content_sha256": row["evidence_content_sha256"],
+                    "evidence_captured_at": row["evidence_captured_at"],
                 }
             )
     return path
