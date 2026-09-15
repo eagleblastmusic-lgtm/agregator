@@ -173,6 +173,27 @@ agregator export-quality-labels \
   --contact-limit 1000
 ```
 
+Główne `*_truth.csv` są blind-primary: nie zawierają prognoz modelu. Do pracy w terminalu można pobrać pierwszy nieoznaczony rekord:
+
+```bash
+agregator-benchmark label-next \
+  --label-dir benchmark/labels \
+  --kind contact_classification
+```
+
+Etykietę zapisuje się jawnie, bez skrótu typu „zaakceptuj predykcję”:
+
+```bash
+agregator-benchmark label-set \
+  --label-dir benchmark/labels \
+  --kind contact_classification \
+  --row 12 \
+  --value green \
+  --purpose business_partnership
+```
+
+Dla domeny można podać domenę/URL albo `__none__`, a przypadki bez wiarygodnego ground truth można jawnie wyłączyć z ewaluacji przez `--exclude`. Domyślnie istniejącej etykiety nie da się nadpisać; świadoma korekta wymaga `--overwrite`.
+
 Postęp ręcznego labelingu:
 
 ```bash
