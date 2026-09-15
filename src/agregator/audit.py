@@ -46,8 +46,6 @@ def init_audit_schema(store: SQLiteStore) -> None:
 
             CREATE INDEX IF NOT EXISTS idx_website_verification_runs_company
                 ON website_verification_runs(company_id, captured_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_website_verification_runs_origin
-                ON website_verification_runs(resolution_origin, resolution_source);
 
             CREATE TABLE IF NOT EXISTS contact_evidence_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
