@@ -1,6 +1,6 @@
 # Faro — diagnostyczny overlap ofert między źródłami
 
-Benchmark raportuje teraz heurystyczny overlap ofert pomiędzy źródłami. Celem jest odpowiedź na pytanie, czy kolejne integracje wnoszą nowe oferty, czy głównie powielają rynek już pokryty przez inne źródła.
+Benchmark raportuje heurystyczny overlap ofert pomiędzy źródłami. Celem jest odpowiedź na pytanie, czy kolejne integracje wnoszą nowe oferty, czy głównie powielają rynek już pokryty przez inne źródła.
 
 ## Ważne ograniczenie
 
@@ -32,12 +32,30 @@ z polami:
 unique_job_fingerprints
 cross_source_shared_fingerprints
 cross_source_shared_fingerprint_rate
+by_source
 pairwise
 ```
 
 `cross_source_shared_fingerprints` oznacza liczbę unikalnych fingerprintów występujących w co najmniej dwóch źródłach.
 
 `cross_source_shared_fingerprint_rate` to ich udział w całej puli unikalnych fingerprintów.
+
+## Wartość pojedynczego źródła
+
+`by_source` pokazuje, ile treści danego źródła jest rzeczywiście ekskluzywne względem wszystkich pozostałych źródeł w benchmarku:
+
+```text
+source
+fingerprints
+exclusive_fingerprints
+shared_fingerprints
+exclusive_rate
+shared_rate
+```
+
+`exclusive_fingerprints` to fingerprinty obserwowane tylko w tym jednym źródle. `exclusive_rate` jest więc prostą diagnostyką marginalnej wartości pokrycia źródła. `shared_rate` pokazuje odwrotnie, jaka część jego fingerprintów pojawia się także gdzie indziej.
+
+To nie jest jeszcze miara biznesowej wartości źródła — unikalna oferta bez wiarygodnej identity może być mniej użyteczna niż powielona oferta zawierająca NIP, REGON lub oficjalny URL firmy.
 
 ## Metryki par źródeł
 
