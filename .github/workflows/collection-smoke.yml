@@ -35,7 +35,7 @@ permissions:
 
 concurrency:
   group: faro-collection-smoke-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   smoke:
@@ -167,6 +167,8 @@ jobs:
               blockers = preflight.get("blockers") or []
               if blockers:
                   lines.append("- Preflight blockers: `" + ", ".join(map(str, blockers)) + "`")
+                  if all(str(item).startswith("source_not_ready:") for item in blockers):
+                      lines.append("- P10 state: `not_configured` (partner credentials unavailable)")
 
           if result is not None:
               collection = result.get("collection") or {}
@@ -215,6 +217,30 @@ jobs:
           fi
 
           if [ "$preflight_code" -ne 0 ]; then
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              only_not_ready="$(python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("benchmark/collection-smoke/preflight.json")
+          value = False
+          if path.exists():
+              try:
+                  payload = json.loads(path.read_text(encoding="utf-8"))
+                  blockers = payload.get("blockers") or []
+                  value = bool(blockers) and all(
+                      str(item).startswith("source_not_ready:") for item in blockers
+                  )
+              except Exception:
+                  value = False
+          print("true" if value else "false")
+          PY
+              )"
+              if [[ "$only_not_ready" == "true" ]]; then
+                echo "Partner sources are not configured; recorded as P10 not_configured."
+                exit 0
+              fi
+            fi
             echo "Collection preflight failed (exit code: $preflight_code)."
             exit "$preflight_code"
           fi
