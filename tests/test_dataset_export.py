@@ -16,6 +16,7 @@ from agregator.models import (
     DiscoveryResult,
     Evidence,
     JobPosting,
+    WebsiteResolutionOrigin,
 )
 from agregator.storage import SQLiteStore
 
@@ -59,6 +60,8 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
             website_url="https://acme.test",
             domain="acme.test",
             website_confidence=0.99,
+            website_resolution_origin=WebsiteResolutionOrigin.SOURCE_CANDIDATE,
+            website_resolution_source="fixture.website",
             website_verification_signals=["exact_normalized_company_name", "accepted"],
         ),
         channels=[
@@ -118,8 +121,11 @@ def test_export_dataset_bundle_preserves_resolution_and_evidence(tmp_path: Path)
     assert "partnerzy@acme.test" in contacts
     assert "evidence_url" in contacts
     assert "exact_normalized_company_name" in website_runs
+    assert "resolution_origin" in website_runs
+    assert "source_candidate" in website_runs
+    assert "fixture.website" in website_runs
     assert "content_sha256" in snapshots
-    assert manifest["schema_version"] == "4"
+    assert manifest["schema_version"] == "5"
     assert manifest["counts"] == {
         "companies": 1,
         "job_postings": 1,
