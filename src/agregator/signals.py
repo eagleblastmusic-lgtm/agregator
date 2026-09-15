@@ -34,6 +34,14 @@ EXPLICIT_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("franczyza", ChannelPurpose.FRANCHISE),
 ]
 
+COMMERCIAL_CONSENT_SIGNALS = [
+    "zgadzam sie na otrzymywanie informacji handlowych",
+    "zgoda na otrzymywanie informacji handlowych",
+    "wyrazam zgode na otrzymywanie informacji handlowych",
+    "wyrazam zgode na przesylanie informacji handlowych",
+    "zgoda na informacje handlowe",
+]
+
 REVIEW_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("b2b", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("partnerzy", ChannelPurpose.BUSINESS_PARTNERSHIP),
@@ -82,6 +90,10 @@ def classify_context(context: str, value: str = "") -> tuple[ChannelPurpose, Dec
         if phrase in normalized:
             return purpose, Decision.GREEN, 0.95, phrase
 
+    for phrase in COMMERCIAL_CONSENT_SIGNALS:
+        if phrase in normalized:
+            return ChannelPurpose.SALES, Decision.REVIEW, 0.78, phrase
+
     local_part = value.split("@", 1)[0].lower() if "@" in value else ""
     if local_part in GREEN_LOCAL_PARTS:
         return ChannelPurpose.BUSINESS_PARTNERSHIP, Decision.REVIEW, 0.82, f"localpart:{local_part}"
@@ -102,4 +114,5 @@ def classify_context(context: str, value: str = "") -> tuple[ChannelPurpose, Dec
 def contains_discovery_signal(text: str) -> bool:
     normalized = normalize_text(text)
     phrases = [phrase for phrase, _ in EXPLICIT_SIGNALS + REVIEW_SIGNALS]
+    phrases.extend(COMMERCIAL_CONSENT_SIGNALS)
     return any(phrase in normalized for phrase in phrases)
