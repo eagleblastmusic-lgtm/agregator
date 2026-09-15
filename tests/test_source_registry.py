@@ -17,8 +17,26 @@ def test_default_registry_contains_api_and_public_sources(
     monkeypatch.setenv("EPRACA_ALL", "true")
     registry = default_registry()
 
-    assert registry.names() == ["adzuna", "careerjet", "epraca", "jooble", "olx"]
+    assert registry.names() == [
+        "adzuna",
+        "careerjet",
+        "epraca",
+        "jooble",
+        "justjoinit",
+        "karierawfinansach",
+        "nofluffjobs",
+        "olx",
+        "pracuj",
+        "rocketjobs",
+        "skillshot",
+    ]
     assert registry.create("OLX").name == "olx"
+    assert registry.create("PRACUJ").name == "pracuj"
+    assert registry.create("SKILLSHOT").name == "skillshot"
+    assert registry.create("NOFLUFFJOBS").name == "nofluffjobs"
+    assert registry.create("JUSTJOINIT").name == "justjoinit"
+    assert registry.create("ROCKETJOBS").name == "rocketjobs"
+    assert registry.create("KARIERAWFINANSACH").name == "karierawfinansach"
     assert registry.create("JOOBLE").name == "jooble"
     assert registry.create("ADZUNA").name == "adzuna"
     assert registry.create("CAREERJET").name == "careerjet"
@@ -33,6 +51,15 @@ def test_default_registry_exposes_access_policy_metadata() -> None:
     assert olx.experimental is True
     assert olx.notes is not None
     assert olx.required_env == ()
+
+    pracuj = registry.describe("pracuj")
+    assert pracuj.access_mode == "public_sitemap_html"
+    assert pracuj.experimental is True
+    assert pracuj.required_env == ()
+
+    skillshot = registry.describe("skillshot")
+    assert skillshot.access_mode == "public_html"
+    assert skillshot.experimental is True
 
     epraca = registry.describe("epraca")
     assert epraca.access_mode == "official_partner_feed"
