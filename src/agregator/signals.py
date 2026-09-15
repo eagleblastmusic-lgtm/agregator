@@ -18,6 +18,7 @@ def normalize_text(value: str) -> str:
 
 EXPLICIT_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("propozycje wspolpracy", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("oferty wspolpracy", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("nawiaz wspolprace", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("zapraszamy do wspolpracy", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("kontakt dla partnerow", ChannelPurpose.BUSINESS_PARTNERSHIP),
@@ -25,13 +26,26 @@ EXPLICIT_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("zostan partnerem", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("wspolpraca b2b", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("propozycje biznesowe", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("business enquiries", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("business inquiries", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("business proposals", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("partnership enquiries", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("partnership inquiries", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("partnership proposals", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("oferty handlowe", ChannelPurpose.SALES),
     ("kontakt handlowy", ChannelPurpose.SALES),
     ("dzial handlowy", ChannelPurpose.SALES),
+    ("commercial offers", ChannelPurpose.SALES),
+    ("sales enquiries", ChannelPurpose.SALES),
+    ("sales inquiries", ChannelPurpose.SALES),
     ("dla dostawcow", ChannelPurpose.SUPPLIER),
     ("zostan dostawca", ChannelPurpose.SUPPLIER),
     ("wspolpraca z dostawcami", ChannelPurpose.SUPPLIER),
+    ("supplier enquiries", ChannelPurpose.SUPPLIER),
+    ("supplier inquiries", ChannelPurpose.SUPPLIER),
     ("franczyza", ChannelPurpose.FRANCHISE),
+    ("franchise enquiries", ChannelPurpose.FRANCHISE),
+    ("franchise inquiries", ChannelPurpose.FRANCHISE),
 ]
 
 COMMERCIAL_CONSENT_SIGNALS = [
@@ -40,15 +54,24 @@ COMMERCIAL_CONSENT_SIGNALS = [
     "wyrazam zgode na otrzymywanie informacji handlowych",
     "wyrazam zgode na przesylanie informacji handlowych",
     "zgoda na informacje handlowe",
+    "consent to receive commercial information",
+    "consent to receive marketing information",
 ]
 
 REVIEW_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("b2b", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("partnerzy", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("partner", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("partnership", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("cooperation", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("wspolpraca", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("dla firm", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("biznes", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("sprzedaz", ChannelPurpose.SALES),
+    ("sales", ChannelPurpose.SALES),
+    ("supplier", ChannelPurpose.SUPPLIER),
+    ("vendor", ChannelPurpose.SUPPLIER),
+    ("franchise", ChannelPurpose.FRANCHISE),
 ]
 
 NEGATIVE_SIGNALS = [
@@ -57,22 +80,60 @@ NEGATIVE_SIGNALS = [
     "nie wysylaj ofert handlowych",
     "zakaz przesylania ofert handlowych",
     "brak zgody na oferty handlowe",
+    "no commercial offers",
+    "do not send commercial offers",
+    "no sales solicitations",
 ]
 
-PRIVACY_SIGNALS = ["rodo", "iod", "inspektor ochrony danych", "privacy", "dane osobowe"]
-RECRUITMENT_SIGNALS = ["rekrutacja", "kariera", "praca", "cv", "hr@"]
-SUPPORT_SIGNALS = ["obsluga klienta", "reklamacje", "pomoc", "support", "serwis"]
+PRIVACY_SIGNALS = [
+    "rodo",
+    "iod",
+    "inspektor ochrony danych",
+    "privacy",
+    "dane osobowe",
+    "dpo@",
+    "data protection officer",
+]
+RECRUITMENT_SIGNALS = [
+    "rekrutacja",
+    "kariera",
+    "praca",
+    "cv",
+    "hr@",
+    "jobs@",
+    "careers",
+    "career",
+    "recruitment",
+    "talent acquisition",
+]
+SUPPORT_SIGNALS = [
+    "obsluga klienta",
+    "reklamacje",
+    "pomoc",
+    "support",
+    "serwis",
+    "customer service",
+    "helpdesk",
+]
 
 GREEN_LOCAL_PARTS = {
     "wspolpraca",
     "partnerzy",
     "partner",
+    "partnership",
+    "partnerships",
     "b2b",
     "handel",
     "handlowy",
     "sprzedaz",
+    "sales",
     "dostawcy",
+    "supplier",
+    "suppliers",
+    "vendor",
+    "vendors",
     "franczyza",
+    "franchise",
 }
 
 
@@ -115,4 +176,5 @@ def contains_discovery_signal(text: str) -> bool:
     normalized = normalize_text(text)
     phrases = [phrase for phrase, _ in EXPLICIT_SIGNALS + REVIEW_SIGNALS]
     phrases.extend(COMMERCIAL_CONSENT_SIGNALS)
+    phrases.extend(NEGATIVE_SIGNALS)
     return any(phrase in normalized for phrase in phrases)
