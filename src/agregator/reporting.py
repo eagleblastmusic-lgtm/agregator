@@ -6,7 +6,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .audit import init_audit_schema
 from .company_identifiers import init_company_identifier_schema
+from .company_websites import init_company_website_candidate_schema
 from .employer_score import rank_companies
 from .storage import SQLiteStore
 
@@ -22,6 +24,9 @@ class BenchmarkReport:
     company_identifiers_total: int
     companies_with_identifiers: int
     identifier_conflicts: int
+    website_candidates_total: int
+    companies_with_website_candidates: int
+    source_verified_websites: int
     contact_channels_total: int
     green_channels: int
     review_channels: int
@@ -29,6 +34,9 @@ class BenchmarkReport:
     company_to_job_ratio: float
     website_find_rate: float
     identifier_company_rate: float
+    source_website_candidate_company_rate: float
+    source_verified_website_rate: float
+    source_verified_share_of_found: float
     green_company_rate: float
     employer_score_average: float
     employer_score_ge_60: int
@@ -47,7 +55,9 @@ def build_benchmark_report(
     high_confidence_threshold: float = 0.7,
 ) -> BenchmarkReport:
     store.init_schema()
+    init_audit_schema(store)
     init_company_identifier_schema(store)
+    init_company_website_candidate_schema(store)
     with store.connect() as connection:
         jobs_total = _scalar(connection, "SELECT COUNT(*) FROM job_postings")
         companies_total = _scalar(connection, "SELECT COUNT(*) FROM companies")
@@ -86,6 +96,29 @@ def build_benchmark_report(
                 GROUP BY kind, value
                 HAVING COUNT(DISTINCT company_id) > 1
             ) conflicts
+            """,
+        )
+        website_candidates_total = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM company_website_candidates",
+        )
+        companies_with_website_candidates = _scalar(
+            connection,
+            "SELECT COUNT(DISTINCT company_id) FROM company_website_candidates",
+        )
+        source_verified_websites = _scalar(
+            connection,
+            """
+            SELECT COUNT(*)
+            FROM website_verification_runs w
+            JOIN (
+                SELECT company_id, MAX(id) AS latest_id
+                FROM website_verification_runs
+                GROUP BY company_id
+            ) latest ON latest.latest_id = w.id
+            WHERE w.outcome = 'verified'
+              AND w.search_candidates_json = '[]'
+              AND w.verification_signals_json LIKE '%source_website_candidate:%'
             """,
         )
         contact_channels_total = _scalar(
@@ -177,6 +210,9 @@ def build_benchmark_report(
         company_identifiers_total=company_identifiers_total,
         companies_with_identifiers=companies_with_identifiers,
         identifier_conflicts=identifier_conflicts,
+        website_candidates_total=website_candidates_total,
+        companies_with_website_candidates=companies_with_website_candidates,
+        source_verified_websites=source_verified_websites,
         contact_channels_total=contact_channels_total,
         green_channels=green_channels,
         review_channels=review_channels,
@@ -184,6 +220,18 @@ def build_benchmark_report(
         company_to_job_ratio=_ratio(companies_total, jobs_total),
         website_find_rate=_ratio(websites_found, enriched_companies),
         identifier_company_rate=_ratio(companies_with_identifiers, companies_total),
+        source_website_candidate_company_rate=_ratio(
+            companies_with_website_candidates,
+            companies_total,
+        ),
+        source_verified_website_rate=_ratio(
+            source_verified_websites,
+            companies_with_website_candidates,
+        ),
+        source_verified_share_of_found=_ratio(
+            source_verified_websites,
+            websites_found,
+        ),
         green_company_rate=_ratio(green_companies, enriched_companies),
         employer_score_average=_average(score_values),
         employer_score_ge_60=sum(1 for score in score_values if score >= 60),
