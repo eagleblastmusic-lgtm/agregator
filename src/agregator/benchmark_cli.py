@@ -8,6 +8,7 @@ import typer
 
 from .benchmark_evaluation import evaluate_labeled_benchmark
 from .benchmark_pipeline import run_benchmark_pipeline
+from .benchmark_preflight import build_benchmark_preflight
 from .crawler import WebsiteCrawler
 from .label_status import build_label_bundle_status
 from .pipeline import EmployerDiscoveryPipeline
@@ -33,6 +34,29 @@ def _search_provider() -> BraveSearchProvider:
             "Ustaw BRAVE_SEARCH_API_KEY przed uruchomieniem pełnego benchmarku"
         )
     return BraveSearchProvider(api_key)
+
+
+def _source_names(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+@app.command("preflight")
+def preflight(
+    sources: str = typer.Option("olx,jooble,adzuna", "--sources"),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Kod wyjścia 2, jeśli search lub którekolwiek żądane źródło nie jest gotowe",
+    ),
+) -> None:
+    result = build_benchmark_preflight(
+        default_registry(),
+        _source_names(sources),
+        search_provider_ready=bool(os.getenv("BRAVE_SEARCH_API_KEY", "")),
+    )
+    typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    if strict and not result.ready:
+        raise typer.Exit(code=2)
 
 
 @app.command("run")
@@ -87,7 +111,7 @@ def run(
         help="Kod wyjścia 2, jeśli target lub pełny enrichment nie są domknięte",
     ),
 ) -> None:
-    source_names = [item.strip() for item in sources.split(",") if item.strip()]
+    source_names = _source_names(sources)
     store = SQLiteStore(db)
     pipeline = EmployerDiscoveryPipeline(
         crawler=_crawler(),
