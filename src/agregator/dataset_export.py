@@ -7,12 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from .audit import init_audit_schema
+from .audit_export import WebsiteSnapshotExportResult, export_website_page_snapshots
 from .company_identifiers import init_company_identifier_schema
 from .company_websites import init_company_website_candidate_schema
 from .employer_score import rank_companies
 from .storage import SQLiteStore
 
-EXPORT_SCHEMA_VERSION = "5"
+EXPORT_SCHEMA_VERSION = "6"
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +26,7 @@ class DatasetExportResult:
     contacts_path: Path
     website_verifications_path: Path
     evidence_snapshots_path: Path
+    website_snapshots: WebsiteSnapshotExportResult
     manifest_path: Path
     companies: int
     jobs: int
@@ -44,6 +46,7 @@ class DatasetExportResult:
             "contacts_path": str(self.contacts_path),
             "website_verifications_path": str(self.website_verifications_path),
             "evidence_snapshots_path": str(self.evidence_snapshots_path),
+            "website_snapshots": self.website_snapshots.to_dict(),
             "manifest_path": str(self.manifest_path),
             "companies": self.companies,
             "jobs": self.jobs,
@@ -76,6 +79,7 @@ def export_dataset_bundle(
     contacts_path = directory / "contact_channels.csv"
     website_verifications_path = directory / "website_verification_runs.csv"
     evidence_snapshots_path = directory / "contact_evidence_snapshots.csv"
+    website_snapshots_path = directory / "website_page_snapshots.csv"
     manifest_path = directory / "manifest.json"
 
     score_by_company = {
@@ -282,6 +286,7 @@ def export_dataset_bundle(
         evidence_snapshots,
         _evidence_snapshot_fields(),
     )
+    website_snapshots = export_website_page_snapshots(store, website_snapshots_path)
 
     manifest = {
         "schema_version": EXPORT_SCHEMA_VERSION,
@@ -293,6 +298,7 @@ def export_dataset_bundle(
             "contact_channels": contacts_path.name,
             "website_verification_runs": website_verifications_path.name,
             "contact_evidence_snapshots": evidence_snapshots_path.name,
+            "website_page_snapshots": website_snapshots.path.name,
         },
         "counts": {
             "companies": len(companies),
@@ -302,6 +308,8 @@ def export_dataset_bundle(
             "contact_channels": len(contacts),
             "website_verification_runs": len(website_verifications),
             "contact_evidence_snapshots": len(evidence_snapshots),
+            "website_page_snapshots": website_snapshots.rows,
+            "website_page_snapshot_parse_errors": website_snapshots.parse_errors,
         },
         "notes": {
             "company_resolution": (
@@ -323,8 +331,11 @@ def export_dataset_bundle(
             "website_audit": (
                 "website_verification_runs keeps ranked candidates and per-candidate attempts"
             ),
+            "website_page_snapshots": (
+                "flattened immutable attempt/final page evidence for offline domain review"
+            ),
             "evidence_hash": (
-                "contact_evidence_snapshots preserves immutable SHA-256 evidence snapshots"
+                "contact and page snapshots preserve SHA-256 evidence hashes"
             ),
         },
     }
@@ -342,6 +353,7 @@ def export_dataset_bundle(
         contacts_path=contacts_path,
         website_verifications_path=website_verifications_path,
         evidence_snapshots_path=evidence_snapshots_path,
+        website_snapshots=website_snapshots,
         manifest_path=manifest_path,
         companies=len(companies),
         jobs=len(jobs),
