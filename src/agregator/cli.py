@@ -49,6 +49,7 @@ async def _collect(
     store = SQLiteStore(db)
     result = await ingest_source(source, store, pages=pages, resume=not fresh)
     return {
+        "run_id": result.run_id,
         "source": result.source,
         "pages": result.pages,
         "next_cursor": result.next_cursor,
@@ -123,6 +124,23 @@ def collect_olx(
 ) -> None:
     result = asyncio.run(_collect("olx", db, pages, fresh))
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@app.command("runs")
+def runs(
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    source: str | None = typer.Option(None, "--source"),
+    limit: int = typer.Option(50, "--limit", min=1, max=1000),
+) -> None:
+    store = SQLiteStore(db)
+    store.init_schema()
+    typer.echo(
+        json.dumps(
+            store.list_source_runs(source=source, limit=limit),
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 @app.command("import-csv")
