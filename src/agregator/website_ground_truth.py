@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 from .audit import init_audit_schema
 from .company_websites import init_company_website_candidate_schema
+from .ground_truth_common import EXCLUDE_LABEL, count_excluded_labels
 from .storage import SQLiteStore
 
 NO_WEBSITE = "__none__"
@@ -33,6 +34,7 @@ class WebsiteEvaluation:
     recall: float
     f1: float
     accuracy: float
+    excluded_rows: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -81,6 +83,10 @@ def load_website_ground_truth_csv(path: str | Path) -> list[WebsiteGroundTruthLa
                     f"duplicate website ground truth company at line {line_number}: {company_id}"
                 )
             seen.add(company_id)
+
+            if raw_truth.lower() == EXCLUDE_LABEL:
+                continue
+
             labels.append(
                 WebsiteGroundTruthLabel(
                     company_id=company_id,
@@ -252,7 +258,11 @@ def evaluate_website_resolution_csv(
     store: SQLiteStore,
     path: str | Path,
 ) -> WebsiteEvaluation:
-    return evaluate_website_resolution(store, load_website_ground_truth_csv(path))
+    result = evaluate_website_resolution(store, load_website_ground_truth_csv(path))
+    return replace(
+        result,
+        excluded_rows=count_excluded_labels(path, "truth_domain"),
+    )
 
 
 def _safe_ratio(numerator: float, denominator: float) -> float:
