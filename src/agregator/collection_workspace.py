@@ -109,6 +109,7 @@ async def run_collection_workspace(
             "source_health_ready": collection.source_health_ready,
             "unexercised_sources": list(collection.unexercised_sources),
             "disabled_sources": list(collection.disabled_sources),
+            "sources_without_jobs": list(collection.sources_without_jobs),
             "sources_with_errors": list(collection.sources_with_errors),
             "ready_for_full_enrichment_benchmark": ready,
             "manual_ground_truth_ready": False,
@@ -147,6 +148,10 @@ def _readiness_blockers(collection: BenchmarkCollectionResult) -> list[str]:
         )
     if collection.disabled_sources:
         blockers.append("disabled_sources:" + ",".join(collection.disabled_sources))
+    if collection.sources_without_jobs:
+        blockers.append(
+            "sources_without_jobs:" + ",".join(collection.sources_without_jobs)
+        )
     return blockers
 
 
