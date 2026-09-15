@@ -69,3 +69,43 @@ def test_verification_rejects_domain_when_crawler_has_no_pages() -> None:
     assert result.accepted is False
     assert result.content_score == 0.0
     assert result.signals == ("no_crawlable_pages",)
+
+
+def test_jsonld_organization_can_confirm_identity_when_visible_copy_is_sparse() -> None:
+    result = verify_company_website(
+        "Baltic Robotics Sp. z o.o.",
+        "Gdynia",
+        "https://balticrobotics.example",
+        [
+            _page(
+                "https://balticrobotics.example",
+                """
+                <html>
+                  <head>
+                    <script type="application/ld+json">
+                    {
+                      "@context": "https://schema.org",
+                      "@type": "Organization",
+                      "legalName": "Baltic Robotics Sp. z o.o.",
+                      "url": "https://balticrobotics.example",
+                      "taxID": "PL1234567890",
+                      "address": {
+                        "@type": "PostalAddress",
+                        "addressLocality": "Gdynia"
+                      }
+                    }
+                    </script>
+                  </head>
+                  <body><h1>Rozwiązania automatyki przemysłowej</h1></body>
+                </html>
+                """,
+            )
+        ],
+        search_score=0.88,
+    )
+
+    assert result.accepted is True
+    assert "jsonld_organization_name" in result.signals
+    assert "jsonld_organization_url" in result.signals
+    assert "jsonld_address_city" in result.signals
+    assert "jsonld_tax_id_present" in result.signals
