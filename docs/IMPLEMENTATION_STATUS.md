@@ -8,11 +8,24 @@ Szczegółowy plan i checkpointy: [`PLAN.md`](PLAN.md).
 
 - M0: crawler + evidence + GREEN/REVIEW/IGNORE.
 - M1: OLX, Jooble, Adzuna, Careerjet Publisher API i oficjalny ePraca WebService, source registry, resumowalne runy, katalog 91 źródeł, pełny bundle eksportowy dla Faro oraz kontrolowany `benchmark-collect` round-robin.
-- M2: konserwatywny Company Resolution v1, aliasy/lokalizacje, metody/confidence, ground truth, pairwise precision/recall/F1, fuzzy REVIEW bez automatycznego merge.
+- M2: konserwatywny Company Resolution v1, aliasy/lokalizacje, metody/confidence, ground truth, pairwise precision/recall/F1, fuzzy REVIEW bez automatycznego merge oraz warstwa jawnych identyfikatorów pracodawcy.
 - M3: ranking wyników wyszukiwarki + first-party content verification z fallbackiem do kolejnych kandydatów, JSON-LD Organization oraz zapis każdej próby weryfikacji kandydata.
 - M4 foundations: `sitemap.xml`, priorytety podstron współpracy/B2B, typowe obfuskowane e-maile, formularze ze zgodą na informacje handlowe, append-only evidence snapshots z SHA-256.
 - Quality benchmark: osobne ground truth i ewaluatory dla Company Resolution, wyboru oficjalnej domeny oraz klasyfikacji kontaktów.
 - Employer Discovery Score: niezależny od confidence ranking firm na podstawie liczby ofert, liczby źródeł, zweryfikowanej WWW, strony biznesowej, GREEN channel i jakości identity.
+
+## Jawne identyfikatory pracodawcy
+
+`JobPosting` może przenosić źródłowe identyfikatory przedsiębiorstwa wraz z provenance i confidence. Są one zapisywane do `company_identifiers` po przypisaniu oferty do firmy.
+
+Aktualnie rozpoznawane i normalizowane są m.in.:
+
+- `nip` — 10 cyfr,
+- `regon` — 9 lub 14 cyfr,
+- `krs` — 10 cyfr,
+- inne identyfikatory mogą być przechowane jako jawne identyfikatory tekstowe.
+
+ePraca mapuje oficjalne pola `nip` i `regon` z confidence `0.995`. Jeśli ten sam identyfikator pojawi się pod więcej niż jednym aktualnym `company_id`, silnik zapisuje konflikt do warstwy pomiarowej/REVIEW i **nie wykonuje automatycznego merge**. Benchmark raportuje `company_identifiers_total`, `companies_with_identifiers`, `identifier_company_rate` oraz `identifier_conflicts`.
 
 ## ePraca — oficjalny WebService integratorski
 
@@ -43,7 +56,7 @@ albo:
 EPRACA_ALL=true
 ```
 
-Adapter wysyła SOAP POST, rozpoznaje statusy usługi, odczytuje zwracane archiwum ZIP i parsuje pliki JSON z aktywnymi ofertami do wspólnego modelu `JobPosting`. Pole `pracodawca` ma wysoki identity confidence, a `identyfikatorOferty`, `stanowisko`, `miejscowosc`, `link`, `dataDodaniaOferty` i `dataAktualizacji` są mapowane bezpośrednio z oficjalnego feedu.
+Adapter wysyła SOAP POST, rozpoznaje statusy usługi, odczytuje zwracane archiwum ZIP i parsuje pliki JSON z aktywnymi ofertami do wspólnego modelu `JobPosting`. Obsługiwany jest zarówno ZIP osadzony w odpowiedzi SOAP jako base64, jak i bezpośrednia odpowiedź ZIP. Pole `pracodawca` ma wysoki identity confidence, a `identyfikatorOferty`, `stanowisko`, `miejscowosc`, `link`, `dataDodaniaOferty`, `dataAktualizacji`, `nip` i `regon` są mapowane z oficjalnego feedu.
 
 Ze względu na autoryzację, limit wywołań i okna dostępności ePraca nie jest dodawana automatycznie do domyślnego benchmarku. Można ją jawnie podać przez `--sources epraca,...` po uzyskaniu prawidłowej konfiguracji integratora.
 
@@ -74,7 +87,7 @@ agregator benchmark-collect \
 agregator benchmark --db agregator.sqlite3
 ```
 
-`benchmark-collect` działa round-robin i daje każdemu aktywnemu źródłu najwyżej jedną stronę na rundę. Źródła bez wymaganej konfiguracji są wyłączane, a powtarzające się błędy runtime mają limit. `benchmark` raportuje także `source_run_metrics`: success rate, strony, oferty, insert/update, utworzone firmy i czas per source.
+`benchmark-collect` działa round-robin i daje każdemu aktywnemu źródłu najwyżej jedną stronę na rundę. Źródła bez wymaganej konfiguracji są wyłączane, a powtarzające się błędy runtime mają limit. `benchmark` raportuje także `source_run_metrics`: success rate, strony, oferty, insert/update, utworzone firmy i czas per source, a także pokrycie i konflikty jawnych identyfikatorów pracodawcy.
 
 ## Kluczowe komendy jakościowe
 
@@ -130,10 +143,11 @@ Każdy enrichment zapisuje append-only `website_verification_runs`, również gd
 
 Kontaktowe evidence jest snapshotowane do `contact_evidence_snapshots`. Każdy snapshot ma pełny tekst dowodu, URL, signal, timestamp i SHA-256; identyczny snapshot nie jest dublowany.
 
-`export-dataset` schema v2 eksportuje:
+`export-dataset` schema v3 eksportuje:
 
 - `companies.csv`,
 - `job_postings.csv`,
+- `company_identifiers.csv`,
 - `contact_channels.csv`,
 - `website_verification_runs.csv`,
 - `contact_evidence_snapshots.csv`,
@@ -157,6 +171,7 @@ Próbka 1000 ofert ma dostarczyć danych do kalibracji:
 
 - precision/recall/F1 Company Resolution,
 - jakości fuzzy REVIEW,
+- pokrycia i konfliktów jawnych identyfikatorów firm,
 - precision/recall wyboru oficjalnej domeny,
 - udziału firm z poprawnym enrichmentem,
 - jakości GREEN/REVIEW/IGNORE,
@@ -166,6 +181,7 @@ Próbka 1000 ofert ma dostarczyć danych do kalibracji:
 ## Granice automatyzacji
 
 - fuzzy podobieństwo nazw nie scala firm automatycznie,
+- identyczny NIP/REGON znaleziony pod różnymi `company_id` trafia do konfliktu/REVIEW zamiast automatycznego merge,
 - domena WWW jest mocnym sygnałem REVIEW, ale auto-merge wymaga wcześniejszej walidacji na ground truth,
 - formularz ze zgodą marketingową jest sygnałem REVIEW, a nie zgodą na automatyczny outreach,
 - quality gate nie zastępuje ręcznego labelingu — mierzy jakość względem etykiet,
