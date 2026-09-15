@@ -30,6 +30,7 @@ def test_label_status_reports_partial_and_complete_bundle(tmp_path: Path) -> Non
 
     assert partial.total_rows == 6
     assert partial.labeled_rows == 5
+    assert partial.excluded_rows == 0
     assert partial.remaining_rows == 1
     assert partial.completion_rate == 0.8333
     assert partial.ready_for_quality_gate is False
@@ -48,6 +49,7 @@ def test_label_status_reports_partial_and_complete_bundle(tmp_path: Path) -> Non
 
     assert complete.total_rows == 6
     assert complete.labeled_rows == 6
+    assert complete.excluded_rows == 0
     assert complete.remaining_rows == 0
     assert complete.completion_rate == 1.0
     assert complete.ready_for_quality_gate is True
@@ -178,3 +180,46 @@ def test_label_status_warns_when_sampling_manifest_row_counts_drift(
     assert status.audit_warnings == (
         "sampling_manifest_row_mismatch:company_resolution:expected=1:actual=2",
     )
+
+
+def test_label_status_counts_exclusions_as_completed_but_auditable(tmp_path: Path) -> None:
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    (labels / "company_resolution_truth.csv").write_text(
+        "source,source_id,truth_company_id\na,1,__exclude__\n",
+        encoding="utf-8",
+    )
+    (labels / "website_resolution_truth.csv").write_text(
+        "company_id,truth_domain\n1,__none__\n",
+        encoding="utf-8",
+    )
+    (labels / "contact_classification_truth.csv").write_text(
+        "contact_id,truth_decision\n1,green\n",
+        encoding="utf-8",
+    )
+    (labels / "sampling_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "seed": "audit-seed",
+                "strategy": "deterministic stratified sampling",
+                "files": [
+                    {"name": "company_resolution", "sampled_rows": 1},
+                    {"name": "website_resolution", "sampled_rows": 1},
+                    {"name": "contact_classification", "sampled_rows": 1},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status = build_label_bundle_status(labels)
+
+    assert status.total_rows == 3
+    assert status.labeled_rows == 3
+    assert status.excluded_rows == 1
+    assert status.remaining_rows == 0
+    assert status.ready_for_quality_gate is True
+    assert status.blockers == ()
+    assert status.audit_warnings == ("ground_truth_rows_excluded:1",)
+    assert status.files[0].excluded_rows == 1
