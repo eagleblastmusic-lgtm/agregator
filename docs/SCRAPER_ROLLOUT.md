@@ -33,8 +33,8 @@ Master catalog: **91 źródeł**.
 Aktualnie:
 
 ```text
-adaptery zaimplementowane: 17
-pozostałe:                74
+adaptery zaimplementowane: 18
+pozostałe:                73
 ```
 
 Zaimplementowane adaptery:
@@ -53,6 +53,7 @@ Zaimplementowane adaptery:
 | Nabory KPRM | `kprm` | official public HTML | experimental |
 | Jooble Polska | `jooble` | partner API | optional source method |
 | Careerjet Polska | `careerjet` | publisher API | optional source method |
+| Randstad Polska | `randstad` | public HTML | experimental |
 | NGO.pl — praca i współpraca | `ngo` | public HTML | experimental |
 | Kariera w Finansach | `karierawfinansach` | public HTML | experimental |
 | Skillshot.pl | `skillshot` | public HTML | experimental |
@@ -163,6 +164,19 @@ Adapter `bulldogjob`:
 - robots check, retry i request delay,
 - kompletne pokrycie mechanizmu dalszego ładowania/paginacji pozostaje do realnego smoke i dlatego adapter jest nadal `experimental`.
 
+### Randstad Polska
+
+Adapter `randstad`:
+
+- publiczny listing `/znajdz-prace/`,
+- jawna paginacja `/znajdz-prace/page-N/`,
+- publiczne strony ofert `/znajdz-prace/<slug>_<id>/`,
+- preferowany JSON-LD `JobPosting`, jeżeli strona ujawnia `hiringOrganization`,
+- numer oferty z URL oraz `reference number` zachowywany w `source_payload`,
+- pełny widoczny tekst oferty zachowany jako source evidence,
+- jeżeli Randstad nie ujawnia klienta końcowego, system nie wymyśla pracodawcy: zapisuje Randstad jako jawny **low-confidence agency fallback** i oznacza `client_employer_disclosed=false`,
+- robots check, retry i request delay.
+
 ### Następne A1
 
 Priorytet mają źródła oficjalne/publiczne i server-rendered, w których można zebrać dużo danych o pracodawcy bez obchodzenia ograniczeń. Kolejny audyt obejmuje przede wszystkim portale z czytelnym publicznym listingiem oraz źródła oficjalne/agencje.
@@ -179,7 +193,7 @@ Pobranie wybranych źródeł:
 
 ```bash
 agregator-scrape run \
-  --sources kprm,ofertypracyedu,ngo,aplikuj,theprotocol,bulldogjob \
+  --sources kprm,ofertypracyedu,ngo,aplikuj,theprotocol,bulldogjob,randstad \
   --pages-per-source 1 \
   --db agregator.sqlite3 \
   --strict
