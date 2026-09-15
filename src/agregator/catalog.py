@@ -8,6 +8,7 @@ DEFAULT_CATALOG_PATH = Path(__file__).resolve().parents[2] / "config" / "source_
 
 IMPLEMENTED_ADAPTERS: dict[int, str] = {
     1: "pracuj",
+    4: "aplikuj",
     7: "olx",
     10: "justjoinit",
     11: "nofluffjobs",
