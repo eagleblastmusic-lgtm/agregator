@@ -13,6 +13,7 @@ from .models import (
     DiscoveryResult,
     PageSnapshot,
     SearchCandidate,
+    WebsiteResolutionOrigin,
     WebsiteVerificationAttempt,
 )
 from .resolver import score_candidate
@@ -68,6 +69,9 @@ class EmployerDiscoveryPipeline:
         resolved_url: str,
         pages: list[CrawlPage],
         verification: WebsiteVerification,
+        *,
+        origin: WebsiteResolutionOrigin | None = None,
+        source: str | None = None,
     ) -> WebsiteVerificationAttempt:
         return WebsiteVerificationAttempt(
             url=candidate.url,
@@ -77,6 +81,8 @@ class EmployerDiscoveryPipeline:
             search_score=verification.search_score,
             content_score=verification.content_score,
             name_coverage=verification.name_coverage,
+            origin=origin,
+            source=source,
             signals=list(verification.signals),
             scanned_pages=[page.url for page in pages],
             page_snapshots=cls._page_snapshots(pages),
@@ -93,6 +99,8 @@ class EmployerDiscoveryPipeline:
         search_candidates: list[SearchCandidate] | None = None,
         verification_signals: list[str] | None = None,
         website_attempts: list[WebsiteVerificationAttempt] | None = None,
+        resolution_origin: WebsiteResolutionOrigin | None = None,
+        resolution_source: str | None = None,
     ) -> DiscoveryResult:
         channels: list[ContactChannel] = []
         for page in pages:
@@ -107,6 +115,8 @@ class EmployerDiscoveryPipeline:
                 website_url=resolved_url,
                 domain=domain,
                 website_confidence=website_confidence,
+                website_resolution_origin=resolution_origin,
+                website_resolution_source=resolution_source,
                 website_verification_signals=verification_signals or [],
             ),
             channels=self._deduplicate(channels),
@@ -134,6 +144,8 @@ class EmployerDiscoveryPipeline:
             pages=pages,
             search_candidates=search_candidates,
             verification_signals=["known_or_user_supplied_website"],
+            resolution_origin=WebsiteResolutionOrigin.KNOWN_URL,
+            resolution_source="scan_known_website",
         )
 
     async def verify_website_candidate(
@@ -144,6 +156,7 @@ class EmployerDiscoveryPipeline:
         *,
         candidate_confidence: float = 0.95,
         source_signal: str = "source_website_candidate",
+        resolution_source: str | None = None,
     ) -> DiscoveryResult:
         """Verify a source-provided website candidate as first-party evidence.
 
@@ -154,6 +167,7 @@ class EmployerDiscoveryPipeline:
         """
 
         score = min(max(candidate_confidence, 0.0), 1.0)
+        source = resolution_source or source_signal
         candidate = SearchCandidate(
             title=company_name,
             url=website_url,
@@ -174,6 +188,8 @@ class EmployerDiscoveryPipeline:
             resolved_url,
             pages,
             verification,
+            origin=WebsiteResolutionOrigin.SOURCE_CANDIDATE,
+            source=source,
         )
 
         if verification.accepted:
@@ -185,6 +201,8 @@ class EmployerDiscoveryPipeline:
                 pages=pages,
                 verification_signals=[source_signal, *verification.signals],
                 website_attempts=[attempt],
+                resolution_origin=WebsiteResolutionOrigin.SOURCE_CANDIDATE,
+                resolution_source=source,
             )
 
         return DiscoveryResult(
@@ -240,6 +258,8 @@ class EmployerDiscoveryPipeline:
                     resolved_url,
                     pages,
                     verification,
+                    origin=WebsiteResolutionOrigin.SEARCH,
+                    source="search_provider",
                 )
             )
             if not verification.accepted:
@@ -254,6 +274,8 @@ class EmployerDiscoveryPipeline:
                 search_candidates=ranked,
                 verification_signals=list(verification.signals),
                 website_attempts=attempts,
+                resolution_origin=WebsiteResolutionOrigin.SEARCH,
+                resolution_source="search_provider",
             )
 
         return DiscoveryResult(
