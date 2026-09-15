@@ -175,12 +175,13 @@ agregator-scrape run \
 
 Status: **IN PROGRESS**.
 
-Aktualnie katalog rozpoznaje **14/91 zaimplementowanych adapterów**; **77 pozostaje**.
+Aktualnie katalog rozpoznaje **15/91 zaimplementowanych adapterów**; **76 pozostaje**.
 
 Zaimplementowane są m.in.:
 
 ```text
 pracuj
+aplikuj
 olx
 justjoinit
 nofluffjobs
@@ -212,15 +213,19 @@ Nie próbujemy sztucznie domknąć `14/14` przez obchodzenie ograniczeń. Przech
 
 ### A1 — rozpoczęty
 
-Pierwszy nowy adapter A1 to `ngo` dla publicznej kategorii NGO.pl `Organizacja oferuje pracę, współpracę`.
+Zaimplementowane nowe A1:
+
+- `ngo` — publiczna kategoria NGO.pl `Organizacja oferuje pracę, współpracę`,
+- `aplikuj` — publiczny listing/paginacja Aplikuj.pl, publiczne szczegóły, JSON-LD/fallback HTML i source evidence pracodawcy.
 
 Następna kolejność audytu:
 
-1. EURAXESS / publiczne oferty naukowe,
-2. Akademicka Baza Ogłoszeń MNiSW — po rozstrzygnięciu zakresu licencji dla planowanego wykorzystania,
-3. BIP-y i inne oficjalne źródła,
-4. publiczne serwisy agencji zatrudnienia,
-5. pozostałe A1, następnie B i C.
+1. kolejne publiczne portale A1 z czytelnym listingiem/detailami,
+2. EURAXESS / publiczne oferty naukowe,
+3. Akademicka Baza Ogłoszeń MNiSW — po rozstrzygnięciu zakresu licencji dla planowanego wykorzystania,
+4. BIP-y i inne oficjalne źródła,
+5. publiczne serwisy agencji zatrudnienia,
+6. następnie B i C.
 
 ---
 
@@ -344,8 +349,8 @@ P2 generic public scraper engine             DONE baseline
 P3 scraper rollout                           ◀ TERAZ
  │   ├── A0 public/dozwolone ścieżki
  │   ├── KPRM + OfertyPracy.edu.pl
- │   ├── NGO.pl
- │   └── A1 -> B -> C
+ │   ├── NGO.pl + Aplikuj.pl
+ │   └── dalsze A1 -> B -> C
  ▼
 P4–P9 utrzymywać i wzmacniać istniejący pipeline
  │
