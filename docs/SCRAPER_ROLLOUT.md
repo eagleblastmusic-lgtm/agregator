@@ -33,8 +33,8 @@ Master catalog: **91 źródeł**.
 Aktualnie:
 
 ```text
-adaptery zaimplementowane: 16
-pozostałe:                75
+adaptery zaimplementowane: 17
+pozostałe:                74
 ```
 
 Zaimplementowane adaptery:
@@ -47,6 +47,7 @@ Zaimplementowane adaptery:
 | Just Join IT | `justjoinit` | public HTML | experimental |
 | No Fluff Jobs | `nofluffjobs` | public HTML | experimental |
 | theprotocol.it | `theprotocol` | public HTML | experimental |
+| Bulldogjob | `bulldogjob` | public HTML | experimental |
 | RocketJobs | `rocketjobs` | public HTML | experimental |
 | ePraca / CBOP | `epraca` | official partner feed | implemented |
 | Nabory KPRM | `kprm` | official public HTML | experimental |
@@ -150,6 +151,18 @@ Adapter `theprotocol`:
 - source-specific dane zachowane bez cross-source deduplikacji,
 - robots check, retry i request delay.
 
+### Bulldogjob
+
+Adapter `bulldogjob`:
+
+- publiczny listing `/companies/jobs`,
+- publiczne strony ofert `/companies/jobs/<id>-<slug>`,
+- preferowany JSON-LD `JobPosting`,
+- profile firm `/companies/profiles/<id>-<slug>` jako fallback źródła nazwy firmy,
+- pełny source payload bez cross-source deduplikacji,
+- robots check, retry i request delay,
+- kompletne pokrycie mechanizmu dalszego ładowania/paginacji pozostaje do realnego smoke i dlatego adapter jest nadal `experimental`.
+
 ### Następne A1
 
 Priorytet mają źródła oficjalne/publiczne i server-rendered, w których można zebrać dużo danych o pracodawcy bez obchodzenia ograniczeń. Kolejny audyt obejmuje przede wszystkim portale z czytelnym publicznym listingiem oraz źródła oficjalne/agencje.
@@ -166,7 +179,7 @@ Pobranie wybranych źródeł:
 
 ```bash
 agregator-scrape run \
-  --sources kprm,ofertypracyedu,ngo,aplikuj,theprotocol \
+  --sources kprm,ofertypracyedu,ngo,aplikuj,theprotocol,bulldogjob \
   --pages-per-source 1 \
   --db agregator.sqlite3 \
   --strict
