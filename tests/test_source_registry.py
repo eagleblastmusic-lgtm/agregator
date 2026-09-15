@@ -13,13 +13,16 @@ def test_default_registry_contains_api_and_public_sources(
     monkeypatch.setenv("CAREERJET_REFERER", "https://faro.example/jobs")
     monkeypatch.setenv("CAREERJET_USER_IP", "203.0.113.10")
     monkeypatch.setenv("CAREERJET_USER_AGENT", "Mozilla/5.0 Test")
+    monkeypatch.setenv("EPRACA_PARTNER", "Faro Partner")
+    monkeypatch.setenv("EPRACA_ALL", "true")
     registry = default_registry()
 
-    assert registry.names() == ["adzuna", "careerjet", "jooble", "olx"]
+    assert registry.names() == ["adzuna", "careerjet", "epraca", "jooble", "olx"]
     assert registry.create("OLX").name == "olx"
     assert registry.create("JOOBLE").name == "jooble"
     assert registry.create("ADZUNA").name == "adzuna"
     assert registry.create("CAREERJET").name == "careerjet"
+    assert registry.create("EPRACA").name == "epraca"
 
 
 def test_jooble_registry_requires_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,3 +53,27 @@ def test_careerjet_registry_requires_publisher_context(
 
     with pytest.raises(ValueError, match="CAREERJET_REFERER"):
         registry.create("careerjet")
+
+
+def test_epraca_registry_requires_authorized_partner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("EPRACA_PARTNER", raising=False)
+    monkeypatch.setenv("EPRACA_ALL", "true")
+    registry = default_registry()
+
+    with pytest.raises(ValueError, match="EPRACA_PARTNER"):
+        registry.create("epraca")
+
+
+def test_epraca_registry_requires_explicit_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EPRACA_PARTNER", "Faro Partner")
+    monkeypatch.delenv("EPRACA_WOJEWODZTWO", raising=False)
+    monkeypatch.delenv("EPRACA_JEDNOSTKA", raising=False)
+    monkeypatch.delenv("EPRACA_ALL", raising=False)
+    registry = default_registry()
+
+    with pytest.raises(ValueError, match="exactly one criterion"):
+        registry.create("epraca")
