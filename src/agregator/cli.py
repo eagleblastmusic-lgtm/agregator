@@ -15,6 +15,7 @@ from .importers import load_jobs_csv
 from .ingest import IngestResult, ingest_source
 from .pipeline import EmployerDiscoveryPipeline
 from .reporting import build_benchmark_report, export_green_channels
+from .resolution_review import build_resolution_review_queue
 from .search import BraveSearchProvider
 from .sources import default_registry
 from .sources.adzuna import AdzunaApiSource
@@ -316,6 +317,29 @@ def benchmark(
         high_confidence_threshold=high_confidence_threshold,
     )
     typer.echo(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+
+
+@app.command("resolution-review")
+def resolution_review(
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    min_score: float = typer.Option(0.82, "--min-score", min=0.0, max=1.0),
+    limit: int = typer.Option(100, "--limit", min=1, max=10_000),
+    company_limit: int = typer.Option(5000, "--company-limit", min=1, max=100_000),
+) -> None:
+    store = SQLiteStore(db)
+    candidates = build_resolution_review_queue(
+        store,
+        min_score=min_score,
+        limit=limit,
+        company_limit=company_limit,
+    )
+    typer.echo(
+        json.dumps(
+            [candidate.to_dict() for candidate in candidates],
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 @app.command("export-ground-truth")
