@@ -48,6 +48,26 @@ def init_company_identifier_schema(store: SQLiteStore) -> None:
                 ON company_identifiers(kind, value);
             CREATE INDEX IF NOT EXISTS idx_company_identifiers_company
                 ON company_identifiers(company_id);
+
+            CREATE TABLE IF NOT EXISTS company_identifier_observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                value TEXT NOT NULL,
+                job_source TEXT NOT NULL,
+                evidence_source TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0,
+                observation_count INTEGER NOT NULL DEFAULT 1,
+                first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(company_id) REFERENCES companies(id),
+                UNIQUE(company_id, kind, value, job_source, evidence_source)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_company_identifier_observations_source
+                ON company_identifier_observations(job_source);
+            CREATE INDEX IF NOT EXISTS idx_company_identifier_observations_company
+                ON company_identifier_observations(company_id);
             """
         )
 
@@ -59,8 +79,9 @@ def persist_job_company_identifiers(
     """Persist explicit source-provided company IDs after jobs are assigned to companies.
 
     Matching identifiers observed under multiple current company records are counted as
-    conflicts but never merge those records automatically. This keeps the stronger
-    identifier evidence available for review without silently changing Company Resolution.
+    conflicts but never merge those records automatically. A separate observation table
+    preserves which job source supplied each identifier so source-value diagnostics do not
+    need to infer provenance from generic field names such as ``official_feed.nip``.
     """
 
     init_company_identifier_schema(store)
@@ -91,6 +112,9 @@ def persist_job_company_identifiers(
                     stats.invalid += 1
                     continue
                 kind, value = normalized
+                evidence_source = (
+                    identifier.source or job.company_name_source or job.source
+                )
 
                 conflict = connection.execute(
                     """
@@ -135,7 +159,37 @@ def persist_job_company_identifiers(
                         company_id,
                         kind,
                         value,
-                        identifier.source or job.company_name_source or job.source,
+                        evidence_source,
+                        identifier.confidence,
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO company_identifier_observations(
+                        company_id,
+                        kind,
+                        value,
+                        job_source,
+                        evidence_source,
+                        confidence
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(
+                        company_id,
+                        kind,
+                        value,
+                        job_source,
+                        evidence_source
+                    ) DO UPDATE SET
+                        confidence = MAX(confidence, excluded.confidence),
+                        observation_count = observation_count + 1,
+                        last_seen_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        company_id,
+                        kind,
+                        value,
+                        job.source,
+                        evidence_source,
                         identifier.confidence,
                     ),
                 )
