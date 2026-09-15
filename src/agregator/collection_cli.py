@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 import typer
 
@@ -20,7 +21,7 @@ def _source_names(value: str) -> list[str]:
 
 @app.command("sources")
 def sources() -> None:
-    """Show source access policy without creating API clients or reading secrets."""
+    """Show source access policy without creating API clients or reading secret values."""
 
     payload = [
         {
@@ -28,10 +29,87 @@ def sources() -> None:
             "access_mode": item.access_mode,
             "experimental": item.experimental,
             "notes": item.notes,
+            "required_env": list(item.required_env),
+            "configuration_env": list(item.configuration_env),
         }
         for item in default_registry().registrations()
     ]
     typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+@app.command("credentials")
+def credentials(
+    sources: str = typer.Option(_DEFAULT_SOURCES, "--sources"),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Kod wyjścia 2, jeśli konfiguracja któregokolwiek źródła nie jest gotowa",
+    ),
+) -> None:
+    """Report whether required source configuration is present without exposing values."""
+
+    registry = default_registry()
+    rows: list[dict[str, object]] = []
+    ready = True
+
+    for name in _source_names(sources):
+        try:
+            registration = registry.describe(name)
+        except KeyError as exc:
+            ready = False
+            rows.append(
+                {
+                    "name": name.strip().lower(),
+                    "ready": False,
+                    "error": str(exc),
+                    "required_env": [],
+                    "configuration_env": [],
+                }
+            )
+            continue
+
+        required = [
+            {"name": env_name, "configured": bool(os.getenv(env_name, ""))}
+            for env_name in registration.required_env
+        ]
+        configuration = [
+            {"name": env_name, "configured": bool(os.getenv(env_name, ""))}
+            for env_name in registration.configuration_env
+        ]
+        missing_required = [
+            str(item["name"]) for item in required if not bool(item["configured"])
+        ]
+
+        factory_error: str | None = None
+        if not missing_required:
+            try:
+                registry.create(name)
+            except (KeyError, ValueError) as exc:
+                factory_error = str(exc)
+
+        source_ready = not missing_required and factory_error is None
+        ready = ready and source_ready
+        rows.append(
+            {
+                "name": registration.name,
+                "access_mode": registration.access_mode,
+                "experimental": registration.experimental,
+                "ready": source_ready,
+                "missing_required_env": missing_required,
+                "required_env": required,
+                "configuration_env": configuration,
+                "error": factory_error,
+            }
+        )
+
+    payload = {
+        "ready": ready and bool(rows),
+        "sources": rows,
+        "values_exposed": False,
+    }
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    if strict and not payload["ready"]:
+        raise typer.Exit(code=2)
 
 
 @app.command("preflight")
