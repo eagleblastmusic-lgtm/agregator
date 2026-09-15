@@ -9,7 +9,7 @@ Szczegółowy plan i checkpointy: [`PLAN.md`](PLAN.md).
 - M0: crawler + evidence + GREEN/REVIEW/IGNORE.
 - M1: OLX, Jooble, Adzuna, Careerjet Publisher API i oficjalny ePraca WebService, source registry, resumowalne runy, katalog 91 źródeł, pełny bundle eksportowy dla Faro oraz kontrolowany `benchmark-collect` round-robin.
 - M2: konserwatywny Company Resolution v1, aliasy/lokalizacje, metody/confidence, ground truth, pairwise precision/recall/F1, fuzzy REVIEW bez automatycznego merge oraz warstwa jawnych identyfikatorów pracodawcy.
-- M3: ranking wyników wyszukiwarki + first-party content verification z fallbackiem do kolejnych kandydatów, źródłowe kandydatury WWW weryfikowane przed search fallback, JSON-LD Organization oraz zapis każdej próby weryfikacji kandydata.
+- M3: ranking wyników wyszukiwarki + first-party content verification z fallbackiem do kolejnych kandydatów, źródłowe kandydatury WWW weryfikowane przed search fallback, strukturalne provenance rozwiązania domeny, JSON-LD Organization oraz zapis każdej próby weryfikacji kandydata.
 - M4 foundations: `sitemap.xml`, priorytety podstron współpracy/B2B, typowe obfuskowane e-maile, formularze ze zgodą na informacje handlowe, append-only evidence snapshots z SHA-256.
 - Quality benchmark: osobne ground truth i ewaluatory dla Company Resolution, wyboru oficjalnej domeny oraz klasyfikacji kontaktów.
 - Employer Discovery Score: niezależny od confidence ranking firm na podstawie liczby ofert, liczby źródeł, zweryfikowanej WWW, strony biznesowej, GREEN channel i jakości identity.
@@ -31,7 +31,16 @@ ePraca mapuje oficjalne pola `nip` i `regon` z confidence `0.995`. Jeśli ten sa
 
 `JobPosting` może także przenosić jawnie podany przez źródło adres WWW pracodawcy jako `CompanyWebsiteCandidate`. Taki URL jest zapisywany do `company_website_candidates` razem z hostem, provenance, confidence, liczbą obserwacji i timestampami.
 
-Kandydat źródłowy **nie jest automatycznie uznawany za oficjalną stronę firmy**. Enrichment najpierw crawluje URL i przepuszcza go przez ten sam first-party identity verifier, który chroni wybór domeny z wyszukiwarki. Dopiero po pozytywnej weryfikacji URL może zostać zapisany jako `companies.website_url` i użyty do crawl kontaktów. Jeśli kandydat źródłowy nie potwierdzi tożsamości firmy, Faro przechodzi do normalnego search fallback.
+Kandydat źródłowy **nie jest automatycznie uznawany za oficjalną stronę firmy**. Enrichment najpierw crawluje URL i przepuszcza go przez ten sam first-party identity verifier, który chroni wybór domeny z wyszukiwarki. Dopiero po pozytywnej weryfikacji URL może zostać użyty jako oficjalna strona firmy i do crawl kontaktów. Jeśli kandydat źródłowy nie potwierdzi tożsamości firmy, Faro przechodzi do normalnego search fallback.
+
+Rozstrzygnięcie WWW ma teraz jawne, strukturalne provenance:
+
+- `website_resolution_origin = source_candidate` — zweryfikowany URL pochodzący ze źródła oferty,
+- `website_resolution_origin = search` — domena znaleziona i zweryfikowana przez SearchProvider,
+- `website_resolution_origin = known_url` — URL podany jawnie do trybu `scan-url`,
+- `website_resolution_source` wskazuje konkretne źródło, np. `official_feed.adresWww`, `brave` albo `static` w testach.
+
+Takie same pola `origin` i `source` są zapisywane także na każdej `WebsiteVerificationAttempt`, więc można rozróżnić odrzuconą kandydaturę źródłową od późniejszego trafienia z wyszukiwarki bez parsowania tekstowych sygnałów.
 
 Benchmark raportuje:
 
@@ -40,7 +49,9 @@ Benchmark raportuje:
 - `source_verified_websites`,
 - `source_website_candidate_company_rate`,
 - `source_verified_website_rate`,
-- `source_verified_share_of_found` — udział znalezionych stron WWW, które udało się potwierdzić bez użycia wyszukiwarki.
+- `source_verified_share_of_found` — udział znalezionych stron WWW, które udało się potwierdzić bez użycia wyszukiwarki,
+- `website_resolution_origin_counts` — liczba finalnych zweryfikowanych domen per origin,
+- `source_verified_website_counts` — liczba finalnych trafień źródłowych pogrupowana po provenance.
 
 ## ePraca — oficjalny WebService integratorski
 
@@ -154,18 +165,20 @@ Progi są parametrami CLI i przed zamrożeniem produkcyjnym powinny zostać potw
 
 ## Audit trail i eksport Faro
 
-Każdy enrichment zapisuje append-only `website_verification_runs`, również gdy żaden kandydat nie został zaakceptowany. Rekord przechowuje ranking wyszukiwarki, wszystkie rzeczywiście sprawdzone kandydatury — również źródłowe — wraz z wynikiem weryfikacji, sygnały, odwiedzone strony i finalny confidence.
+Każdy enrichment zapisuje append-only `website_verification_runs`, również gdy żaden kandydat nie został zaakceptowany. Rekord przechowuje finalne `resolution_origin` / `resolution_source`, ranking wyszukiwarki, wszystkie rzeczywiście sprawdzone kandydatury — również źródłowe — wraz z wynikiem weryfikacji, sygnały, odwiedzone strony i finalny confidence.
+
+Migracja audit schema dodaje nowe kolumny do istniejącej bazy przed utworzeniem indeksu origin/source, dzięki czemu starsze pliki SQLite pozostają obsługiwane.
 
 Kontaktowe evidence jest snapshotowane do `contact_evidence_snapshots`. Każdy snapshot ma pełny tekst dowodu, URL, signal, timestamp i SHA-256; identyczny snapshot nie jest dublowany.
 
-`export-dataset` schema v4 eksportuje:
+`export-dataset` schema v5 eksportuje:
 
 - `companies.csv`,
 - `job_postings.csv`,
 - `company_identifiers.csv`,
 - `company_website_candidates.csv`,
 - `contact_channels.csv`,
-- `website_verification_runs.csv`,
+- `website_verification_runs.csv` — także `resolution_origin` i `resolution_source`,
 - `contact_evidence_snapshots.csv`,
 - `manifest.json`.
 
@@ -191,6 +204,7 @@ Próbka 1000 ofert ma dostarczyć danych do kalibracji:
 - precision/recall wyboru oficjalnej domeny,
 - udziału firm z poprawnym enrichmentem,
 - pokrycia źródłowych kandydatur WWW oraz odsetka stron znalezionych bez search fallback,
+- rozkładu origin/source finalnego rozwiązania domeny,
 - jakości GREEN/REVIEW/IGNORE,
 - rozkładu Employer Discovery Score,
 - kosztu/czasu per źródło i per firma.
