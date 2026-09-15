@@ -45,3 +45,28 @@ def test_generic_contact_is_not_green() -> None:
     channels = extract_channels(html, "https://example.pl/kontakt")
     email = next(item for item in channels if item.value == "kontakt@example.pl")
     assert email.decision == Decision.REVIEW
+
+
+def test_obfuscated_at_and_dot_email_is_reconstructed_with_context() -> None:
+    html = """
+    <html><body>
+      <p>Propozycje współpracy prosimy kierować na wspolpraca [at] example [dot] pl.</p>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.pl/wspolpraca")
+    email = next(item for item in channels if item.value == "wspolpraca@example.pl")
+    assert email.decision == Decision.GREEN
+    assert email.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
+    assert "wspolpraca [at] example [dot] pl" in email.evidence.text.lower()
+
+
+def test_obfuscated_polish_malpa_email_is_reconstructed() -> None:
+    html = """
+    <html><body>
+      <p>Kontakt dla partnerów: partnerzy (małpa) example.pl</p>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.pl/partnerzy")
+    email = next(item for item in channels if item.value == "partnerzy@example.pl")
+    assert email.decision == Decision.GREEN
+    assert email.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
