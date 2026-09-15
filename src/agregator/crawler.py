@@ -138,7 +138,13 @@ class WebsiteCrawler:
                     continue
 
                 final_url = str(response.url)
-                pages.append(CrawlPage(url=final_url, html=response.text, status_code=response.status_code))
+                pages.append(
+                    CrawlPage(
+                        url=final_url,
+                        html=response.text,
+                        status_code=response.status_code,
+                    )
+                )
 
                 for priority, link in self._links(response.text, final_url, start_url):
                     if link in visited or link in queued:
