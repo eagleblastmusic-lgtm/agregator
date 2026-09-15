@@ -45,15 +45,13 @@ agregator-benchmark run \
 
 ### Tryb strict
 
-Do formalnego gate przed ręcznym labelingiem można dodać:
-
 ```bash
 agregator-benchmark run ... --strict
 ```
 
 Tryb `--strict` nadal zapisuje raporty i manifest, ale kończy proces kodem `2`, jeśli nie osiągnięto `target_jobs` albo enrichment nie zakończył się stanem `no_pending_companies`.
 
-`benchmark_run_manifest.json` zawiera strukturę `readiness`: `collection_target_reached`, `enrichment_complete`, `dataset_exported`, `ground_truth_templates_generated`, `ready_for_manual_labeling`, `manual_ground_truth_required` oraz `blockers`.
+`benchmark_run_manifest.json` zawiera `readiness`: `collection_target_reached`, `enrichment_complete`, `dataset_exported`, `ground_truth_templates_generated`, `ready_for_manual_labeling`, `manual_ground_truth_required` oraz `blockers`.
 
 `ready_for_manual_labeling=true` nie oznacza przejścia quality gate. Oznacza tylko, że techniczny run jest kompletny i można rozpocząć ręczne oznaczanie ground truth.
 
@@ -108,6 +106,37 @@ Jeżeli run nie ma listy prób, np. dla jawnie podanego znanego URL, exporter u�
 
 `latest_verification_id` pozwala powiązać wiersz labelingu z `website_page_snapshots.csv` i zobaczyć evidence zaakceptowanej domeny oraz wcześniejszych kandydatów odrzuconych przez verifier.
 
+## Ground truth kontaktów z immutable evidence
+
+`labels/contact_classification_truth.csv` przechowuje teraz również:
+
+- `latest_evidence_snapshot_id`,
+- `evidence_content_sha256`,
+- `evidence_captured_at`.
+
+Dzięki temu ręczna decyzja GREEN/REVIEW/IGNORE może być powiązana z konkretnym immutable snapshotem evidence zamiast wyłącznie z bieżącym stanem rekordu kontaktowego.
+
+## Postęp labelingu
+
+Po wygenerowaniu pakietu można sprawdzać postęp bez uruchamiania quality gate:
+
+```bash
+agregator-benchmark status \
+  --label-dir benchmark/run/labels
+```
+
+Raport pokazuje dla każdego pliku liczbę wszystkich, oznaczonych i pozostałych wierszy, completion rate oraz blockery.
+
+Do skryptów/CI można użyć:
+
+```bash
+agregator-benchmark status \
+  --label-dir benchmark/run/labels \
+  --strict
+```
+
+`--strict` zwraca kod `2`, dopóki wszystkie trzy pliki ground truth nie istnieją, mają prawidłową kolumnę etykiety, nie są puste i nie są w pełni oznaczone.
+
 ## Następny krok: ręczny ground truth
 
 Po benchmarku nie należy automatycznie podnosić progów ani rozszerzać auto-merge. Najpierw należy ręcznie oznaczyć:
@@ -116,7 +145,7 @@ Po benchmarku nie należy automatycznie podnosić progów ani rozszerzać auto-m
 - `website_resolution_truth.csv`,
 - `contact_classification_truth.csv`.
 
-Następnie:
+Gdy `agregator-benchmark status --strict` przejdzie:
 
 ```bash
 agregator quality-gate \
