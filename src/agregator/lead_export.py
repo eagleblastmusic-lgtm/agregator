@@ -102,10 +102,18 @@ def build_company_lead_rows(store: SQLiteStore) -> list[dict[str, Any]]:
             [f"{item['kind']}: {item['value']}" for item in company_contacts]
         )
         all_evidence = _unique_preserve_order(
-            [str(item["evidence_text"]).strip() for item in company_contacts if item["evidence_text"]]
+            [
+                str(item["evidence_text"]).strip()
+                for item in company_contacts
+                if item["evidence_text"]
+            ]
         )
         all_evidence_urls = _unique_preserve_order(
-            [str(item["evidence_url"]).strip() for item in company_contacts if item["evidence_url"]]
+            [
+                str(item["evidence_url"]).strip()
+                for item in company_contacts
+                if item["evidence_url"]
+            ]
         )
         kinds = identifiers_by_company.get(company_id, {})
 
@@ -174,7 +182,9 @@ def _write_leads_sheet(workbook: xlsxwriter.Workbook, rows: list[dict[str, Any]]
     )
     wrap = workbook.add_format({"text_wrap": True, "valign": "top"})
     confidence = workbook.add_format({"num_format": "0%", "valign": "top"})
-    link = workbook.add_format({"font_color": "#0563C1", "underline": 1, "valign": "top"})
+    link = workbook.add_format(
+        {"font_color": "#0563C1", "underline": 1, "valign": "top"}
+    )
 
     columns = [
         ("Firma", "company_name"),
@@ -205,7 +215,11 @@ def _write_leads_sheet(workbook: xlsxwriter.Workbook, rows: list[dict[str, Any]]
             value = row.get(key)
             if key == "contact_confidence":
                 sheet.write_number(row_index, col, float(value or 0), confidence)
-            elif key in {"website", "evidence_url"} and isinstance(value, str) and value.startswith(("http://", "https://")):
+            elif (
+                key in {"website", "evidence_url"}
+                and isinstance(value, str)
+                and value.startswith(("http://", "https://"))
+            ):
                 sheet.write_url(row_index, col, value, link, string=value)
             elif isinstance(value, int):
                 sheet.write_number(row_index, col, value)
@@ -238,8 +252,9 @@ def _write_legend_sheet(workbook: xlsxwriter.Workbook) -> None:
         "A5",
         (
             "GREEN oznacza publiczny, istotny sygnał współpracy/partnerstwa/ofert handlowych "
-            "wykryty przez system wraz z zachowanym dowodem. Nie jest to automatyczne stwierdzenie "
-            "zgody prawnej na dowolny marketing; przed outreach należy ocenić konkretny kanał i kontekst."
+            "wykryty przez system wraz z zachowanym dowodem. Nie jest to automatyczne "
+            "stwierdzenie zgody prawnej na dowolny marketing; przed outreach należy ocenić "
+            "konkretny kanał i kontekst."
         ),
         wrap,
     )
