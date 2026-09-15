@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 from urllib.parse import urlparse
+
+from bs4 import BeautifulSoup
 
 from .crawler import CrawlPage, WebsiteCrawler
 from .extract import extract_channels
@@ -8,6 +11,7 @@ from .models import (
     CompanyIdentity,
     ContactChannel,
     DiscoveryResult,
+    PageSnapshot,
     SearchCandidate,
     WebsiteVerificationAttempt,
 )
@@ -41,7 +45,25 @@ class EmployerDiscoveryPipeline:
         return sorted(best.values(), key=lambda item: item.confidence, reverse=True)
 
     @staticmethod
+    def _snapshot_page(page: CrawlPage) -> PageSnapshot:
+        soup = BeautifulSoup(page.html, "html.parser")
+        for node in soup(["script", "style", "noscript", "svg"]):
+            node.decompose()
+        text = " ".join(soup.stripped_strings)
+        return PageSnapshot(
+            url=page.url,
+            status_code=page.status_code,
+            content_sha256=hashlib.sha256(page.html.encode("utf-8")).hexdigest(),
+            text_excerpt=text[:2000],
+        )
+
+    @classmethod
+    def _page_snapshots(cls, pages: list[CrawlPage]) -> list[PageSnapshot]:
+        return [cls._snapshot_page(page) for page in pages]
+
+    @classmethod
     def _verification_attempt(
+        cls,
         candidate: SearchCandidate,
         resolved_url: str,
         pages: list[CrawlPage],
@@ -57,6 +79,7 @@ class EmployerDiscoveryPipeline:
             name_coverage=verification.name_coverage,
             signals=list(verification.signals),
             scanned_pages=[page.url for page in pages],
+            page_snapshots=cls._page_snapshots(pages),
         )
 
     def _result_from_pages(
@@ -88,6 +111,7 @@ class EmployerDiscoveryPipeline:
             ),
             channels=self._deduplicate(channels),
             scanned_pages=[page.url for page in pages],
+            page_snapshots=self._page_snapshots(pages),
             search_candidates=search_candidates or [],
             website_attempts=website_attempts or [],
         )
@@ -172,6 +196,7 @@ class EmployerDiscoveryPipeline:
             ),
             channels=[],
             scanned_pages=[],
+            page_snapshots=[],
             search_candidates=ranked,
             website_attempts=attempts,
         )
