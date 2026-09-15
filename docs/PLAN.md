@@ -93,7 +93,7 @@ B   24
 C   17
 ```
 
-Aktualnie mamy **17/91 adapterów**, więc **74 źródła pozostają**.
+Aktualnie mamy **18/91 adapterów**, więc **73 źródła pozostają**.
 
 ```text
 pracuj
@@ -108,6 +108,7 @@ epraca
 kprm
 jooble
 careerjet
+randstad
 ngo
 karierawfinansach
 skillshot
@@ -134,7 +135,8 @@ Rollout A1 jest rozpoczęty. Najnowsze adaptery:
 - `ngo` — publiczna kategoria NGO.pl z ofertami pracy/współpracy,
 - `aplikuj` — publiczny listing i paginacja Aplikuj.pl,
 - `theprotocol` — publiczny listing/detail theprotocol.it,
-- `bulldogjob` — publiczny listing i strony ofert Bulldogjob; pełne pokrycie dalszego ładowania/paginacji wymaga jeszcze realnego smoke.
+- `bulldogjob` — publiczny listing i strony ofert Bulldogjob; pełne pokrycie dalszego ładowania/paginacji wymaga jeszcze realnego smoke,
+- `randstad` — publiczny listing Randstad Polska z jawną paginacją i stronami ofert; ukryty klient końcowy nie jest zgadywany, tylko oznaczany jako low-confidence agency fallback.
 
 Następna kolejność: kolejne czytelne publiczne A1, źródła oficjalne/naukowe/BIP, serwisy agencji, a następnie B i C.
 
@@ -286,6 +288,7 @@ P3 scraper rollout                           ◀ TERAZ
  │   ├── KPRM + OfertyPracy.edu.pl
  │   ├── NGO.pl + Aplikuj.pl
  │   ├── theprotocol + Bulldogjob
+ │   ├── Randstad
  │   └── dalsze A1 -> B -> C
  ▼
 P4–P9 utrzymywać i wzmacniać istniejący pipeline
