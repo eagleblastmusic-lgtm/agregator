@@ -19,6 +19,8 @@ from .sources import default_registry
 from .storage import SQLiteStore
 
 app = typer.Typer(help="Faro controlled benchmark runner")
+_REQUIRED_KIND_OPTION = typer.Option(..., "--kind")
+_REQUIRED_ROW_OPTION = typer.Option(..., "--row", min=1)
 
 
 def _crawler() -> WebsiteCrawler:
@@ -172,7 +174,7 @@ def status(
 
 @app.command("label-next")
 def label_next(
-    kind: LabelKind = typer.Option(..., "--kind"),
+    kind: LabelKind = _REQUIRED_KIND_OPTION,
     label_dir: str = typer.Option("benchmark/run/labels", "--label-dir"),
 ) -> None:
     try:
@@ -198,8 +200,8 @@ def label_next(
 
 @app.command("label-set")
 def label_set(
-    kind: LabelKind = typer.Option(..., "--kind"),
-    row_number: int = typer.Option(..., "--row", min=1),
+    kind: LabelKind = _REQUIRED_KIND_OPTION,
+    row_number: int = _REQUIRED_ROW_OPTION,
     label_dir: str = typer.Option("benchmark/run/labels", "--label-dir"),
     value: str | None = typer.Option(None, "--value"),
     purpose: str | None = typer.Option(None, "--purpose"),
