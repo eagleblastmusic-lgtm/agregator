@@ -7,8 +7,11 @@ import os
 import typer
 
 from .crawler import WebsiteCrawler
+from .ingest import ingest_source
 from .pipeline import EmployerDiscoveryPipeline
 from .search import BraveSearchProvider
+from .sources.olx import OlxPublicSource
+from .storage import SQLiteStore
 
 app = typer.Typer(help="Faro Employer Discovery Engine")
 
@@ -51,6 +54,55 @@ def discover(
         typer.echo(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
 
     asyncio.run(run())
+
+
+@app.command("db-init")
+def db_init(
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+) -> None:
+    store = SQLiteStore(db)
+    store.init_schema()
+    typer.echo(f"Baza gotowa: {db}")
+
+
+@app.command("collect-olx")
+def collect_olx(
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    pages: int = typer.Option(1, "--pages", min=1, max=20),
+    fresh: bool = typer.Option(False, "--fresh", help="Zacznij od offsetu 0"),
+) -> None:
+    async def run() -> None:
+        store = SQLiteStore(db)
+        source = OlxPublicSource()
+        result = await ingest_source(source, store, pages=pages, resume=not fresh)
+        typer.echo(
+            json.dumps(
+                {
+                    "source": result.source,
+                    "pages": result.pages,
+                    "next_cursor": result.next_cursor,
+                    "jobs_seen": result.stats.jobs_seen,
+                    "jobs_inserted": result.stats.jobs_inserted,
+                    "jobs_updated": result.stats.jobs_updated,
+                    "companies_created": result.stats.companies_created,
+                    "db": db,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+
+    asyncio.run(run())
+
+
+@app.command("companies")
+def companies(
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    limit: int = typer.Option(50, "--limit", min=1, max=1000),
+) -> None:
+    store = SQLiteStore(db)
+    store.init_schema()
+    typer.echo(json.dumps(store.list_companies(limit), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
