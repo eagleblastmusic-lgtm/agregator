@@ -6,6 +6,7 @@ import os
 
 import typer
 
+from .benchmark_evaluation import evaluate_labeled_benchmark
 from .benchmark_pipeline import run_benchmark_pipeline
 from .crawler import WebsiteCrawler
 from .label_status import build_label_bundle_status
@@ -134,6 +135,34 @@ def status(
     result = build_label_bundle_status(label_dir)
     typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     if strict and not result.ready_for_quality_gate:
+        raise typer.Exit(code=2)
+
+
+@app.command("evaluate")
+def evaluate(
+    db: str = typer.Option("benchmark/benchmark.sqlite3", "--db"),
+    label_dir: str = typer.Option("benchmark/run/labels", "--label-dir"),
+    min_resolution_f1: float = typer.Option(0.95, "--min-resolution-f1", min=0.0, max=1.0),
+    min_website_f1: float = typer.Option(0.95, "--min-website-f1", min=0.0, max=1.0),
+    min_contact_macro_f1: float = typer.Option(
+        0.90,
+        "--min-contact-macro-f1",
+        min=0.0,
+        max=1.0,
+    ),
+    fail_on_error: bool = typer.Option(False, "--fail-on-error"),
+) -> None:
+    result = evaluate_labeled_benchmark(
+        SQLiteStore(db),
+        label_dir,
+        min_resolution_f1=min_resolution_f1,
+        min_website_f1=min_website_f1,
+        min_contact_macro_f1=min_contact_macro_f1,
+    )
+    typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    if not result.evaluated:
+        raise typer.Exit(code=2)
+    if fail_on_error and not result.passed:
         raise typer.Exit(code=2)
 
 
