@@ -9,6 +9,7 @@ from .careerjet import CareerjetApiSource
 from .epraca import EPracaSource
 from .jooble import JoobleApiSource
 from .kprm import KprmPublicSource
+from .ngo import NgoPublicSource
 from .ofertypracy_edu import OfertyPracyEduPublicSource
 from .olx import OlxPublicSource
 from .public_sources import (
@@ -26,7 +27,6 @@ def _jooble_from_env() -> JoobleApiSource:
     api_key = os.getenv("JOOBLE_API_KEY", "")
     if not api_key:
         raise ValueError("Ustaw JOOBLE_API_KEY przed użyciem źródła jooble")
-
     return JoobleApiSource(
         api_key,
         keywords=os.getenv("JOOBLE_KEYWORDS", "praca"),
@@ -41,7 +41,6 @@ def _adzuna_from_env() -> AdzunaApiSource:
     app_key = os.getenv("ADZUNA_APP_KEY", "")
     if not app_id or not app_key:
         raise ValueError("Ustaw ADZUNA_APP_ID i ADZUNA_APP_KEY przed użyciem źródła adzuna")
-
     return AdzunaApiSource(
         app_id,
         app_key,
@@ -69,7 +68,6 @@ def _careerjet_from_env() -> CareerjetApiSource:
     ]
     if missing:
         raise ValueError("Ustaw wymagane zmienne Careerjet: " + ", ".join(missing))
-
     return CareerjetApiSource(
         api_key,
         referer=referer,
@@ -87,7 +85,6 @@ def _epraca_from_env() -> EPracaSource:
     partner = os.getenv("EPRACA_PARTNER", "")
     if not partner:
         raise ValueError("Ustaw EPRACA_PARTNER nadany przez MRPiPS")
-
     voivodeship = os.getenv("EPRACA_WOJEWODZTWO") or None
     unit = os.getenv("EPRACA_JEDNOSTKA") or None
     all_offers = os.getenv("EPRACA_ALL", "").strip().lower() in {
@@ -96,7 +93,6 @@ def _epraca_from_env() -> EPracaSource:
         "yes",
         "tak",
     }
-
     return EPracaSource(
         partner,
         language=os.getenv("EPRACA_LANGUAGE", "pl"),
@@ -133,50 +129,35 @@ def default_registry() -> SourceRegistry:
         skillshot_source,
         access_mode="public_html",
         experimental=True,
-        notes=(
-            "Server-rendered public listing with numbered pagination; robots is checked "
-            "before listing and detail requests."
-        ),
+        notes="Public server-rendered listing/detail pages; robots is checked before requests.",
     )
     registry.register(
         "nofluffjobs",
         nofluffjobs_source,
         access_mode="public_html",
         experimental=True,
-        notes=(
-            "Public HTML only. Hidden/API endpoints are not used; current adapter collects "
-            "the server-rendered listing batch and respects robots.txt."
-        ),
+        notes="Public HTML only; hidden/API endpoints are not used and robots is respected.",
     )
     registry.register(
         "justjoinit",
         justjoinit_source,
         access_mode="public_html",
         experimental=True,
-        notes=(
-            "Public server-rendered listing/detail pages only; no private API or access-control "
-            "bypass. Pagination expansion is pending source-specific validation."
-        ),
+        notes="Public HTML only; no private API or access-control bypass.",
     )
     registry.register(
         "rocketjobs",
         rocketjobs_source,
         access_mode="public_html",
         experimental=True,
-        notes=(
-            "Public server-rendered listing/detail pages only; pagination expansion and terms "
-            "review are pending."
-        ),
+        notes="Public HTML only; pagination expansion and terms review remain pending.",
     )
     registry.register(
         "karierawfinansach",
         karierawfinansach_source,
         access_mode="public_html",
         experimental=True,
-        notes=(
-            "Public listing/detail pages only; current first batch is intentionally conservative "
-            "until pagination and terms are fully audited."
-        ),
+        notes="Public listing/detail pages only; conservative first rollout.",
     )
     registry.register(
         "kprm",
@@ -184,8 +165,7 @@ def default_registry() -> SourceRegistry:
         access_mode="official_public_html",
         experimental=True,
         notes=(
-            "Official civil-service recruitment site. The footer advertises an XML export; "
-            "this adapter currently preserves the human-visible public HTML notices and checks "
+            "Official civil-service recruitment site; preserves public notice text and checks "
             "robots.txt before requests."
         ),
     )
@@ -195,8 +175,18 @@ def default_registry() -> SourceRegistry:
         access_mode="official_public_html",
         experimental=True,
         notes=(
-            "Official MEN/SIO public vacancy listing. Public listing/detail pages only; "
-            "recruitment contacts remain raw evidence and are not treated as GREEN outreach."
+            "Official MEN/SIO public vacancy listing; recruitment contacts remain raw evidence "
+            "and are not treated as GREEN outreach."
+        ),
+    )
+    registry.register(
+        "ngo",
+        NgoPublicSource,
+        access_mode="public_html",
+        experimental=True,
+        notes=(
+            "Public NGO.pl job/cooperation listings and detail pages only. Recruitment contacts "
+            "remain source evidence, not automatic GREEN cooperation channels."
         ),
     )
     registry.register(
@@ -262,6 +252,7 @@ __all__ = [
     "EPracaSource",
     "JoobleApiSource",
     "KprmPublicSource",
+    "NgoPublicSource",
     "OfertyPracyEduPublicSource",
     "OlxPublicSource",
     "SourceRegistry",
