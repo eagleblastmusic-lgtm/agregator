@@ -1,0 +1,246 @@
+from __future__ import annotations
+
+import csv
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .storage import SQLiteStore
+
+EXPORT_SCHEMA_VERSION = "1"
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetExportResult:
+    output_dir: Path
+    companies_path: Path
+    jobs_path: Path
+    contacts_path: Path
+    manifest_path: Path
+    companies: int
+    jobs: int
+    contacts: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "output_dir": str(self.output_dir),
+            "companies_path": str(self.companies_path),
+            "jobs_path": str(self.jobs_path),
+            "contacts_path": str(self.contacts_path),
+            "manifest_path": str(self.manifest_path),
+            "companies": self.companies,
+            "jobs": self.jobs,
+            "contacts": self.contacts,
+            "schema_version": EXPORT_SCHEMA_VERSION,
+        }
+
+
+def export_dataset_bundle(
+    store: SQLiteStore,
+    output_dir: str | Path,
+) -> DatasetExportResult:
+    """Export normalized companies, jobs and contact evidence for Faro integration."""
+
+    store.init_schema()
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    companies_path = directory / "companies.csv"
+    jobs_path = directory / "job_postings.csv"
+    contacts_path = directory / "contact_channels.csv"
+    manifest_path = directory / "manifest.json"
+
+    with store.connect() as connection:
+        companies = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT
+                    c.id AS company_id,
+                    c.canonical_name,
+                    c.normalized_name,
+                    c.city AS primary_city,
+                    c.normalized_city AS primary_normalized_city,
+                    c.identity_source,
+                    c.identity_confidence,
+                    c.website_url,
+                    c.website_confidence,
+                    c.enriched_at,
+                    c.created_at,
+                    c.updated_at,
+                    (
+                        SELECT GROUP_CONCAT(alias, ' | ')
+                        FROM company_aliases ca
+                        WHERE ca.company_id = c.id
+                    ) AS aliases,
+                    (
+                        SELECT GROUP_CONCAT(city, ' | ')
+                        FROM company_locations cl
+                        WHERE cl.company_id = c.id
+                    ) AS locations,
+                    COUNT(DISTINCT j.id) AS job_count,
+                    GROUP_CONCAT(DISTINCT j.source) AS job_sources
+                FROM companies c
+                LEFT JOIN job_postings j ON j.company_id = c.id
+                GROUP BY c.id
+                ORDER BY c.id ASC
+                """
+            ).fetchall()
+        ]
+        jobs = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT
+                    j.id AS job_id,
+                    j.source,
+                    j.source_id,
+                    j.url,
+                    j.title,
+                    j.company_id,
+                    j.company_name_raw,
+                    j.company_name_source,
+                    j.company_name_confidence,
+                    j.company_resolution_method,
+                    j.company_resolution_confidence,
+                    j.city,
+                    j.description,
+                    j.published_at,
+                    j.refreshed_at,
+                    j.first_seen_at,
+                    j.last_seen_at
+                FROM job_postings j
+                ORDER BY j.id ASC
+                """
+            ).fetchall()
+        ]
+        contacts = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT
+                    cc.id AS contact_id,
+                    cc.company_id,
+                    c.canonical_name,
+                    cc.kind,
+                    cc.value,
+                    cc.purpose,
+                    cc.decision,
+                    cc.confidence,
+                    cc.evidence_url,
+                    cc.evidence_text,
+                    cc.evidence_signal,
+                    cc.verified_at
+                FROM contact_channels cc
+                JOIN companies c ON c.id = cc.company_id
+                ORDER BY cc.id ASC
+                """
+            ).fetchall()
+        ]
+
+    _write_csv(companies_path, companies, _company_fields())
+    _write_csv(jobs_path, jobs, _job_fields())
+    _write_csv(contacts_path, contacts, _contact_fields())
+
+    manifest = {
+        "schema_version": EXPORT_SCHEMA_VERSION,
+        "files": {
+            "companies": companies_path.name,
+            "job_postings": jobs_path.name,
+            "contact_channels": contacts_path.name,
+        },
+        "counts": {
+            "companies": len(companies),
+            "job_postings": len(jobs),
+            "contact_channels": len(contacts),
+        },
+        "notes": {
+            "company_resolution": (
+                "company_resolution_method/confidence describe automatic identity resolution"
+            ),
+            "contact_decision": "green/review/ignore is preserved with evidence provenance",
+        },
+    }
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    return DatasetExportResult(
+        output_dir=directory,
+        companies_path=companies_path,
+        jobs_path=jobs_path,
+        contacts_path=contacts_path,
+        manifest_path=manifest_path,
+        companies=len(companies),
+        jobs=len(jobs),
+        contacts=len(contacts),
+    )
+
+
+def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _company_fields() -> list[str]:
+    return [
+        "company_id",
+        "canonical_name",
+        "normalized_name",
+        "primary_city",
+        "primary_normalized_city",
+        "aliases",
+        "locations",
+        "identity_source",
+        "identity_confidence",
+        "website_url",
+        "website_confidence",
+        "job_count",
+        "job_sources",
+        "enriched_at",
+        "created_at",
+        "updated_at",
+    ]
+
+
+def _job_fields() -> list[str]:
+    return [
+        "job_id",
+        "source",
+        "source_id",
+        "url",
+        "title",
+        "company_id",
+        "company_name_raw",
+        "company_name_source",
+        "company_name_confidence",
+        "company_resolution_method",
+        "company_resolution_confidence",
+        "city",
+        "description",
+        "published_at",
+        "refreshed_at",
+        "first_seen_at",
+        "last_seen_at",
+    ]
+
+
+def _contact_fields() -> list[str]:
+    return [
+        "contact_id",
+        "company_id",
+        "canonical_name",
+        "kind",
+        "value",
+        "purpose",
+        "decision",
+        "confidence",
+        "evidence_url",
+        "evidence_text",
+        "evidence_signal",
+        "verified_at",
+    ]
