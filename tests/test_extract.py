@@ -70,3 +70,22 @@ def test_obfuscated_polish_malpa_email_is_reconstructed() -> None:
     email = next(item for item in channels if item.value == "partnerzy@example.pl")
     assert email.decision == Decision.GREEN
     assert email.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
+
+
+def test_commercial_consent_checkbox_marks_form_for_review() -> None:
+    html = """
+    <html><body>
+      <form action="/kontakt/wyslij">
+        <label>
+          <input type="checkbox" name="marketing">
+          Zgadzam się na otrzymywanie informacji handlowych drogą elektroniczną.
+        </label>
+        <button>Wyślij</button>
+      </form>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.pl/kontakt")
+    form = next(item for item in channels if item.value == "https://example.pl/kontakt/wyslij")
+    assert form.decision == Decision.REVIEW
+    assert form.purpose == ChannelPurpose.SALES
+    assert form.confidence == 0.78
