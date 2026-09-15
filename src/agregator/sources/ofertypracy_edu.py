@@ -13,7 +13,7 @@ from ..models import CompanyWebsiteCandidate, JobPosting
 from .base import SourceBatch
 
 BASE_URL = "https://ofertypracy.edu.pl"
-LISTING_URL = BASE_URL + "/?page={page}&per_page=100&search=1&sort=-published_at"
+LISTING_URL = BASE_URL + "/?page={page}&per_page=25&search=1&sort=-published_at"
 _OFFER_PATH = re.compile(r"^/oferty/(\d+)/?$", re.IGNORECASE)
 _OFFICIAL_ID = re.compile(r"\bID:\s*([0-9]+/[0-9]{4})\b", re.IGNORECASE)
 _POSTAL_CITY = re.compile(r"\b\d{2}-\d{3}\s+([^\n]+)")
