@@ -33,8 +33,8 @@ Master catalog: **91 źródeł**.
 Aktualnie:
 
 ```text
-adaptery zaimplementowane: 14
-pozostałe:                77
+adaptery zaimplementowane: 15
+pozostałe:                76
 ```
 
 Zaimplementowane adaptery:
@@ -42,6 +42,7 @@ Zaimplementowane adaptery:
 | Źródło | Adapter | Tryb | Stan rollout |
 |---|---|---|---|
 | Pracuj.pl | `pracuj` | public sitemap + HTML | experimental |
+| Aplikuj.pl | `aplikuj` | public HTML | experimental |
 | OLX Praca | `olx` | public web endpoint | experimental |
 | Just Join IT | `justjoinit` | public HTML | experimental |
 | No Fluff Jobs | `nofluffjobs` | public HTML | experimental |
@@ -70,7 +71,7 @@ W katalogu jest 14 źródeł A0. Dla publicznie/dozwolenie dostępnych ścieżek
 | LinkedIn Jobs | HOLD — brak obchodzenia ograniczeń LinkedIn; potrzebna dozwolona ścieżka publiczna/partnerska |
 | Indeed Polska | HOLD — brak obchodzenia anty-bot/login; potrzebna dozwolona ścieżka publiczna/partnerska |
 
-To kończy pierwszy przebieg A0 bez prób obchodzenia ograniczeń. Rollout przechodzi teraz na **A1**.
+To kończy pierwszy przebieg A0 bez prób obchodzenia ograniczeń. Rollout jest teraz w **A1**.
 
 ## Batch S1 — DONE baseline
 
@@ -124,15 +125,22 @@ Adapter `ngo` został dodany jako pierwszy nowy A1:
 - pełny tekst ogłoszenia zachowany w `source_payload`,
 - kontakt rekrutacyjny pozostaje raw evidence i nie jest automatycznie GREEN.
 
+### Aplikuj.pl
+
+Adapter `aplikuj` jest kolejnym A1:
+
+- publiczny listing `/praca` oraz paginacja `/praca/strona-N`,
+- publiczne szczegóły `/oferta/<id>/<slug>`,
+- preferowany parser JSON-LD `JobPosting` z fallbackiem HTML,
+- nazwa pracodawcy, stanowisko, miasto, data publikacji,
+- jawny NIP z treści ogłoszenia, jeżeli portal go publikuje,
+- URL profilu pracodawcy zachowany w `source_payload`,
+- pełny widoczny tekst zachowany jako source evidence,
+- robots check, retry i request delay.
+
 ### Następne A1
 
-Priorytet mają źródła oficjalne/publiczne i server-rendered, w których można zebrać dużo danych o pracodawcy bez obchodzenia ograniczeń. Kandydaci do audytu:
-
-1. EURAXESS / aktualna publiczna baza ofert naukowych,
-2. Akademicka Baza Ogłoszeń MNiSW — przed wykorzystaniem biznesowym trzeba rozstrzygnąć zakres licencji publikowanych treści,
-3. BIP-y / źródła publiczne,
-4. publiczne serwisy agencji zatrudnienia,
-5. pozostałe portale A1 z czytelnym publicznym listingiem i detailem.
+Priorytet mają źródła oficjalne/publiczne i server-rendered, w których można zebrać dużo danych o pracodawcy bez obchodzenia ograniczeń. Kolejny audyt obejmuje przede wszystkim portale z czytelnym publicznym listingiem oraz źródła oficjalne/agencje.
 
 ## CLI scraper-first
 
@@ -146,7 +154,7 @@ Pobranie wybranych źródeł:
 
 ```bash
 agregator-scrape run \
-  --sources kprm,ofertypracyedu,ngo \
+  --sources kprm,ofertypracyedu,ngo,aplikuj \
   --pages-per-source 1 \
   --db agregator.sqlite3 \
   --strict
@@ -163,7 +171,7 @@ agregator-scrape run \
 
 `agregator-scrape` celowo nie wybiera `partner_api`. Dzięki temu publiczny scraping nie jest uzależniony od JOOBLE/ADZUNA/CAREERJET credentials.
 
-Manualny GitHub Actions workflow `.github/workflows/public-scraper-smoke.yml` wykonuje kontrolowany realny smoke publicznych adapterów bez sekretów. Domyślny zestaw smoke to `kprm,ofertypracyedu,ngo`.
+Manualny GitHub Actions workflow `.github/workflows/public-scraper-smoke.yml` wykonuje kontrolowany realny smoke publicznych adapterów bez sekretów.
 
 ## Definition of Done dla pojedynczego źródła
 
