@@ -67,8 +67,13 @@ def _seed(store: SQLiteStore) -> tuple[int, int]:
             ],
         ),
     )
-    contact_id = int(store.list_green_channels(limit=1)[0]["id"])
-    return company_id, contact_id
+    with store.connect() as connection:
+        row = connection.execute(
+            "SELECT id FROM contact_channels WHERE company_id = ? AND value = ?",
+            (company_id, "partnerzy@acme.test"),
+        ).fetchone()
+    assert row is not None
+    return company_id, int(row["id"])
 
 
 def _write_complete_labels(label_dir: Path, company_id: int, contact_id: int) -> None:
