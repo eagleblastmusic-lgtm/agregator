@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -128,7 +129,15 @@ def _write_csv(
     fieldnames: list[str],
     rows: list[dict[str, str]],
 ) -> None:
-    with path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
