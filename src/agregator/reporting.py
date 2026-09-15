@@ -27,6 +27,12 @@ class BenchmarkReport:
     website_candidates_total: int
     companies_with_website_candidates: int
     source_verified_websites: int
+    source_website_attempts_total: int
+    source_website_attempts_accepted: int
+    source_website_attempts_rejected: int
+    source_website_attempt_acceptance_rate: float
+    search_fallbacks_after_source_rejection: int
+    search_fallback_after_source_rejection_rate: float
     contact_channels_total: int
     green_channels: int
     review_channels: int
@@ -45,6 +51,7 @@ class BenchmarkReport:
     company_resolution_counts: dict[str, int]
     website_resolution_origin_counts: dict[str, int]
     source_verified_website_counts: dict[str, int]
+    source_website_attempt_metrics: dict[str, dict[str, int | float]]
     source_run_metrics: dict[str, dict[str, int | float]]
 
     def to_dict(self) -> dict[str, Any]:
@@ -113,7 +120,8 @@ def build_benchmark_report(
             SELECT
                 w.outcome,
                 COALESCE(w.resolution_origin, 'legacy') AS resolution_origin,
-                COALESCE(w.resolution_source, '') AS resolution_source
+                COALESCE(w.resolution_source, '') AS resolution_source,
+                w.website_attempts_json
             FROM website_verification_runs w
             JOIN (
                 SELECT company_id, MAX(id) AS latest_id
@@ -213,6 +221,7 @@ def build_benchmark_report(
             )
     source_verified_websites = sum(source_verified_website_counts.values())
 
+    attempt_stats = _source_website_attempt_metrics(latest_website_rows)
     source_run_metrics = _source_run_metrics(run_rows)
     employer_scores = rank_companies(store, min_score=0, limit=max(1, companies_total))
     score_values = [item.score for item in employer_scores]
@@ -230,6 +239,14 @@ def build_benchmark_report(
         website_candidates_total=website_candidates_total,
         companies_with_website_candidates=companies_with_website_candidates,
         source_verified_websites=source_verified_websites,
+        source_website_attempts_total=int(attempt_stats["attempts_total"]),
+        source_website_attempts_accepted=int(attempt_stats["accepted"]),
+        source_website_attempts_rejected=int(attempt_stats["rejected"]),
+        source_website_attempt_acceptance_rate=float(attempt_stats["acceptance_rate"]),
+        search_fallbacks_after_source_rejection=int(attempt_stats["search_fallbacks"]),
+        search_fallback_after_source_rejection_rate=float(
+            attempt_stats["search_fallback_rate"]
+        ),
         contact_channels_total=contact_channels_total,
         green_channels=green_channels,
         review_channels=review_channels,
@@ -257,6 +274,7 @@ def build_benchmark_report(
         company_resolution_counts=company_resolution_counts,
         website_resolution_origin_counts=website_resolution_origin_counts,
         source_verified_website_counts=source_verified_website_counts,
+        source_website_attempt_metrics=attempt_stats["by_source"],  # type: ignore[arg-type]
         source_run_metrics=source_run_metrics,
     )
 
@@ -301,6 +319,79 @@ def export_green_channels(
         return path
 
     raise ValueError(f"unsupported export format: {export_format}")
+
+
+def _source_website_attempt_metrics(rows: list[Any]) -> dict[str, Any]:
+    attempts_total = 0
+    accepted = 0
+    rejected = 0
+    source_attempted_companies = 0
+    search_fallbacks = 0
+    by_source: dict[str, dict[str, int | float]] = {}
+
+    for row in rows:
+        try:
+            raw_attempts = json.loads(str(row["website_attempts_json"] or "[]"))
+        except (json.JSONDecodeError, TypeError):
+            raw_attempts = []
+        if not isinstance(raw_attempts, list):
+            continue
+
+        attempts = [item for item in raw_attempts if isinstance(item, dict)]
+        source_attempts = [
+            (index, item)
+            for index, item in enumerate(attempts)
+            if item.get("origin") == "source_candidate"
+        ]
+        if not source_attempts:
+            continue
+
+        source_attempted_companies += 1
+        rejected_indexes: list[int] = []
+        for index, attempt in source_attempts:
+            attempts_total += 1
+            is_accepted = bool(attempt.get("accepted"))
+            source = str(attempt.get("source") or "unknown")
+            metrics = by_source.setdefault(
+                source,
+                {
+                    "attempts": 0,
+                    "accepted": 0,
+                    "rejected": 0,
+                    "acceptance_rate": 0.0,
+                },
+            )
+            metrics["attempts"] = int(metrics["attempts"]) + 1
+            if is_accepted:
+                accepted += 1
+                metrics["accepted"] = int(metrics["accepted"]) + 1
+            else:
+                rejected += 1
+                rejected_indexes.append(index)
+                metrics["rejected"] = int(metrics["rejected"]) + 1
+
+        if rejected_indexes and any(
+            index > min(rejected_indexes) and attempt.get("origin") == "search"
+            for index, attempt in enumerate(attempts)
+        ):
+            search_fallbacks += 1
+
+    for metrics in by_source.values():
+        metrics["acceptance_rate"] = _ratio(
+            int(metrics["accepted"]),
+            int(metrics["attempts"]),
+        )
+
+    return {
+        "attempts_total": attempts_total,
+        "accepted": accepted,
+        "rejected": rejected,
+        "acceptance_rate": _ratio(accepted, attempts_total),
+        "source_attempted_companies": source_attempted_companies,
+        "search_fallbacks": search_fallbacks,
+        "search_fallback_rate": _ratio(search_fallbacks, source_attempted_companies),
+        "by_source": by_source,
+    }
 
 
 def _source_run_metrics(rows: list[Any]) -> dict[str, dict[str, int | float]]:
