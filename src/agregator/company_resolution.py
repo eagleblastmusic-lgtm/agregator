@@ -67,7 +67,11 @@ def choose_company_candidate(
 
     normalized_name = normalize_company_name(company_name)
     normalized_city = normalize_text(city or "") or None
-    exact_name = [candidate for candidate in candidates if candidate.normalized_name == normalized_name]
+    exact_name = [
+        candidate
+        for candidate in candidates
+        if candidate.normalized_name == normalized_name
+    ]
 
     same_city = [
         candidate
@@ -83,7 +87,11 @@ def choose_company_candidate(
 
     if len(exact_name) != 1:
         method = "ambiguous_exact_name" if exact_name else "new_company"
-        return ResolutionDecision(company_id=None, method=method, confidence=identity_confidence)
+        return ResolutionDecision(
+            company_id=None,
+            method=method,
+            confidence=identity_confidence,
+        )
 
     candidate = exact_name[0]
     if (
