@@ -83,6 +83,32 @@ def rocketjobs_source() -> PublicHtmlJobSource:
     )
 
 
+def theprotocol_source() -> PublicHtmlJobSource:
+    return PublicHtmlJobSource(
+        HtmlJobSourceConfig(
+            name="theprotocol",
+            base_url="https://theprotocol.it",
+            listing_url_template="https://theprotocol.it/praca?pageNumber={page}",
+            offer_path_patterns=(
+                r"^/praca/.+,oferta,",
+                r"^/szczegoly/praca/.+,oferta,",
+            ),
+            paginated=True,
+            start_page=1,
+            max_offer_links=50,
+            company_selectors=(
+                "a[href*='/firmy/']",
+                "[data-testid*='company']",
+                ".company-name",
+            ),
+            city_selectors=("[data-testid*='location']", ".location"),
+            description_selectors=("main", "article"),
+        ),
+        user_agent=_user_agent(),
+        request_delay=_delay(),
+    )
+
+
 def karierawfinansach_source() -> PublicHtmlJobSource:
     return PublicHtmlJobSource(
         HtmlJobSourceConfig(
@@ -131,4 +157,5 @@ __all__ = [
     "pracuj_source",
     "rocketjobs_source",
     "skillshot_source",
+    "theprotocol_source",
 ]
