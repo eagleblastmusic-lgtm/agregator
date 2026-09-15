@@ -1,0 +1,140 @@
+name: P10 OfertyPracy.edu Diagnostic
+
+on:
+  pull_request:
+    branches:
+      - feat/m0-employer-discovery-core
+    paths:
+      - ".github/workflows/p10-ofertypracyedu-diagnostic.yml"
+      - "src/agregator/sources/ofertypracy_edu.py"
+      - ".github/p10-smoke-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Capture public listing diagnostics
+        shell: bash
+        run: |
+          mkdir -p p10-ofertypracyedu-diagnostic
+          python - <<'PY'
+          import asyncio
+          import json
+          import urllib.robotparser
+          from pathlib import Path
+          from urllib.parse import urlparse
+
+          import httpx
+          from bs4 import BeautifulSoup
+
+          BASE = "https://ofertypracy.edu.pl"
+          LISTING = BASE + "/?page=1&per_page=25&search=1&sort=-published_at"
+          UA = "FaroEmployerDiscovery/0.2"
+          root = Path("p10-ofertypracyedu-diagnostic")
+
+          async def main():
+              async with httpx.AsyncClient(
+                  timeout=25,
+                  follow_redirects=True,
+                  headers={
+                      "Accept": "text/html,application/xhtml+xml",
+                      "Accept-Language": "pl-PL,pl;q=0.9",
+                      "User-Agent": UA,
+                  },
+              ) as client:
+                  robots_url = BASE + "/robots.txt"
+                  robots_response = await client.get(robots_url)
+                  root.joinpath("robots.txt").write_text(
+                      robots_response.text,
+                      encoding="utf-8",
+                  )
+
+                  parser = urllib.robotparser.RobotFileParser()
+                  parser.set_url(robots_url)
+                  if robots_response.status_code in {401, 403}:
+                      parser.parse(["User-agent: *", "Disallow: /"])
+                  elif robots_response.status_code == 404:
+                      parser.parse(["User-agent: *", "Allow: /"])
+                  else:
+                      robots_response.raise_for_status()
+                      parser.parse(robots_response.text.splitlines())
+
+                  allowed = parser.can_fetch(UA, LISTING)
+                  if not allowed:
+                      root.joinpath("summary.json").write_text(
+                          json.dumps(
+                              {
+                                  "robots_status": robots_response.status_code,
+                                  "robots_allowed": False,
+                                  "listing_url": LISTING,
+                              },
+                              indent=2,
+                          ) + "\n",
+                          encoding="utf-8",
+                      )
+                      return
+
+                  response = await client.get(LISTING)
+                  response.raise_for_status()
+                  html = response.text
+                  soup = BeautifulSoup(html, "html.parser")
+                  hrefs = [
+                      str(a.get("href") or "").strip()
+                      for a in soup.select("a[href]")
+                      if str(a.get("href") or "").strip()
+                  ]
+                  offerish = [href for href in hrefs if "ofert" in href.lower()]
+                  scripts = [
+                      {
+                          "type": str(script.get("type") or ""),
+                          "src": str(script.get("src") or ""),
+                          "text_prefix": script.get_text(" ", strip=True)[:500],
+                      }
+                      for script in soup.find_all("script")
+                  ]
+                  summary = {
+                      "robots_status": robots_response.status_code,
+                      "robots_allowed": allowed,
+                      "listing_url": LISTING,
+                      "status": response.status_code,
+                      "final_url": str(response.url),
+                      "content_type": response.headers.get("content-type"),
+                      "content_length": len(response.content),
+                      "html_chars": len(html),
+                      "title": soup.title.get_text(" ", strip=True) if soup.title else None,
+                      "anchors": len(hrefs),
+                      "offerish_hrefs": len(offerish),
+                      "first_hrefs": hrefs[:150],
+                      "first_offerish_hrefs": offerish[:100],
+                      "scripts": scripts[:50],
+                      "body_text_prefix": " ".join(soup.stripped_strings)[:5000],
+                  }
+                  root.joinpath("summary.json").write_text(
+                      json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+                      encoding="utf-8",
+                  )
+                  root.joinpath("listing.html").write_text(html, encoding="utf-8")
+
+          asyncio.run(main())
+          PY
+
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: p10-ofertypracyedu-diagnostic-${{ github.run_id }}
+          path: p10-ofertypracyedu-diagnostic/
+          retention-days: 3
