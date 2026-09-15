@@ -7,6 +7,7 @@ from dataclasses import asdict
 
 import typer
 
+from .catalog import catalog_summary, filter_catalog, load_source_catalog
 from .crawler import WebsiteCrawler
 from .enrich import enrich_pending_companies
 from .importers import load_jobs_csv
@@ -109,6 +110,41 @@ def db_init(
 @app.command("sources")
 def sources() -> None:
     typer.echo(json.dumps(default_registry().names(), ensure_ascii=False, indent=2))
+
+
+@app.command("catalog")
+def catalog(
+    priority: str | None = typer.Option(None, "--priority"),
+    implemented_only: bool = typer.Option(False, "--implemented-only"),
+    pending_only: bool = typer.Option(False, "--pending-only"),
+    summary: bool = typer.Option(False, "--summary"),
+) -> None:
+    if implemented_only and pending_only:
+        raise typer.BadParameter("Wybierz tylko --implemented-only albo --pending-only")
+
+    entries = load_source_catalog()
+    if summary:
+        typer.echo(json.dumps(catalog_summary(entries), ensure_ascii=False, indent=2))
+        return
+
+    implemented: bool | None = None
+    if implemented_only:
+        implemented = True
+    elif pending_only:
+        implemented = False
+
+    filtered = filter_catalog(
+        entries,
+        priority=priority,
+        implemented=implemented,
+    )
+    typer.echo(
+        json.dumps(
+            [entry.to_dict() for entry in filtered],
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 @app.command("collect")
