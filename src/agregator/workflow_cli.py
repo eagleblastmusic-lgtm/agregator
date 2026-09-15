@@ -19,6 +19,11 @@ app = typer.Typer(
 )
 
 
+@app.callback()
+def main() -> None:
+    """Run resumable Faro end-to-end workflows."""
+
+
 def _crawler_from_env() -> WebsiteCrawler:
     return WebsiteCrawler(
         user_agent=os.getenv("AGREGATOR_USER_AGENT", "FaroEmployerDiscovery/0.1"),
