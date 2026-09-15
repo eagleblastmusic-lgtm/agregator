@@ -7,6 +7,8 @@ from .models import ChannelPurpose, Decision
 
 
 def normalize_text(value: str) -> str:
+    # Unicode NFKD does not decompose Polish ł/Ł, so map it explicitly.
+    value = value.replace("Ł", "L").replace("ł", "l")
     value = unicodedata.normalize("NFKD", value)
     value = "".join(ch for ch in value if not unicodedata.combining(ch))
     value = value.lower()
