@@ -41,6 +41,26 @@ def init_company_website_candidate_schema(store: SQLiteStore) -> None:
                 ON company_website_candidates(company_id, confidence DESC);
             CREATE INDEX IF NOT EXISTS idx_company_website_candidates_host
                 ON company_website_candidates(host);
+
+            CREATE TABLE IF NOT EXISTS company_website_candidate_observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id INTEGER NOT NULL,
+                url TEXT NOT NULL,
+                host TEXT NOT NULL,
+                job_source TEXT NOT NULL,
+                evidence_source TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0,
+                observation_count INTEGER NOT NULL DEFAULT 1,
+                first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(company_id) REFERENCES companies(id),
+                UNIQUE(company_id, url, job_source, evidence_source)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_company_website_observations_source
+                ON company_website_candidate_observations(job_source);
+            CREATE INDEX IF NOT EXISTS idx_company_website_observations_company
+                ON company_website_candidate_observations(company_id);
             """
         )
 
@@ -49,6 +69,8 @@ def persist_job_company_website_candidates(
     store: SQLiteStore,
     jobs: list[JobPosting],
 ) -> WebsiteCandidatePersistenceStats:
+    """Persist source-provided website leads and their job-source provenance."""
+
     init_company_website_candidate_schema(store)
     stats = WebsiteCandidatePersistenceStats()
 
@@ -77,6 +99,7 @@ def persist_job_company_website_candidates(
                     stats.invalid += 1
                     continue
                 url, host = normalized
+                evidence_source = candidate.source or job.source
 
                 exists = connection.execute(
                     """
@@ -109,7 +132,31 @@ def persist_job_company_website_candidates(
                         company_id,
                         url,
                         host,
-                        candidate.source or job.source,
+                        evidence_source,
+                        candidate.confidence,
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO company_website_candidate_observations(
+                        company_id,
+                        url,
+                        host,
+                        job_source,
+                        evidence_source,
+                        confidence
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(company_id, url, job_source, evidence_source) DO UPDATE SET
+                        confidence = MAX(confidence, excluded.confidence),
+                        observation_count = observation_count + 1,
+                        last_seen_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        company_id,
+                        url,
+                        host,
+                        job.source,
+                        evidence_source,
                         candidate.confidence,
                     ),
                 )
