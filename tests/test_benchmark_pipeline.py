@@ -127,6 +127,8 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert result.benchmark_report_path.exists()
     assert result.run_manifest_path.exists()
     assert result.dataset.manifest_path.exists()
+    assert result.dataset.identifier_observations_path.exists()
+    assert result.dataset.website_candidate_observations_path.exists()
     assert result.dataset.evidence_observations_path.exists()
     assert result.website_snapshots.path.exists()
     assert result.website_snapshots.rows == 1
@@ -167,7 +169,9 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert manifest["enrichment"]["evidence_observations"] == 1
     assert manifest["benchmark"]["websites_found"] == 1
     assert manifest["website_snapshots"]["rows"] == 1
-    assert manifest["dataset"]["schema_version"] == "7"
+    assert manifest["dataset"]["schema_version"] == "8"
+    assert manifest["dataset"]["identifier_observations"] == 0
+    assert manifest["dataset"]["website_candidate_observations"] == 0
     assert manifest["dataset"]["evidence_observations"] == 1
     assert manifest["readiness"]["ready_for_manual_labeling"] is True
     assert manifest["readiness"]["blockers"] == []
