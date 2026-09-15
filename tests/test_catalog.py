@@ -6,11 +6,12 @@ def test_source_catalog_matches_master_list() -> None:
     summary = catalog_summary(entries)
 
     assert summary["total"] == 91
-    assert summary["implemented"] == 4
-    assert summary["remaining"] == 87
+    assert summary["implemented"] == 5
+    assert summary["remaining"] == 86
     assert summary["priorities"] == {"A0": 14, "A1": 36, "B": 24, "C": 17}
     assert summary["implemented_adapters"] == [
         "olx",
+        "epraca",
         "jooble",
         "careerjet",
         "adzuna",
@@ -21,6 +22,6 @@ def test_filter_catalog_a0_pending() -> None:
     entries = load_source_catalog()
     pending_a0 = filter_catalog(entries, priority="A0", implemented=False)
 
-    assert len(pending_a0) == 12
+    assert len(pending_a0) == 11
     assert all(entry.priority == "A0" for entry in pending_a0)
     assert all(not entry.implemented for entry in pending_a0)
