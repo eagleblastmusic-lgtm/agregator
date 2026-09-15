@@ -68,6 +68,67 @@ def load_ground_truth_csv(path: str | Path) -> list[GroundTruthLabel]:
     return labels
 
 
+def export_ground_truth_template(
+    store: SQLiteStore,
+    output: str | Path,
+    *,
+    limit: int = 1000,
+) -> Path:
+    store.init_schema()
+    path = Path(output)
+    with store.connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                j.source,
+                j.source_id,
+                j.company_name_raw,
+                j.city,
+                j.url,
+                j.company_id AS predicted_company_id,
+                j.company_resolution_method,
+                j.company_resolution_confidence
+            FROM job_postings j
+            ORDER BY j.id ASC
+            LIMIT ?
+            """,
+            (max(1, limit),),
+        ).fetchall()
+
+    fieldnames = [
+        "source",
+        "source_id",
+        "truth_company_id",
+        "company_name_raw",
+        "city",
+        "url",
+        "predicted_company_id",
+        "company_resolution_method",
+        "company_resolution_confidence",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {
+                    "source": row["source"],
+                    "source_id": row["source_id"],
+                    "truth_company_id": "",
+                    "company_name_raw": row["company_name_raw"],
+                    "city": row["city"],
+                    "url": row["url"],
+                    "predicted_company_id": row["predicted_company_id"],
+                    "company_resolution_method": row["company_resolution_method"],
+                    "company_resolution_confidence": row[
+                        "company_resolution_confidence"
+                    ],
+                }
+            )
+    return path
+
+
 def evaluate_company_resolution(
     store: SQLiteStore,
     labels: list[GroundTruthLabel],
