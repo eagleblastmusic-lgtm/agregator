@@ -19,13 +19,16 @@ Projekt **nie wysyła wiadomości**, nie omija logowania, CAPTCHA, paywalli ani 
 
 - wspólny `JobSource` + `SourceRegistry`,
 - adaptery: `olx`, `jooble`, `adzuna`, `careerjet`, `epraca`,
+- jawne metadane source access policy (`access_mode`, `experimental`),
 - katalog 91 źródeł w `config/source_catalog.tsv`,
 - resumowalne pobieranie + `source_runs`,
 - kontrolowany collector round-robin,
+- collection-only smoke test bez zależności od SearchProvider,
 - Company Resolution v1 z konserwatywnym exact-match i fuzzy REVIEW-only,
 - aliasy/lokalizacje firm,
 - jawne identyfikatory przedsiębiorstw z provenance/confidence,
 - NIP/REGON z oficjalnego feedu ePraca,
+- append-only provenance obserwacji identyfikatorów i kandydatur WWW per źródło,
 - konflikty identyfikatorów bez automatycznego merge,
 - źródłowe kandydatury WWW, np. ePraca `adresWww`,
 - first-party verification domeny przed uznaniem jej za oficjalną,
@@ -43,7 +46,7 @@ Projekt **nie wysyła wiadomości**, nie omija logowania, CAPTCHA, paywalli ani 
 - ręcznie etykietowane quality gates dla Company Resolution, domen i kontaktów,
 - Employer Discovery Score 0–100,
 - kontrolowany benchmark end-to-end 1000 ofert,
-- eksport Faro **schema v7**.
+- eksport Faro **schema v8**.
 
 ## Instalacja
 
@@ -54,10 +57,11 @@ pip install -e ".[dev]"
 cp .env.example .env
 ```
 
-Po instalacji dostępne są dwa entrypointy:
+Po instalacji dostępne są trzy entrypointy:
 
 ```text
 agregator
+agregator-collect
 agregator-benchmark
 ```
 
@@ -75,16 +79,32 @@ CAREERJET_REFERER=
 CAREERJET_USER_IP=
 CAREERJET_USER_AGENT=
 EPRACA_PARTNER=
+EPRACA_WOJEWODZTWO=
+EPRACA_JEDNOSTKA=
+EPRACA_ALL=
 ```
 
-Careerjet wymaga rzeczywistego kontekstu partnera. ePraca wymaga wartości `Partner` nadanej integratorowi i prawidłowego zakresu zapytania. Repo nie podstawia fikcyjnych danych i nie obchodzi autoryzacji.
+Careerjet wymaga rzeczywistego kontekstu partnera. ePraca wymaga wartości `Partner` nadanej integratorowi i dokładnie jednego prawidłowego zakresu zapytania. Repo nie podstawia fikcyjnych danych i nie obchodzi autoryzacji.
+
+## Source access policy
+
+`SourceRegistry` przechowuje dla adaptera także `access_mode`, flagę `experimental` i opcjonalną notatkę operacyjną.
+
+Partner/API-first źródła są preferowanym baseline'em. Obecny adapter OLX korzysta z publicznego endpointu webowego poza udokumentowanym kontraktem partnerskim, dlatego jest oznaczony jako:
+
+```text
+access_mode=public_web_endpoint
+experimental=true
+```
+
+Collection smoke i kontrolowany benchmark nie uruchamiają źródeł eksperymentalnych bez jawnego `--allow-experimental-sources`.
 
 ## Podstawowe użycie
 
 ```bash
 agregator db-init --db agregator.sqlite3
 agregator sources
-agregator collect --source olx --pages 2
+agregator collect --source jooble --pages 2
 agregator companies --db agregator.sqlite3 --limit 50
 agregator enrich-db --db agregator.sqlite3 --limit 20
 agregator benchmark --db agregator.sqlite3
@@ -119,13 +139,39 @@ source website candidates
   -> crawl kontaktów
 ```
 
+## Collection-only smoke test
+
+Przed pełnym benchmarkiem można sprawdzić realne API i dane źródłowe **bez** Brave Search i bez crawlowania stron firm:
+
+```bash
+agregator-collect preflight \
+  --sources jooble,adzuna \
+  --strict
+
+agregator-collect run \
+  --db benchmark/collection.sqlite3 \
+  --output-dir benchmark/collection \
+  --sources jooble,adzuna \
+  --target-jobs 100 \
+  --max-rounds 10 \
+  --strict
+```
+
+Collector kończy całą rundę round-robin zanim sprawdzi `target_jobs`, więc każde aktywne źródło ma szansę wykonać swoją stronę w rundzie. Liczba ofert może przez to lekko przekroczyć target.
+
+Collection `--strict` wymaga nie tylko osiągnięcia łącznego targetu, lecz także `source_health_ready=true`: każde żądane źródło musi wykonać udany run, nie może być disabled i musi zwrócić co najmniej jedną ofertę. Przejściowe błędy pozostają raportowane osobno.
+
+Manualny GitHub Actions workflow `.github/workflows/collection-smoke.yml` tworzy artifact z preflightem, bazą, raportem i datasetem v8. Nie wymaga `BRAVE_SEARCH_API_KEY`.
+
+Szczegóły: [`docs/COLLECTION_SMOKE.md`](docs/COLLECTION_SMOKE.md).
+
 ## Kontrolowany benchmark end-to-end
 
 Najpierw można sprawdzić konfigurację bez wypisywania wartości sekretów:
 
 ```bash
 agregator-benchmark preflight \
-  --sources olx,jooble,adzuna \
+  --sources jooble,adzuna \
   --strict
 ```
 
@@ -135,12 +181,14 @@ Pełny workflow:
 agregator-benchmark run \
   --db benchmark/benchmark.sqlite3 \
   --output-dir benchmark/run \
-  --sources olx,jooble,adzuna \
+  --sources jooble,adzuna \
   --target-jobs 1000 \
   --max-rounds 100 \
   --enrichment-batch-size 25 \
   --max-enrichment-companies 1000
 ```
+
+Źródło oznaczone jako eksperymentalne wymaga jawnego `--allow-experimental-sources`.
 
 Workflow wykonuje:
 
@@ -157,6 +205,8 @@ collection
 ```
 
 Opcja `--strict` ustawia kod wyjścia `2`, jeśli nie osiągnięto targetu albo enrichment nie został domknięty. `benchmark_run_manifest.json` przechowuje `readiness` i listę blockerów. `ready_for_manual_labeling=true` oznacza gotowość do ręcznego labelingu, a nie przejście quality gate.
+
+Pełny benchmark pozostaje resumowalny: jeżeli baza ma już osiągnięty target kolekcji, można kontynuować enrichment bez wymuszania ponownego live smoke źródeł. Source-health gate należy wykonywać osobno przez `agregator-collect`.
 
 Szczegóły: [`docs/BENCHMARK_RUN.md`](docs/BENCHMARK_RUN.md).
 
@@ -230,7 +280,7 @@ Domyślne progi:
 
 `website_resolution_truth.csv` zawiera latest verification provenance, dzięki czemu można powiązać etykietę z zachowanymi snapshotami strony. Ewaluator kontaktów raportuje również `decision_by_kind` z osobnymi metrykami dla `email` i `form`.
 
-## Eksport Faro — schema v7
+## Eksport Faro — schema v8
 
 ```bash
 agregator export-dataset \
@@ -244,7 +294,9 @@ Powstają:
 companies.csv
 job_postings.csv
 company_identifiers.csv
+company_identifier_observations.csv
 company_website_candidates.csv
+company_website_candidate_observations.csv
 contact_channels.csv
 website_verification_runs.csv
 contact_evidence_snapshots.csv
@@ -252,6 +304,8 @@ contact_evidence_observations.csv
 website_page_snapshots.csv
 manifest.json
 ```
+
+`company_identifier_observations.csv` i `company_website_candidate_observations.csv` zachowują osobno `job_source` oraz dokładne `evidence_source`. Dzięki temu kilka portali może dostać własne provenance/credit za dostarczenie tego samego NIP, REGON lub URL firmy.
 
 `website_page_snapshots.csv` jest spłaszczonym offline evidence z audit trailu. Zawiera także snapshoty odrzuconych `WebsiteVerificationAttempt`, hash SHA-256, URL, status HTTP, excerpt oraz provenance próby. Nie wymaga ponownego crawlowania strony podczas późniejszego labelingu.
 
@@ -278,11 +332,13 @@ agregator export-green --db agregator.sqlite3 --output green.csv
 
 - plan: [`docs/PLAN.md`](docs/PLAN.md),
 - status wdrożenia: [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md),
-- benchmark end-to-end: [`docs/BENCHMARK_RUN.md`](docs/BENCHMARK_RUN.md).
+- collection smoke: [`docs/COLLECTION_SMOKE.md`](docs/COLLECTION_SMOKE.md),
+- benchmark end-to-end: [`docs/BENCHMARK_RUN.md`](docs/BENCHMARK_RUN.md),
+- benchmark w GitHub Actions: [`docs/BENCHMARK_ACTIONS.md`](docs/BENCHMARK_ACTIONS.md).
 
 ## Zasady projektu
 
-1. Publiczne dane i publiczne strony.
+1. Publiczne dane i autoryzowane źródła partnerskie/API.
 2. Brak omijania logowania, CAPTCHA, paywalli i kontroli dostępu.
 3. Każdy wynik kontaktowy ma provenance/evidence.
 4. Sama obecność e-maila nie oznacza `GREEN`.
