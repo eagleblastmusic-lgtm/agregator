@@ -13,6 +13,7 @@ IMPLEMENTED_ADAPTERS: dict[int, str] = {
     10: "justjoinit",
     11: "nofluffjobs",
     12: "theprotocol",
+    13: "bulldogjob",
     16: "rocketjobs",
     20: "epraca",
     21: "kprm",
