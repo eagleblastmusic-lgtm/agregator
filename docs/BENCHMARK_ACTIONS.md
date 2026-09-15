@@ -64,7 +64,7 @@ preflight --strict
 controlled benchmark --strict
           │
           ▼
-export source identity diagnostics
+source diagnostics
           │
           ▼
 upload workspace artifact
@@ -77,7 +77,60 @@ Workspace jest inicjalizowany **przed** preflightem. Dzięki temu nawet błąd k
 
 Sam run benchmarku zapisuje swój kod wyjścia do `benchmark/exit_code.txt`. Standardowy JSON zwracany przez CLI trafia do `benchmark/run_result.json`; właściwe dane benchmarku są nadal zapisywane w `benchmark/run/` przez samą aplikację.
 
-Po runie workflow generuje również `benchmark/source_identity_metrics.json` z diagnostyką jakości rekordów per źródło: liczba ofert i firm, company-to-job ratio, średnie confidence nazwy firmy i Company Resolution, coverage miasta/opisu oraz rozkład metod resolution. To raport diagnostyczny do oceny wartości źródeł; nie jest automatycznym rankingiem ani quality gate.
+## Source diagnostics
+
+Po utworzeniu bazy workflow uruchamia:
+
+```bash
+agregator-benchmark source-diagnostics \
+  --db benchmark/benchmark.sqlite3
+```
+
+Wynik trafia do:
+
+```text
+benchmark/source_diagnostics.json
+```
+
+Sekcja `identity` opisuje jakość rekordów ofertowych per źródło, m.in. confidence nazwy firmy, confidence Company Resolution, coverage miasta/opisu i rozkład metod resolution.
+
+Sekcja `provenance` odpowiada na inne pytanie: **które źródło faktycznie dostarczyło jawne dane pracodawcy**, np. NIP/REGON lub kandydat oficjalnej strony WWW. W tym celu silnik utrzymuje osobne observation tables:
+
+```text
+company_identifier_observations
+company_website_candidate_observations
+```
+
+Każda obserwacja zachowuje jednocześnie:
+
+```text
+job_source
++ evidence_source
++ company_id
++ wartość / URL
++ confidence
++ observation_count
+```
+
+Dzięki temu, jeśli dwie integracje dostarczą ten sam NIP lub tę samą stronę firmy, obie dostają własny credit w diagnostyce. Nie trzeba zgadywać źródła na podstawie ogólnego pola typu `official_feed.nip`.
+
+Przykładowe metryki provenance per źródło:
+
+```text
+identifier_observations
+identifiers
+companies_with_identifiers
+identifier_company_rate
+identifier_kinds
+identifier_evidence_sources
+website_candidate_observations
+website_candidates
+companies_with_website_candidates
+website_candidate_company_rate
+website_evidence_sources
+```
+
+To nadal nie jest jeden arbitralny `Source Value Score`. Po realnym benchmarku wolumen, exclusivity/overlap, identity quality, jawne employer evidence, stabilność i koszt runtime powinny być analizowane osobno.
 
 ## Artifact
 
@@ -95,7 +148,7 @@ preflight_exit_code.txt
 exit_code.txt
 run_result.json
 run_skipped.txt
-source_identity_metrics.json
+source_diagnostics.json
 benchmark.sqlite3
 run/collection.json
 run/enrichment.json
@@ -105,7 +158,7 @@ run/dataset/*
 run/labels/*
 ```
 
-`run_skipped.txt` występuje tylko wtedy, gdy preflight nie przeszedł. `run_result.json`, `source_identity_metrics.json` i katalog `run/` powstają dopiero po wejściu we właściwy benchmark.
+`run_skipped.txt` występuje tylko wtedy, gdy preflight nie przeszedł. `run_result.json` i katalog `run/` powstają dopiero po wejściu we właściwy benchmark. `source_diagnostics.json` powstaje, jeśli baza benchmarkowa została utworzona.
 
 Baza i eksport zawierają dane pozyskane podczas benchmarku, dlatego artefaktu nie należy traktować jako pliku do publicznego rozpowszechniania bez wcześniejszego przeglądu danych i warunków źródeł.
 
