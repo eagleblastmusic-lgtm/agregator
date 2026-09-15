@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from .base import JobSource
@@ -15,6 +15,8 @@ class SourceRegistration:
     access_mode: str = "unspecified"
     experimental: bool = False
     notes: str | None = None
+    required_env: tuple[str, ...] = ()
+    configuration_env: tuple[str, ...] = ()
 
 
 class SourceRegistry:
@@ -29,6 +31,8 @@ class SourceRegistry:
         access_mode: str = "unspecified",
         experimental: bool = False,
         notes: str | None = None,
+        required_env: Iterable[str] = (),
+        configuration_env: Iterable[str] = (),
     ) -> None:
         normalized = name.strip().lower()
         if not normalized:
@@ -39,6 +43,8 @@ class SourceRegistry:
             access_mode=access_mode.strip() or "unspecified",
             experimental=experimental,
             notes=notes.strip() if notes else None,
+            required_env=_normalize_env_names(required_env),
+            configuration_env=_normalize_env_names(configuration_env),
         )
 
     def create(self, name: str) -> JobSource:
@@ -57,3 +63,15 @@ class SourceRegistry:
 
     def registrations(self) -> list[SourceRegistration]:
         return [self._registrations[name] for name in self.names()]
+
+
+def _normalize_env_names(values: Iterable[str]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        name = value.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        normalized.append(name)
+    return tuple(normalized)
