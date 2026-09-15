@@ -11,12 +11,17 @@ Projekt **nie wysyła wiadomości**, nie omija logowania ani zabezpieczeń porta
 ## Aktualny zakres M0/M1
 
 - modele danych dla ofert, firm, kanałów kontaktu i dowodów,
-- kontrakt `JobSource` dla wielu portali pracy,
-- pierwszy adapter `OlxPublicSource`,
-- resumowalne pobieranie stron wyników przez cursor/offset,
-- SQLite: `companies`, `job_postings`, `contact_channels`, `source_state`,
+- wspólny kontrakt `JobSource` i `SourceRegistry`,
+- adapter `OlxPublicSource`,
+- adapter `JoobleApiSource` oparty o oficjalne REST API,
+- adapter `AdzunaApiSource` oparty o oficjalne REST API,
+- katalog 91 źródeł z master-listy w `config/source_catalog.tsv`,
+- resumowalne pobieranie przez cursor/offset/page,
+- historia każdego uruchomienia źródła i metryki błędów,
+- SQLite: `companies`, `job_postings`, `contact_channels`, `source_state`, `source_runs`,
 - podstawowa deduplikacja firm,
-- confidence źródła nazwy firmy,
+- provenance i confidence źródła nazwy firmy,
+- importer CSV do benchmarków wieloźródłowych,
 - wyszukiwanie oficjalnej strony przez wymienny `SearchProvider`,
 - opcjonalny provider Brave Search API,
 - resolver domeny z oceną dopasowania,
@@ -27,7 +32,7 @@ Projekt **nie wysyła wiadomości**, nie omija logowania ani zabezpieczeń porta
   „oferty handlowe”, „dla dostawców”,
 - zachowywanie `evidence_url`, `evidence_text` i confidence,
 - kolejka firm do enrichmentu z minimalnym confidence tożsamości,
-- testy jednostkowe i CI.
+- testy jednostkowe i GitHub Actions CI.
 
 ## Instalacja
 
@@ -35,13 +40,7 @@ Projekt **nie wysyła wiadomości**, nie omija logowania ani zabezpieczeń porta
 python -m venv .venv
 . .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 pip install -e ".[dev]"
-```
-
-Opcjonalnie ustaw klucz wyszukiwarki:
-
-```bash
 cp .env.example .env
-# BRAVE_SEARCH_API_KEY=...
 ```
 
 ## Użycie
@@ -52,31 +51,81 @@ cp .env.example .env
 agregator db-init --db agregator.sqlite3
 ```
 
-### 2. Pobranie publicznych ofert OLX Praca
-
-Pierwsza strona:
+### 2. Dostępne adaptery
 
 ```bash
-agregator collect-olx --db agregator.sqlite3 --pages 1
+agregator sources
 ```
 
-Kolejne uruchomienie wznawia pracę od zapisanego kursora. Aby zacząć od początku:
+Aktualnie: `olx`, `jooble`, `adzuna`.
+
+### 3. OLX Praca
 
 ```bash
-agregator collect-olx --db agregator.sqlite3 --pages 2 --fresh
+agregator collect-olx --db agregator.sqlite3 --pages 2
 ```
 
-Adapter OLX korzysta wyłącznie z publicznego webowego źródła danych. Przed wdrożeniem produkcyjnym sposób dostępu do każdego portalu musi zostać ponownie zweryfikowany technicznie i regulaminowo.
+Kolejne uruchomienie wznawia pracę od zapisanego offsetu. `--fresh` rozpoczyna od początku.
 
-### 3. Podgląd wykrytych firm
+Adapter zapisuje provenance nazwy firmy. Imię konta lub osoby kontaktowej ma niski confidence i domyślnie nie trafia do automatycznego enrichmentu.
+
+### 4. Jooble REST API
+
+Wymaga regionalnego klucza `JOOBLE_API_KEY`.
+
+```bash
+agregator collect-jooble \
+  --keywords "sprzedawca" \
+  --location "Polska" \
+  --pages 2
+```
+
+Jooble jest źródłem agregującym, dlatego jego rekordy będą później podlegały mocniejszej deduplikacji z ofertami źródłowymi.
+
+### 5. Adzuna REST API
+
+Wymaga `ADZUNA_APP_ID` i `ADZUNA_APP_KEY`.
+
+```bash
+agregator collect-adzuna \
+  --country pl \
+  --what "python" \
+  --where "Polska" \
+  --pages 2
+```
+
+### 6. Uniwersalny collector
+
+Źródła skonfigurowane przez zmienne środowiskowe można uruchomić wspólnym interfejsem:
+
+```bash
+agregator collect --source jooble --pages 1
+agregator collect --source adzuna --pages 1
+```
+
+### 7. Historia runów
+
+```bash
+agregator runs --source olx --limit 20
+```
+
+Każdy run zapisuje status, kursory, liczbę stron, liczbę ofert, insert/update, nowe firmy i skrócony błąd.
+
+### 8. Import benchmarku CSV
+
+Minimalne kolumny: `url,title,company_name`.
+
+```bash
+agregator import-csv --path jobs.csv --db agregator.sqlite3
+```
+
+### 9. Podgląd wykrytych firm
 
 ```bash
 agregator companies --db agregator.sqlite3 --limit 50
 ```
 
-Firmy, których nazwa pochodzi wyłącznie z niskiej jakości fallbacku, np. nazwy konta osoby prywatnej, dostają niższy `identity_confidence` i domyślnie nie trafiają do automatycznego enrichmentu.
-
-### 4. Znalezienie oficjalnych stron i kanałów B2B
+### 10. Znalezienie oficjalnych stron i kanałów B2B
 
 Wymaga `BRAVE_SEARCH_API_KEY`:
 
@@ -86,7 +135,7 @@ agregator enrich-db --db agregator.sqlite3 --limit 20
 
 Domyślnie przetwarzane są firmy z `identity_confidence >= 0.7`.
 
-### 5. Wyniki GREEN
+### 11. Wyniki GREEN
 
 ```bash
 agregator green --db agregator.sqlite3 --limit 100
@@ -96,17 +145,22 @@ Każdy wynik zawiera źródło dowodu i tekst kontekstu, w którym kontakt zosta
 
 ### Pojedyncza znana firma
 
-Bez wyszukiwarki — skan znanej domeny:
-
 ```bash
 agregator scan-url --company "Przykładowa Firma" --url https://example.com
-```
-
-Z providerem wyszukiwania:
-
-```bash
 agregator discover --company "Przykładowa Firma" --city Gdynia
 ```
+
+## Katalog źródeł
+
+`config/source_catalog.tsv` zawiera 91 źródeł z przygotowanej master-listy wraz z priorytetem, typem, stanem publicznego API i rekomendowanym sposobem integracji.
+
+Kolejność wdrażania jest świadomie różna od prostego „scrapuj wszystko”:
+
+1. API/feed/partnerstwo,
+2. źródła oficjalne,
+3. publiczny HTML po audycie ToS/robots,
+4. Playwright tylko gdy jest potrzebny i zgodny z zasadami dostępu,
+5. źródła partnerskie lub ograniczone nie są zastępowane obchodzeniem zabezpieczeń.
 
 ## Ważne ograniczenie adaptera OLX
 
