@@ -13,7 +13,7 @@ from .company_websites import init_company_website_candidate_schema
 from .employer_score import rank_companies
 from .storage import SQLiteStore
 
-EXPORT_SCHEMA_VERSION = "6"
+EXPORT_SCHEMA_VERSION = "7"
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +26,7 @@ class DatasetExportResult:
     contacts_path: Path
     website_verifications_path: Path
     evidence_snapshots_path: Path
+    evidence_observations_path: Path
     website_snapshots: WebsiteSnapshotExportResult
     manifest_path: Path
     companies: int
@@ -35,6 +36,7 @@ class DatasetExportResult:
     contacts: int
     website_verifications: int
     evidence_snapshots: int
+    evidence_observations: int
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +48,7 @@ class DatasetExportResult:
             "contacts_path": str(self.contacts_path),
             "website_verifications_path": str(self.website_verifications_path),
             "evidence_snapshots_path": str(self.evidence_snapshots_path),
+            "evidence_observations_path": str(self.evidence_observations_path),
             "website_snapshots": self.website_snapshots.to_dict(),
             "manifest_path": str(self.manifest_path),
             "companies": self.companies,
@@ -55,6 +58,7 @@ class DatasetExportResult:
             "contacts": self.contacts,
             "website_verifications": self.website_verifications,
             "evidence_snapshots": self.evidence_snapshots,
+            "evidence_observations": self.evidence_observations,
             "schema_version": EXPORT_SCHEMA_VERSION,
         }
 
@@ -79,6 +83,7 @@ def export_dataset_bundle(
     contacts_path = directory / "contact_channels.csv"
     website_verifications_path = directory / "website_verification_runs.csv"
     evidence_snapshots_path = directory / "contact_evidence_snapshots.csv"
+    evidence_observations_path = directory / "contact_evidence_observations.csv"
     website_snapshots_path = directory / "website_page_snapshots.csv"
     manifest_path = directory / "manifest.json"
 
@@ -259,6 +264,32 @@ def export_dataset_bundle(
                 """
             ).fetchall()
         ]
+        evidence_observations = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT
+                    o.id AS observation_id,
+                    o.website_verification_run_id,
+                    o.contact_channel_id,
+                    o.company_id,
+                    c.canonical_name,
+                    o.snapshot_id,
+                    s.content_sha256,
+                    o.decision,
+                    o.purpose,
+                    o.confidence,
+                    o.evidence_url,
+                    o.evidence_signal,
+                    o.snapshot_changed,
+                    o.captured_at
+                FROM contact_evidence_observations o
+                JOIN companies c ON c.id = o.company_id
+                JOIN contact_evidence_snapshots s ON s.id = o.snapshot_id
+                ORDER BY o.id ASC
+                """
+            ).fetchall()
+        ]
 
     for company in companies:
         score = score_by_company.get(int(company["company_id"]))
@@ -286,6 +317,11 @@ def export_dataset_bundle(
         evidence_snapshots,
         _evidence_snapshot_fields(),
     )
+    _write_csv(
+        evidence_observations_path,
+        evidence_observations,
+        _evidence_observation_fields(),
+    )
     website_snapshots = export_website_page_snapshots(store, website_snapshots_path)
 
     manifest = {
@@ -298,6 +334,7 @@ def export_dataset_bundle(
             "contact_channels": contacts_path.name,
             "website_verification_runs": website_verifications_path.name,
             "contact_evidence_snapshots": evidence_snapshots_path.name,
+            "contact_evidence_observations": evidence_observations_path.name,
             "website_page_snapshots": website_snapshots.path.name,
         },
         "counts": {
@@ -308,6 +345,7 @@ def export_dataset_bundle(
             "contact_channels": len(contacts),
             "website_verification_runs": len(website_verifications),
             "contact_evidence_snapshots": len(evidence_snapshots),
+            "contact_evidence_observations": len(evidence_observations),
             "website_page_snapshots": website_snapshots.rows,
             "website_page_snapshot_parse_errors": website_snapshots.parse_errors,
         },
@@ -328,6 +366,10 @@ def export_dataset_bundle(
                 "0-100 prioritization score; separate from identity/contact confidence"
             ),
             "contact_decision": "green/review/ignore is preserved with evidence provenance",
+            "contact_evidence_observations": (
+                "append-only per-run timeline linking classification to immutable snapshots; "
+                "snapshot_changed marks evidence-content transitions"
+            ),
             "website_audit": (
                 "website_verification_runs keeps ranked candidates and per-candidate attempts"
             ),
@@ -353,6 +395,7 @@ def export_dataset_bundle(
         contacts_path=contacts_path,
         website_verifications_path=website_verifications_path,
         evidence_snapshots_path=evidence_snapshots_path,
+        evidence_observations_path=evidence_observations_path,
         website_snapshots=website_snapshots,
         manifest_path=manifest_path,
         companies=len(companies),
@@ -362,6 +405,7 @@ def export_dataset_bundle(
         contacts=len(contacts),
         website_verifications=len(website_verifications),
         evidence_snapshots=len(evidence_snapshots),
+        evidence_observations=len(evidence_observations),
     )
 
 
@@ -492,5 +536,24 @@ def _evidence_snapshot_fields() -> list[str]:
         "evidence_text",
         "evidence_signal",
         "content_sha256",
+        "captured_at",
+    ]
+
+
+def _evidence_observation_fields() -> list[str]:
+    return [
+        "observation_id",
+        "website_verification_run_id",
+        "contact_channel_id",
+        "company_id",
+        "canonical_name",
+        "snapshot_id",
+        "content_sha256",
+        "decision",
+        "purpose",
+        "confidence",
+        "evidence_url",
+        "evidence_signal",
+        "snapshot_changed",
         "captured_at",
     ]
