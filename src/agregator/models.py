@@ -28,6 +28,12 @@ class Decision(StrEnum):
     IGNORE = "ignore"
 
 
+class WebsiteResolutionOrigin(StrEnum):
+    SOURCE_CANDIDATE = "source_candidate"
+    SEARCH = "search"
+    KNOWN_URL = "known_url"
+
+
 class Evidence(BaseModel):
     url: str
     text: str
@@ -65,6 +71,8 @@ class WebsiteVerificationAttempt(BaseModel):
     search_score: float = Field(ge=0.0, le=1.0)
     content_score: float = Field(ge=0.0, le=1.0)
     name_coverage: float = Field(ge=0.0, le=1.0)
+    origin: WebsiteResolutionOrigin | None = None
+    source: str | None = None
     signals: list[str] = Field(default_factory=list)
     scanned_pages: list[str] = Field(default_factory=list)
     page_snapshots: list[PageSnapshot] = Field(default_factory=list)
@@ -76,6 +84,8 @@ class CompanyIdentity(BaseModel):
     website_url: str | None = None
     domain: str | None = None
     website_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    website_resolution_origin: WebsiteResolutionOrigin | None = None
+    website_resolution_source: str | None = None
     website_verification_signals: list[str] = Field(default_factory=list)
 
 
