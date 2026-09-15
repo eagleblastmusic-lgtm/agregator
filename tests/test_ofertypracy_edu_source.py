@@ -6,8 +6,10 @@ import pytest
 
 from agregator.sources.ofertypracy_edu import (
     OfertyPracyEduPublicSource,
+    build_region_listing_url,
     extract_listing_offer_links,
     extract_offer_links,
+    extract_voivodeship_ids,
     parse_offer_detail,
 )
 
@@ -26,8 +28,25 @@ def _inertia_page(component: str, props: dict) -> str:
     return f'<html><body><div id="app" data-page="{escaped}"></div></body></html>'
 
 
+def _home(*region_ids: str) -> str:
+    return _inertia_page(
+        "Home/Search/SearchIndex",
+        {
+            "voivodeships": [
+                {"id": region_id, "name": f"Region {region_id}"}
+                for region_id in region_ids
+            ],
+            "offers": {
+                "data": [],
+                "meta": {"current_page": 1, "last_page": 1, "total": 0},
+            },
+        },
+    )
+
+
 @pytest.mark.asyncio
-async def test_source_collects_public_inertia_education_offer() -> None:
+async def test_source_collects_public_regional_inertia_offer() -> None:
+    home = _home("02", "04")
     listing = _inertia_page(
         "Home/Search/SearchIndex",
         {
@@ -41,7 +60,7 @@ async def test_source_collects_public_inertia_education_offer() -> None:
                         "rspo": {"city": "Warszawa"},
                     }
                 ],
-                "meta": {"current_page": 1, "last_page": 2, "total": 2},
+                "meta": {"current_page": 1, "last_page": 2, "total": 26},
             }
         },
     )
@@ -74,13 +93,15 @@ async def test_source_collects_public_inertia_education_offer() -> None:
         "profession": None,
     }
     detail = _inertia_page("Home/Search/OfferShow", {"offer": offer})
-    listing_queries: list[dict[str, str]] = []
+    regional_queries: list[dict[str, str]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
             return httpx.Response(200, text="User-agent: *\nAllow: /\n")
+        if request.url.path == "/" and "filter[rspo.voivodeship_id]" not in request.url.params:
+            return httpx.Response(200, text=home)
         if request.url.path == "/":
-            listing_queries.append(dict(request.url.params.multi_items()))
+            regional_queries.append(dict(request.url.params.multi_items()))
             return httpx.Response(200, text=listing)
         if request.url.path == "/oferty/313542":
             return httpx.Response(200, text=detail)
@@ -90,15 +111,16 @@ async def test_source_collects_public_inertia_education_offer() -> None:
         source = OfertyPracyEduPublicSource(client=client, request_delay=0)
         batch = await source.collect()
 
-    assert listing_queries == [
+    assert regional_queries == [
         {
+            "filter[rspo.voivodeship_id]": "02",
             "page": "1",
             "per_page": "25",
             "search": "1",
             "sort": "-published_at",
         }
     ]
-    assert batch.next_cursor == "2"
+    assert batch.next_cursor == "0:2"
     assert len(batch.jobs) == 1
     job = batch.jobs[0]
     assert job.source == "ofertypracyedu"
@@ -111,12 +133,14 @@ async def test_source_collects_public_inertia_education_offer() -> None:
     assert "rekrutacja@szkola.example" in job.source_payload["recruitment_emails"]
     assert job.source_payload["recruitment_phones"]
     assert job.company_website_candidates[0].url == "https://www.szkola.example/"
+    assert len(job.company_website_candidates) == 1
     assert job.source_payload["public_inertia_offer"]["id"] == 313542
 
 
 @pytest.mark.asyncio
-async def test_source_treats_zero_total_inertia_listing_as_truthful_empty() -> None:
-    listing = _inertia_page(
+async def test_source_advances_from_last_page_to_next_voivodeship() -> None:
+    home = _home("02", "04")
+    empty_region = _inertia_page(
         "Home/Search/SearchIndex",
         {
             "offers": {
@@ -125,20 +149,28 @@ async def test_source_treats_zero_total_inertia_listing_as_truthful_empty() -> N
             }
         },
     )
+    requested_regions: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
             return httpx.Response(200, text="User-agent: *\nAllow: /\n")
+        if request.url.path == "/" and "filter[rspo.voivodeship_id]" not in request.url.params:
+            return httpx.Response(200, text=home)
         if request.url.path == "/":
-            return httpx.Response(200, text=listing)
+            requested_regions.append(request.url.params["filter[rspo.voivodeship_id]"])
+            return httpx.Response(200, text=empty_region)
         return httpx.Response(404)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         source = OfertyPracyEduPublicSource(client=client, request_delay=0)
-        batch = await source.collect()
+        first = await source.collect()
+        second = await source.collect(first.next_cursor)
 
-    assert batch.jobs == []
-    assert batch.next_cursor is None
+    assert requested_regions == ["02", "04"]
+    assert first.jobs == []
+    assert first.next_cursor == "1:1"
+    assert second.jobs == []
+    assert second.next_cursor is None
 
 
 @pytest.mark.asyncio
@@ -154,6 +186,20 @@ async def test_source_respects_robots() -> None:
             await source.collect()
 
 
+def test_build_region_listing_url_uses_public_search_parameters() -> None:
+    url = httpx.URL(build_region_listing_url("14", 3))
+
+    assert url.params["filter[rspo.voivodeship_id]"] == "14"
+    assert url.params["page"] == "3"
+    assert url.params["per_page"] == "25"
+    assert url.params["search"] == "1"
+    assert url.params["sort"] == "-published_at"
+
+
+def test_extract_voivodeship_ids_reads_public_inertia_dictionary() -> None:
+    assert extract_voivodeship_ids(_home("02", "04", "14")) == ["02", "04", "14"]
+
+
 def test_extract_listing_links_reads_public_inertia_records() -> None:
     listing = _inertia_page(
         "Home/Search/SearchIndex",
@@ -165,7 +211,7 @@ def test_extract_listing_links_reads_public_inertia_records() -> None:
         },
     )
 
-    links, next_cursor = extract_listing_offer_links(
+    links, next_page = extract_listing_offer_links(
         "https://ofertypracy.edu.pl/?page=2",
         listing,
     )
@@ -174,7 +220,7 @@ def test_extract_listing_links_reads_public_inertia_records() -> None:
         "https://ofertypracy.edu.pl/oferty/159256",
         "https://ofertypracy.edu.pl/oferty/159257",
     ]
-    assert next_cursor == "3"
+    assert next_page == "3"
 
 
 def test_extract_offer_links_keeps_only_legacy_portal_offer_paths() -> None:
