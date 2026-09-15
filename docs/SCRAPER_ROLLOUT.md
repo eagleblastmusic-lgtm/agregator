@@ -33,8 +33,8 @@ Master catalog: **91 źródeł**.
 Aktualnie:
 
 ```text
-adaptery zaimplementowane: 15
-pozostałe:                76
+adaptery zaimplementowane: 16
+pozostałe:                75
 ```
 
 Zaimplementowane adaptery:
@@ -46,6 +46,7 @@ Zaimplementowane adaptery:
 | OLX Praca | `olx` | public web endpoint | experimental |
 | Just Join IT | `justjoinit` | public HTML | experimental |
 | No Fluff Jobs | `nofluffjobs` | public HTML | experimental |
+| theprotocol.it | `theprotocol` | public HTML | experimental |
 | RocketJobs | `rocketjobs` | public HTML | experimental |
 | ePraca / CBOP | `epraca` | official partner feed | implemented |
 | Nabory KPRM | `kprm` | official public HTML | experimental |
@@ -127,7 +128,7 @@ Adapter `ngo` został dodany jako pierwszy nowy A1:
 
 ### Aplikuj.pl
 
-Adapter `aplikuj` jest kolejnym A1:
+Adapter `aplikuj`:
 
 - publiczny listing `/praca` oraz paginacja `/praca/strona-N`,
 - publiczne szczegóły `/oferta/<id>/<slug>`,
@@ -136,6 +137,17 @@ Adapter `aplikuj` jest kolejnym A1:
 - jawny NIP z treści ogłoszenia, jeżeli portal go publikuje,
 - URL profilu pracodawcy zachowany w `source_payload`,
 - pełny widoczny tekst zachowany jako source evidence,
+- robots check, retry i request delay.
+
+### theprotocol.it
+
+Adapter `theprotocol`:
+
+- publiczny listing `/praca` z numerem strony w `pageNumber`,
+- rozpoznawanie publicznych URL ofert `/praca/...oferta...` i `/szczegoly/praca/...oferta...`,
+- preferowany JSON-LD `JobPosting`,
+- fallback HTML dla nazwy firmy/lokalizacji,
+- source-specific dane zachowane bez cross-source deduplikacji,
 - robots check, retry i request delay.
 
 ### Następne A1
@@ -154,7 +166,7 @@ Pobranie wybranych źródeł:
 
 ```bash
 agregator-scrape run \
-  --sources kprm,ofertypracyedu,ngo,aplikuj \
+  --sources kprm,ofertypracyedu,ngo,aplikuj,theprotocol \
   --pages-per-source 1 \
   --db agregator.sqlite3 \
   --strict
