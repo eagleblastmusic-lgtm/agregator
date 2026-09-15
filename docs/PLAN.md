@@ -42,61 +42,136 @@ WSZYSTKIE POZNANE ŹRÓDŁA PRACY
 
 Repo nie wysyła wiadomości. Outreach pozostaje poza zakresem kolektora.
 
----
-
-## 2. Niezmienne zasady danych
+## 2. Twarde zasady danych
 
 1. Każdy rekord zwrócony przez każdy portal jest wartościową obserwacją źródłową.
 2. Ta sama firma i ta sama oferta mogą występować wielokrotnie na różnych portalach.
 3. Nie wykonujemy cross-source deduplikacji ofert.
-4. Ponowne odczytanie rekordu może zostać zachowane jako kolejna obserwacja historyczna.
-5. `job_posting_observations` jest append-only.
-6. `job_postings` jest tylko bieżącym widokiem `(source, source_id)`; nie jest warstwą utraty danych.
-7. Company Resolution tworzy relację/powiązanie do firmy; nie usuwa rekordów źródłowych.
-8. Dane o firmie z różnych portali mogą się uzupełniać i muszą zachować provenance.
-9. Finalna konsolidacja do jednej firmy następuje dopiero w widoku biznesowym/Excelu.
+4. `job_posting_observations` jest append-only i zachowuje historię kolejnych odczytów.
+5. `job_postings` jest tylko bieżącym widokiem `(source, source_id)`.
+6. `JobPosting.source_payload` zachowuje dane specyficzne dla źródła.
+7. Company Resolution tworzy powiązanie do firmy, ale nie usuwa rekordów źródłowych.
+8. Dane firmy z różnych portali mogą się uzupełniać i muszą zachować provenance.
+9. Konsolidacja `1 firma = 1 wiersz` następuje dopiero w finalnym Excelu.
 10. Kontakt rekrutacyjny z ogłoszenia nie jest automatycznie kanałem współpracy `GREEN`.
-11. Do finalnego Excela trafiają firmy z kwalifikowanym kanałem `GREEN` i zachowanym dowodem.
-
----
+11. Finalny Excel wymaga kwalifikowanego kanału `GREEN` i zachowanego dowodu.
 
 ## 3. Zasady dostępu do źródeł
 
-- Używamy publicznie dostępnych stron, jawnych sitemap/feedów oraz autoryzowanych źródeł partnerskich, gdy są przydatne.
-- API jest opcjonalną metodą pobierania danych, a nie warunkiem produktu.
-- Nie obchodzimy logowania, CAPTCHA, paywalli, anty-botów ani kontroli dostępu.
-- Każdy scraper publicznych stron sprawdza `robots.txt`.
-- Jeżeli jawne warunki źródła zabraniają planowanego wykorzystania albo status prawny jest niejasny, źródło trafia do `HOLD`.
-- Adapter ma czytelny failure state; nie próbuje ukrywać swojej tożsamości ani omijać ograniczeń.
+- priorytetem są publiczne strony HTML, jawne sitemap/feed oraz oficjalne źródła,
+- API jest opcjonalną metodą pobierania, a nie warunkiem produktu,
+- nie obchodzimy logowania, CAPTCHA, paywalli, anty-botów ani kontroli dostępu,
+- publiczne scrapery sprawdzają `robots.txt`,
+- niejasne lub niedozwolone ścieżki trafiają do `HOLD`,
+- adapter ma czytelny failure state i nie próbuje ukrywać swojej tożsamości.
 
----
-
-## 4. Stan funkcjonalny
+## 4. Stan etapów
 
 ```text
-P0  zasady raw-data / no cross-source dedup        DONE
-P1  katalog źródeł 91                              DONE baseline
-P2  wspólny silnik scraperów                       DONE baseline
-P3  rollout scraperów źródło po źródle             IN PROGRESS  ◀ TERAZ
-P4  append-only raw database                       DONE baseline
-P5  Company Resolution / linking                   V1 DONE
-P6  official website resolution                    V1 DONE
-P7  first-party website crawler                    DONE baseline
-P8  contact intent classification                  DONE baseline
-P9  finalny Excel 1 firma = 1 wiersz               DONE baseline
+P0  raw-data invariant / no cross-source dedup      DONE
+P1  master catalog 91                               DONE baseline
+P2  wspólny silnik publicznych scraperów            DONE baseline
+P3  rollout scraperów źródło po źródle              IN PROGRESS  ◀ TERAZ
+P4  append-only raw database                        DONE baseline
+P5  Company Resolution / linking                    V1 DONE
+P6  official website resolution                     V1 DONE
+P7  first-party website crawler                     DONE baseline
+P8  contact intent classification                   DONE baseline
+P9  finalny Excel 1 firma = 1 wiersz                DONE baseline
 P10 quality control / benchmark                     infrastructure DONE
 P11 pełny resumowalny run wszystkich źródeł         PLANNED after wider coverage
 ```
 
-Największym bieżącym zadaniem jest **pokrycie źródeł scraperami**, a nie rozszerzanie benchmarków czy uzależnianie kolektora od partner API.
+## 5. P1/P3 — katalog i rollout źródeł
 
----
+Master catalog zawiera **91 źródeł**:
 
-## 5. P0/P4 — pełna warstwa surowa
+```text
+A0  14
+A1  36
+B   24
+C   17
+```
 
-Status: **DONE baseline**.
+Aktualnie mamy **17/91 adapterów**, więc **74 źródła pozostają**.
 
-Przed normalizowanym upsertem ingest wykonuje:
+```text
+pracuj
+aplikuj
+olx
+justjoinit
+nofluffjobs
+theprotocol
+bulldogjob
+rocketjobs
+epraca
+kprm
+jooble
+careerjet
+ngo
+karierawfinansach
+skillshot
+ofertypracyedu
+adzuna
+```
+
+Publiczne adaptery pozostają `experimental`, dopóki nie przejdą kontrolowanego realnego smoke oraz audytu pełnej paginacji i bieżących warunków źródła.
+
+### A0
+
+Po wdrożeniu dozwolonych/publicznych ścieżek trzy A0 pozostają świadomie na `HOLD`:
+
+```text
+Praca.pl       HOLD — potrzebne pozytywne rozstrzygnięcie warunków/uprawnienia
+LinkedIn       HOLD — brak obchodzenia ograniczeń
+Indeed         HOLD — brak obchodzenia anty-bot/login
+```
+
+### A1
+
+Rollout A1 jest rozpoczęty. Najnowsze adaptery:
+
+- `ngo` — publiczna kategoria NGO.pl z ofertami pracy/współpracy,
+- `aplikuj` — publiczny listing i paginacja Aplikuj.pl,
+- `theprotocol` — publiczny listing/detail theprotocol.it,
+- `bulldogjob` — publiczny listing i strony ofert Bulldogjob; pełne pokrycie dalszego ładowania/paginacji wymaga jeszcze realnego smoke.
+
+Następna kolejność: kolejne czytelne publiczne A1, źródła oficjalne/naukowe/BIP, serwisy agencji, a następnie B i C.
+
+Szczegółowy stan: `docs/SCRAPER_ROLLOUT.md`.
+
+## 6. P2 — wspólny silnik scraperów
+
+`PublicHtmlJobSource` zapewnia:
+
+- robots przed listingiem i detailem,
+- request delay i bounded retry,
+- listing -> detail links,
+- ograniczenie hostów,
+- regex detail paths,
+- paginację/cursor tam, gdzie została potwierdzona,
+- JSON-LD `JobPosting` jako preferowane źródło strukturalne,
+- fallback CSS selectors,
+- zachowanie source payload.
+
+`SitemapHtmlJobSource` obsługuje jawne sitemap index/urlset, filtrowanie URL ofert, chunking i resumowalny cursor.
+
+Scraper-first CLI:
+
+```bash
+agregator-scrape sources
+
+agregator-scrape run \
+  --sources all \
+  --pages-per-source 5 \
+  --db agregator.sqlite3
+```
+
+`all` oznacza publiczne adaptery scraper/feed. `partner_api` nie jest automatycznie wybierane.
+
+## 7. P4 — pełna warstwa surowa
+
+Ingest zachowuje kolejność:
 
 ```text
 source.collect()
@@ -111,137 +186,15 @@ upsert_jobs()               ← bieżący widok source/source_id
 company identifiers / website candidates
 ```
 
-`JobPosting.source_payload` zachowuje source-specific dane, które nie mieszczą się jeszcze w wspólnym modelu. Dzięki temu dodatkowy telefon, e-mail, identyfikator, WWW lub fragment danych z jednego portalu nie ginie tylko dlatego, że inny portal go nie posiada.
+Dodatkowy telefon, e-mail, NIP, REGON, URL lub inna wskazówka z jednego portalu nie ginie dlatego, że inny portal jej nie posiada.
 
----
+## 8. P5 — Company Resolution bez utraty źródeł
 
-## 6. P1 — mapa źródeł
-
-Status: **DONE baseline; audyt trwa razem z rolloutem**.
-
-`config/source_catalog.tsv` zawiera **91 źródeł**:
-
-```text
-A0  14
-A1  36
-B   24
-C   17
-```
-
-Dla każdego źródła docelowo ustalamy public start URL, listing, paginację/cursor, detail pattern, sposób renderowania, robots, warunki dostępu, jakość danych pracodawcy oraz status adaptera.
-
-Bieżący rollout: `docs/SCRAPER_ROLLOUT.md`.
-
----
-
-## 7. P2 — wspólny silnik scraperów
-
-Status: **DONE baseline**.
-
-### Public HTML
-
-`PublicHtmlJobSource` zapewnia:
-
-- robots przed listingiem i detailem,
-- request delay i bounded retry,
-- listing -> detail links,
-- ograniczenie hostów,
-- regex detail paths,
-- paginację/cursor,
-- JSON-LD `JobPosting` jako preferowane źródło strukturalne,
-- fallback CSS selectors,
-- zachowanie source payload.
-
-### Sitemap
-
-`SitemapHtmlJobSource` obsługuje jawne sitemap index/urlset, filtrowanie URL ofert, chunking i resumowalny cursor.
-
-### Scraper-first CLI
-
-```bash
-agregator-scrape sources
-
-agregator-scrape run \
-  --sources all \
-  --pages-per-source 5 \
-  --db agregator.sqlite3
-```
-
-`all` oznacza publiczne adaptery scraper/feed. `partner_api` nie jest automatycznie wybierane.
-
----
-
-## 8. P3 — rollout źródeł
-
-Status: **IN PROGRESS**.
-
-Aktualnie katalog rozpoznaje **15/91 zaimplementowanych adapterów**; **76 pozostaje**.
-
-Zaimplementowane są m.in.:
-
-```text
-pracuj
-aplikuj
-olx
-justjoinit
-nofluffjobs
-rocketjobs
-epraca
-kprm
-jooble
-careerjet
-ngo
-karierawfinansach
-skillshot
-ofertypracyedu
-adzuna
-```
-
-Publiczne adaptery pozostają `experimental`, dopóki nie przejdą kontrolowanego realnego smoke oraz audytu paginacji i bieżących warunków źródła.
-
-### A0
-
-Po wdrożeniu KPRM i OfertyPracy.edu.pl **3 A0 pozostają na HOLD**:
-
-```text
-Praca.pl       HOLD — potrzebne pozytywne rozstrzygnięcie warunków/uprawnienia
-LinkedIn       HOLD — brak obchodzenia ograniczeń
-Indeed         HOLD — brak obchodzenia anty-bot/login
-```
-
-Nie próbujemy sztucznie domknąć `14/14` przez obchodzenie ograniczeń. Przechodzimy do A1.
-
-### A1 — rozpoczęty
-
-Zaimplementowane nowe A1:
-
-- `ngo` — publiczna kategoria NGO.pl `Organizacja oferuje pracę, współpracę`,
-- `aplikuj` — publiczny listing/paginacja Aplikuj.pl, publiczne szczegóły, JSON-LD/fallback HTML i source evidence pracodawcy.
-
-Następna kolejność audytu:
-
-1. kolejne publiczne portale A1 z czytelnym listingiem/detailami,
-2. EURAXESS / publiczne oferty naukowe,
-3. Akademicka Baza Ogłoszeń MNiSW — po rozstrzygnięciu zakresu licencji dla planowanego wykorzystania,
-4. BIP-y i inne oficjalne źródła,
-5. publiczne serwisy agencji zatrudnienia,
-6. następnie B i C.
-
----
-
-## 9. P5 — Company Resolution bez utraty źródeł
-
-Status: **V1 DONE; dalsza kalibracja na realnych danych**.
-
-Company Resolution ustala, które rekordy źródłowe dotyczą tej samej firmy. Wynik nie usuwa ani nie scala `job_posting_observations`.
+Status: **V1 DONE; kalibracja trwa na realnych danych**.
 
 Sygnały obejmują nazwę/formę prawną, lokalizację, NIP, REGON, KRS, source-provided WWW, aliasy i verified website. Fuzzy similarity pozostaje REVIEW-only, a konflikty identifierów nie powodują automatycznego merge.
 
----
-
-## 10. P6 — oficjalna WWW
-
-Status: **V1 DONE**.
+## 9. P6 — oficjalna WWW firmy
 
 ```text
 website candidates ze wszystkich ofert firmy
@@ -259,13 +212,9 @@ first-party identity verification
        first-party verification
 ```
 
-Search ranking nie jest dowodem. Oficjalna domena wymaga weryfikacji treści first-party.
+Ranking wyszukiwarki nie jest dowodem. Oficjalna domena wymaga weryfikacji first-party.
 
----
-
-## 11. P7/P8 — crawler firmy i klasyfikacja kontaktu
-
-Status: **DONE baseline; calibration ongoing**.
+## 10. P7/P8 — crawler firmy i klasyfikacja kontaktu
 
 Crawler przegląda publiczne first-party strony, m.in. `/`, `/kontakt`, `/wspolpraca`, `/partnerzy`, `/b2b`, `/dla-firm`, `/dostawcy`, `/franczyza` oraz sitemapę.
 
@@ -273,15 +222,11 @@ Klasyfikacja:
 
 - **GREEN** — wyraźny publiczny kontekst współpracy/partnerstwa/ofert handlowych,
 - **REVIEW** — ogólny kontakt biznesowy/handlowy wymagający oceny,
-- **IGNORE** — recruitment/HR, support, privacy, zakaz ofert, brak właściwego kontekstu.
+- **IGNORE** — recruitment/HR, support, privacy, zakaz ofert lub brak właściwego kontekstu.
 
-Kontakt rekrutacyjny znaleziony w ogłoszeniu pracy służy jako source evidence, ale sam w sobie nie jest `GREEN`.
+`GREEN` jest kwalifikacją relevance/context, nie automatyczną opinią prawną o zgodzie na dowolny marketing.
 
----
-
-## 12. P9 — finalny Excel
-
-Status: **DONE baseline**.
+## 11. P9 — finalny Excel
 
 ```bash
 agregator-export export \
@@ -293,11 +238,7 @@ Finalny widok ma **1 firmę = 1 wiersz** i zawiera m.in. firmę, miasto, WWW, kw
 
 Surowe rekordy z portali pozostają nietknięte.
 
----
-
-## 13. P10 — kontrola jakości
-
-Status: **INFRASTRUCTURE DONE; real validation rośnie razem z coverage**.
+## 12. P10 — kontrola jakości
 
 Początkowe progi jakości:
 
@@ -309,11 +250,7 @@ Contact decision macro F1 >= 0.90
 
 Benchmark jest kontrolą jakości, a nie blokadą przed dodawaniem kolejnych publicznie/dozwolenie dostępnych scraperów.
 
----
-
-## 14. P11 — pełne resumowalne uruchomienie
-
-Status: **PLANNED after wider source coverage**.
+## 13. P11 — pełne resumowalne uruchomienie
 
 Docelowo jeden run wykonuje:
 
@@ -332,9 +269,7 @@ Docelowo jeden run wykonuje:
 
 Awaria jednego portalu nie może niszczyć danych z pozostałych źródeł.
 
----
-
-## 15. Co robimy teraz
+## 14. Co robimy teraz
 
 ```text
 P0 raw-data invariant                         DONE
@@ -350,6 +285,7 @@ P3 scraper rollout                           ◀ TERAZ
  │   ├── A0 public/dozwolone ścieżki
  │   ├── KPRM + OfertyPracy.edu.pl
  │   ├── NGO.pl + Aplikuj.pl
+ │   ├── theprotocol + Bulldogjob
  │   └── dalsze A1 -> B -> C
  ▼
 P4–P9 utrzymywać i wzmacniać istniejący pipeline
