@@ -226,6 +226,9 @@ class EmployerDiscoveryPipeline:
         if self.search_provider is None:
             raise RuntimeError("Search provider is required for automatic website discovery")
 
+        search_source = str(
+            getattr(self.search_provider, "name", type(self.search_provider).__name__)
+        )
         candidates = await self.search_provider.search_company(company_name, city)
         ranked = [
             candidate.model_copy(
@@ -259,7 +262,7 @@ class EmployerDiscoveryPipeline:
                     pages,
                     verification,
                     origin=WebsiteResolutionOrigin.SEARCH,
-                    source="search_provider",
+                    source=search_source,
                 )
             )
             if not verification.accepted:
@@ -275,7 +278,7 @@ class EmployerDiscoveryPipeline:
                 verification_signals=list(verification.signals),
                 website_attempts=attempts,
                 resolution_origin=WebsiteResolutionOrigin.SEARCH,
-                resolution_source="search_provider",
+                resolution_source=search_source,
             )
 
         return DiscoveryResult(
