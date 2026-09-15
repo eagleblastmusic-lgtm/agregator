@@ -8,7 +8,7 @@ Silnik do budowania bazy firm aktywnie rekrutujących oraz wykrywania ich oficja
 
 Projekt **nie wysyła wiadomości**, nie omija logowania ani zabezpieczeń portali i nie próbuje pozyskiwać niepublicznych danych. Zapisuje publicznie dostępne informacje oraz źródło, z którego zostały znalezione.
 
-## Aktualny zakres M0/M1
+## Aktualny zakres M0/M1/M2
 
 - modele danych dla ofert, firm, kanałów kontaktu i dowodów,
 - wspólny kontrakt `JobSource` i `SourceRegistry`,
@@ -18,20 +18,22 @@ Projekt **nie wysyła wiadomości**, nie omija logowania ani zabezpieczeń porta
 - katalog 91 źródeł z master-listy w `config/source_catalog.tsv`,
 - resumowalne pobieranie przez cursor/offset/page,
 - historia każdego uruchomienia źródła i metryki błędów,
-- SQLite: `companies`, `job_postings`, `contact_channels`, `source_state`, `source_runs`,
-- podstawowa deduplikacja firm,
+- SQLite: `companies`, `company_aliases`, `company_locations`, `job_postings`,
+  `contact_channels`, `source_state`, `source_runs`,
+- Company Resolution v1 z konserwatywnym łączeniem między źródłami i lokalizacjami,
+- jawny `company_resolution_method` i `company_resolution_confidence` na ofercie,
 - provenance i confidence źródła nazwy firmy,
 - importer CSV do benchmarków wieloźródłowych,
+- ground-truth evaluator precision/recall/F1 dla Company Resolution,
 - wyszukiwanie oficjalnej strony przez wymienny `SearchProvider`,
 - opcjonalny provider Brave Search API,
 - resolver domeny z oceną dopasowania,
 - crawler stron firmowych z limitem stron i obsługą `robots.txt`,
 - ekstrakcja e-maili oraz formularzy,
 - klasyfikacja kontekstu: `GREEN / REVIEW / IGNORE`,
-- wykrywanie fraz typu „propozycje współpracy”, „partnerzy biznesowi”,
-  „oferty handlowe”, „dla dostawców”,
 - zachowywanie `evidence_url`, `evidence_text` i confidence,
 - kolejka firm do enrichmentu z minimalnym confidence tożsamości,
+- benchmark snapshot i eksport GREEN do JSON/CSV,
 - testy jednostkowe i GitHub Actions CI.
 
 ## Instalacja
@@ -80,8 +82,6 @@ agregator collect-jooble \
   --pages 2
 ```
 
-Jooble jest źródłem agregującym, dlatego jego rekordy będą później podlegały mocniejszej deduplikacji z ofertami źródłowymi.
-
 ### 5. Adzuna REST API
 
 Wymaga `ADZUNA_APP_ID` i `ADZUNA_APP_KEY`.
@@ -95,8 +95,6 @@ agregator collect-adzuna \
 ```
 
 ### 6. Uniwersalny collector
-
-Źródła skonfigurowane przez zmienne środowiskowe można uruchomić wspólnym interfejsem:
 
 ```bash
 agregator collect --source jooble --pages 1
@@ -125,7 +123,51 @@ agregator import-csv --path jobs.csv --db agregator.sqlite3
 agregator companies --db agregator.sqlite3 --limit 50
 ```
 
-### 10. Znalezienie oficjalnych stron i kanałów B2B
+Wynik zawiera także aliasy i wszystkie zaobserwowane lokalizacje firmy.
+
+### 10. Company Resolution v1
+
+Resolver nie wykonuje jeszcze fuzzy-matchingu nazw. Automatyczne łączenie między różnymi miastami jest dopuszczane tylko wtedy, gdy:
+
+- znormalizowana nazwa jest identyczna,
+- nazwa jest wystarczająco charakterystyczna,
+- po obu stronach istnieje mocny `identity_confidence`,
+- istnieje tylko jeden jednoznaczny kandydat.
+
+Krótkie lub ogólne nazwy, niskie confidence oraz niejednoznaczne klastry pozostają rozdzielone zamiast być ryzykownie scalane.
+
+Każda oferta zapisuje metodę resolution, np. `new_company`, `exact_name_city`, `exact_name_cross_city`, `exact_name_partial_location` albo informację o niewystarczających przesłankach.
+
+### 11. Benchmark techniczny
+
+```bash
+agregator benchmark --db agregator.sqlite3
+```
+
+Raport zawiera m.in. liczbę ofert, firm, źródeł, skuteczność enrichmentu, GREEN/REVIEW/IGNORE oraz rozkład `company_resolution_method`.
+
+### 12. Ground truth dla Company Resolution
+
+Plik CSV ma format:
+
+```csv
+source,source_id,truth_company_id
+olx,123,company-001
+jooble,ABC-7,company-001
+adzuna,987,company-002
+```
+
+`truth_company_id` jest ręcznie nadanym identyfikatorem rzeczywistej firmy. Ocena jest wykonywana pairwise i zwraca precision, recall oraz F1:
+
+```bash
+agregator evaluate-resolution \
+  --path company_ground_truth.csv \
+  --db agregator.sqlite3
+```
+
+Dzięki temu benchmark 1000 ofert może mierzyć jakość deduplikacji, a nie tylko liczbę utworzonych rekordów.
+
+### 13. Znalezienie oficjalnych stron i kanałów B2B
 
 Wymaga `BRAVE_SEARCH_API_KEY`:
 
@@ -135,10 +177,11 @@ agregator enrich-db --db agregator.sqlite3 --limit 20
 
 Domyślnie przetwarzane są firmy z `identity_confidence >= 0.7`.
 
-### 11. Wyniki GREEN
+### 14. Wyniki GREEN i eksport
 
 ```bash
 agregator green --db agregator.sqlite3 --limit 100
+agregator export-green --db agregator.sqlite3 --output green.csv
 ```
 
 Każdy wynik zawiera źródło dowodu i tekst kontekstu, w którym kontakt został znaleziony.
