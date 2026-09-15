@@ -8,6 +8,8 @@ from typing import Any
 from .company_resolution import is_distinctive_company_name
 from .storage import SQLiteStore
 
+STRONG_WEBSITE_CONFIDENCE = 0.85
+
 
 @dataclass(frozen=True, slots=True)
 class CompanyReviewProfile:
@@ -18,6 +20,7 @@ class CompanyReviewProfile:
     normalized_aliases: tuple[str, ...]
     locations: tuple[str, ...]
     website_url: str | None
+    website_confidence: float
     identity_confidence: float
 
 
@@ -90,6 +93,7 @@ def _load_profiles(
                 canonical_name,
                 normalized_name,
                 website_url,
+                website_confidence,
                 identity_confidence
             FROM companies
             ORDER BY id ASC
@@ -151,6 +155,7 @@ def _load_profiles(
             normalized_aliases=profile_normalized_aliases,
             locations=tuple(locations[company_id]),
             website_url=row["website_url"],
+            website_confidence=float(row["website_confidence"]),
             identity_confidence=float(row["identity_confidence"]),
         )
     return profiles
@@ -187,7 +192,10 @@ def _blocking_keys(profile: CompanyReviewProfile) -> set[str]:
             keys.add(f"prefix:{compact[:4]}")
             keys.add(f"suffix:{compact[-4:]}")
 
-    if profile.website_url:
+    if (
+        profile.website_url
+        and profile.website_confidence >= STRONG_WEBSITE_CONFIDENCE
+    ):
         keys.add(f"website:{_website_host(profile.website_url)}")
     return keys
 
@@ -202,6 +210,8 @@ def _score_pair(
     website_match = bool(
         left.website_url
         and right.website_url
+        and left.website_confidence >= STRONG_WEBSITE_CONFIDENCE
+        and right.website_confidence >= STRONG_WEBSITE_CONFIDENCE
         and _website_host(left.website_url) == _website_host(right.website_url)
     )
 
@@ -215,8 +225,8 @@ def _score_pair(
         base += 0.04
         signals.append("shared_location")
     if website_match:
-        base += 0.15
-        signals.append("same_website_host")
+        base = max(base + 0.15, 0.9)
+        signals.append("same_verified_website_host")
     if left.identity_confidence >= 0.8 and right.identity_confidence >= 0.8:
         base += 0.02
         signals.append("strong_identity_both")
