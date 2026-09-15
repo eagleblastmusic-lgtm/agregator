@@ -9,6 +9,7 @@ import typer
 
 from .benchmark_runner import collect_benchmark
 from .catalog import catalog_summary, filter_catalog, load_source_catalog
+from .company_identifiers import list_identifier_conflicts
 from .contact_ground_truth import (
     evaluate_contact_classification_csv,
     export_contact_ground_truth_template,
@@ -387,6 +388,16 @@ def resolution_review(
             indent=2,
         )
     )
+
+
+@app.command("identifier-conflicts")
+def identifier_conflicts(
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    limit: int = typer.Option(100, "--limit", min=1, max=10_000),
+) -> None:
+    store = SQLiteStore(db)
+    conflicts = list_identifier_conflicts(store, limit=limit)
+    typer.echo(json.dumps(conflicts, ensure_ascii=False, indent=2))
 
 
 @app.command("export-ground-truth")
