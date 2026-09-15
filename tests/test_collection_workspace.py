@@ -59,7 +59,6 @@ async def test_collection_workspace_runs_without_search_provider(tmp_path: Path)
     assert result.collection.jobs_after == 1
     assert result.benchmark.jobs_total == 1
     assert result.benchmark.source_identity_metrics["fixture"]["jobs"] == 1
-    assert result.dataset.schema_version if False else True
     assert result.dataset.to_dict()["schema_version"] == "8"
     assert result.collection_path.exists()
     assert result.benchmark_report_path.exists()
