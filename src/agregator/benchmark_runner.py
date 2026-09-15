@@ -35,6 +35,34 @@ class BenchmarkCollectionResult:
     stopped_reason: str
     sources: dict[str, BenchmarkSourceStats]
 
+    @property
+    def unexercised_sources(self) -> tuple[str, ...]:
+        return tuple(
+            name
+            for name, stats in sorted(self.sources.items())
+            if stats.runs == 0
+        )
+
+    @property
+    def disabled_sources(self) -> tuple[str, ...]:
+        return tuple(
+            name
+            for name, stats in sorted(self.sources.items())
+            if stats.disabled
+        )
+
+    @property
+    def sources_with_errors(self) -> tuple[str, ...]:
+        return tuple(
+            name
+            for name, stats in sorted(self.sources.items())
+            if stats.errors > 0
+        )
+
+    @property
+    def source_health_ready(self) -> bool:
+        return not self.unexercised_sources and not self.disabled_sources
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "target_jobs": self.target_jobs,
@@ -44,6 +72,10 @@ class BenchmarkCollectionResult:
             "rounds": self.rounds,
             "target_reached": self.target_reached,
             "stopped_reason": self.stopped_reason,
+            "source_health_ready": self.source_health_ready,
+            "unexercised_sources": list(self.unexercised_sources),
+            "disabled_sources": list(self.disabled_sources),
+            "sources_with_errors": list(self.sources_with_errors),
             "sources": {
                 name: stats.to_dict() for name, stats in self.sources.items()
             },
