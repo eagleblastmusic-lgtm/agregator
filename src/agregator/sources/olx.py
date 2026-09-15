@@ -22,11 +22,13 @@ class OlxPublicSource:
         endpoint: str = OLX_OFFERS_ENDPOINT,
         limit: int = 40,
         category_id: int = OLX_JOBS_CATEGORY_ID,
+        user_agent: str = "FaroEmployerDiscovery/0.1",
     ) -> None:
         self._client = client
         self.endpoint = endpoint
-        self.limit = max(1, min(limit, 100))
+        self.limit = max(1, min(limit, 50))
         self.category_id = category_id
+        self.user_agent = user_agent
 
     async def collect(self, cursor: str | None = None) -> SourceBatch:
         offset = self._parse_cursor(cursor)
@@ -34,7 +36,10 @@ class OlxPublicSource:
         client = self._client or httpx.AsyncClient(
             timeout=20,
             follow_redirects=True,
-            headers={"Accept": "application/json"},
+            headers={
+                "Accept": "application/json",
+                "User-Agent": self.user_agent,
+            },
         )
 
         try:
@@ -51,6 +56,9 @@ class OlxPublicSource:
         finally:
             if owns_client:
                 await client.aclose()
+
+        if not isinstance(payload, Mapping):
+            return SourceBatch(jobs=[], next_cursor=None)
 
         jobs = parse_olx_payload(payload)
         next_cursor = _next_cursor(payload, offset, self.limit, len(jobs))
@@ -71,6 +79,8 @@ class OlxPublicSource:
 
 def parse_olx_payload(payload: Mapping[str, Any]) -> list[JobPosting]:
     raw_items = payload.get("data")
+    if not isinstance(raw_items, list):
+        raw_items = payload.get("items")
     if not isinstance(raw_items, list):
         return []
 
@@ -101,6 +111,8 @@ def _parse_offer(raw: Mapping[str, Any]) -> JobPosting | None:
         raw_city = location.get("city")
         if isinstance(raw_city, Mapping):
             city = _string(raw_city.get("name"))
+        elif isinstance(raw_city, str):
+            city = raw_city.strip() or None
 
     return JobPosting(
         source="olx",
@@ -153,9 +165,17 @@ def _next_cursor(
 ) -> str | None:
     metadata = payload.get("metadata")
     if isinstance(metadata, Mapping):
+        explicit_next = metadata.get("next_offset")
+        if isinstance(explicit_next, int) and explicit_next > offset:
+            return str(explicit_next)
+
         total = metadata.get("total_elements", metadata.get("total"))
         if isinstance(total, int) and offset + limit >= total:
             return None
+
+    total = payload.get("total")
+    if isinstance(total, int) and offset + limit >= total:
+        return None
 
     if returned == 0 or returned < limit:
         return None
