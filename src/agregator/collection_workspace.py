@@ -25,6 +25,10 @@ class CollectionWorkspaceResult:
     dataset: DatasetExportResult
     preflight: BenchmarkPreflight
 
+    @property
+    def ready_for_full_enrichment_benchmark(self) -> bool:
+        return self.collection.target_reached and self.collection.source_health_ready
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "output_dir": str(self.output_dir),
@@ -35,6 +39,7 @@ class CollectionWorkspaceResult:
             "benchmark": self.benchmark.to_dict(),
             "dataset": self.dataset.to_dict(),
             "preflight": self.preflight.to_dict(),
+            "ready_for_full_enrichment_benchmark": self.ready_for_full_enrichment_benchmark,
         }
 
 
@@ -77,11 +82,13 @@ async def run_collection_workspace(
     )
     benchmark = build_benchmark_report(store)
     dataset = export_dataset_bundle(store, directory / "dataset")
+    ready = collection.target_reached and collection.source_health_ready
+    blockers = _readiness_blockers(collection)
 
     _write_json(collection_path, collection.to_dict())
     _write_json(benchmark_report_path, benchmark.to_dict())
     manifest = {
-        "schema_version": "1",
+        "schema_version": "2",
         "mode": "collection_only",
         "created_at": datetime.now(UTC).isoformat(),
         "database": str(store.path),
@@ -99,8 +106,13 @@ async def run_collection_workspace(
         "dataset": dataset.to_dict(),
         "readiness": {
             "collection_target_reached": collection.target_reached,
-            "ready_for_full_enrichment_benchmark": collection.target_reached,
+            "source_health_ready": collection.source_health_ready,
+            "unexercised_sources": list(collection.unexercised_sources),
+            "disabled_sources": list(collection.disabled_sources),
+            "sources_with_errors": list(collection.sources_with_errors),
+            "ready_for_full_enrichment_benchmark": ready,
             "manual_ground_truth_ready": False,
+            "blockers": blockers,
             "reason": (
                 "collection-only workspace intentionally skips website/contact enrichment"
             ),
@@ -123,6 +135,19 @@ async def run_collection_workspace(
         dataset=dataset,
         preflight=preflight,
     )
+
+
+def _readiness_blockers(collection: BenchmarkCollectionResult) -> list[str]:
+    blockers: list[str] = []
+    if not collection.target_reached:
+        blockers.append("collection_target_not_reached")
+    if collection.unexercised_sources:
+        blockers.append(
+            "unexercised_sources:" + ",".join(collection.unexercised_sources)
+        )
+    if collection.disabled_sources:
+        blockers.append("disabled_sources:" + ",".join(collection.disabled_sources))
+    return blockers
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
