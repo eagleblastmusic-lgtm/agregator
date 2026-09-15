@@ -46,7 +46,7 @@ def _soap_response(status: str, archive: bytes | None = None) -> bytes:
         "<soap:Body><DaneResponse><return>"
         f"<status>{status}</status>{payload}"
         "</return></DaneResponse></soap:Body></soap:Envelope>"
-    ).encode("utf-8")
+    ).encode()
 
 
 def test_parse_epraca_json_maps_official_fields() -> None:
