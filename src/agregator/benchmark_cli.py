@@ -8,6 +8,7 @@ import typer
 
 from .benchmark_pipeline import run_benchmark_pipeline
 from .crawler import WebsiteCrawler
+from .label_status import build_label_bundle_status
 from .pipeline import EmployerDiscoveryPipeline
 from .search import BraveSearchProvider
 from .sources import default_registry
@@ -118,6 +119,21 @@ def run(
 
     typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     if strict and not result.readiness.ready_for_manual_labeling:
+        raise typer.Exit(code=2)
+
+
+@app.command("status")
+def status(
+    label_dir: str = typer.Option("benchmark/run/labels", "--label-dir"),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Kod wyjścia 2, dopóki wszystkie trzy pliki ground truth nie są kompletne",
+    ),
+) -> None:
+    result = build_label_bundle_status(label_dir)
+    typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    if strict and not result.ready_for_quality_gate:
         raise typer.Exit(code=2)
 
 
