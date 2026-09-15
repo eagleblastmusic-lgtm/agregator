@@ -146,20 +146,63 @@ Każdy adapter jest izolowany w `src/agregator/sources/<source>.py` i może zost
 
 ## M2 — Company Resolution
 
-Cel: jedna firma = jeden rekord niezależnie od liczby ofert, źródeł i lokalizacji.
+Status: **V1 zaimplementowany; fuzzy/entity-resolution v2 pozostaje do wykonania**.
 
-Sygnały:
+Cel: jedna firma = jeden rekord niezależnie od liczby ofert, źródeł i lokalizacji, bez agresywnego łączenia podmiotów tylko dlatego, że ich nazwy są podobne.
+
+### Zaimplementowany baseline V1
+
+- normalizacja nazw i wariantów prawnych,
+- `company_aliases` zachowujące wszystkie zaobserwowane nazwy,
+- `company_locations` zachowujące wszystkie zaobserwowane miejscowości,
+- exact-match nazwy + lokalizacji jako najmocniejszy sygnał,
+- cross-city exact-match tylko dla charakterystycznej nazwy i wysokiego `identity_confidence`,
+- blokada automatycznego cross-city merge dla nazw krótkich lub ogólnych,
+- brak fuzzy-matchingu w V1,
+- stabilny fallback identity dla ofert bez lokalizacji,
+- `company_resolution_method` i `company_resolution_confidence` zapisane przy każdej ofercie,
+- metryki metod resolution w `benchmark`,
+- pairwise ground-truth evaluator precision/recall/F1 przez `evaluate-resolution`.
+
+Przykładowe metody resolution:
+
+```text
+new_company
+exact_name_city
+exact_name_cross_city
+exact_name_partial_location
+insufficient_cross_city_evidence
+ambiguous_exact_name
+stable_source_key
+```
+
+### Ground truth
+
+Ręcznie oznaczony plik ma postać:
+
+```csv
+source,source_id,truth_company_id
+olx,123,company-001
+jooble,ABC-7,company-001
+adzuna,987,company-002
+```
+
+Dla wszystkich dopasowanych rekordów evaluator porównuje pary ofert i liczy TP/FP/FN/TN oraz precision, recall i F1. Brakujące w bazie rekordy są raportowane osobno.
+
+### Sygnały planowane dla V2
 
 - nazwa i warianty prawne,
-- miejscowość,
+- miejscowość i wiele lokalizacji,
 - adres,
 - domena,
 - telefon publiczny,
 - NIP/KRS, jeśli jawnie występują,
 - profile i identyfikatory źródłowe,
-- zgodność danych między portalami.
+- zgodność danych między portalami,
+- fuzzy similarity jako sygnał pomocniczy, nigdy samodzielny dowód,
+- kolejka przypadków niejednoznacznych do ręcznego review.
 
-Wynik:
+Wynik docelowy:
 
 ```text
 company_id
@@ -170,9 +213,16 @@ domains[]
 job_count
 sources[]
 match_confidence
+resolution_method
 ```
 
-Obecna deduplikacja M1 jest celowo konserwatywna i nie zastępuje pełnego Company Resolution.
+### Następne checkpointy M2
+
+- M2-02: dodać jawne identyfikatory pracodawcy ze źródeł, jeśli są dostępne,
+- M2-03: wykorzystać zweryfikowaną domenę jako mocny sygnał merge,
+- M2-04: dodać kandydatów fuzzy do REVIEW bez automatycznego merge,
+- M2-05: zbudować ręczny ground truth na próbce benchmarkowej,
+- M2-06: ustalić progi precision/recall przed rozszerzeniem reguł automatycznych.
 
 ## M3 — wyszukiwanie i weryfikacja oficjalnej WWW
 
@@ -209,6 +259,7 @@ Główne encje:
 - `job_postings`,
 - `companies`,
 - `company_aliases`,
+- `company_locations`,
 - `company_websites`,
 - `contact_channels`,
 - `evidence`,
@@ -257,7 +308,7 @@ Mierzymy:
 
 - liczbę unikalnych firm,
 - company/job ratio,
-- precision Company Resolution na ręcznie oznaczonej próbce,
+- precision/recall/F1 Company Resolution na ręcznie oznaczonej próbce,
 - % firm z poprawnie znalezioną domeną,
 - % wzbogaconych firm z kanałem GREEN/REVIEW,
 - precision klasyfikacji kanałów,
@@ -265,4 +316,4 @@ Mierzymy:
 - liczbę błędów i retry per źródło,
 - średni koszt i czas na firmę.
 
-CLI `benchmark` zapewnia automatyczny snapshot metryk technicznych. Precision/recall wymagają osobnego ręcznie oznaczonego ground truth i zostaną dodane przed właściwym testem 1000 ofert.
+CLI `benchmark` zapewnia automatyczny snapshot metryk technicznych. CLI `evaluate-resolution` mierzy jakość deduplikacji na ręcznie oznaczonym ground truth przed rozszerzeniem automatycznych reguł resolution.
