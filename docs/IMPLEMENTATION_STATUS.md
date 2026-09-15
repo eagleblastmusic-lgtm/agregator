@@ -7,9 +7,19 @@ Szczegółowy plan i checkpointy: [`PLAN.md`](PLAN.md).
 ## Gotowe baseline'y
 
 - M0: crawler + evidence + GREEN/REVIEW/IGNORE.
-- M1: OLX, Jooble, Adzuna, source registry, resumowalne runy, katalog 91 źródeł, benchmark i eksport danych.
+- M1: OLX, Jooble, Adzuna, source registry, resumowalne runy, katalog 91 źródeł, benchmark i pełny bundle eksportowy dla Faro.
 - M2: konserwatywny Company Resolution v1, aliasy/lokalizacje, metody/confidence, ground truth, pairwise precision/recall/F1, fuzzy REVIEW bez automatycznego merge.
 - M3: ranking wyników wyszukiwarki + first-party content verification z fallbackiem do kolejnych kandydatów.
+
+## Kluczowe komendy jakościowe
+
+```bash
+agregator benchmark --db agregator.sqlite3
+agregator resolution-review --db agregator.sqlite3 --min-score 0.82 --limit 100
+agregator export-ground-truth --db agregator.sqlite3 --output company_ground_truth.csv --limit 1000
+agregator evaluate-resolution --db agregator.sqlite3 --path company_ground_truth.csv
+agregator export-dataset --db agregator.sqlite3 --output-dir export/faro
+```
 
 ## Cel najbliższego benchmarku
 
