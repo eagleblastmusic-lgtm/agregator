@@ -23,6 +23,7 @@ from .public_sources import (
     skillshot_source,
     theprotocol_source,
 )
+from .randstad import RandstadPublicSource
 from .registry import SourceRegistry
 
 
@@ -159,6 +160,17 @@ def default_registry() -> SourceRegistry:
         ),
     )
     registry.register(
+        "randstad",
+        RandstadPublicSource,
+        access_mode="public_html",
+        experimental=True,
+        notes=(
+            "Public Randstad Poland listing/detail pages with /page-N pagination. Undisclosed "
+            "client employers remain explicit low-confidence agency fallbacks rather than "
+            "invented employer identities."
+        ),
+    )
+    registry.register(
         "skillshot",
         skillshot_source,
         access_mode="public_html",
@@ -290,6 +302,7 @@ __all__ = [
     "NgoPublicSource",
     "OfertyPracyEduPublicSource",
     "OlxPublicSource",
+    "RandstadPublicSource",
     "SourceRegistry",
     "default_registry",
 ]
