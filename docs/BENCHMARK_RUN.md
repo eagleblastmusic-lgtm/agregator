@@ -10,7 +10,7 @@ zbieranie ofert
     -> crawl kontaktów
     -> raport benchmarku
     -> eksport datasetu
-    -> offline snapshoty stron
+    -> offline snapshoty stron i timeline evidence
     -> pakiet do ręcznego ground truth
 ```
 
@@ -25,6 +25,14 @@ BRAVE_SEARCH_API_KEY=...
 ```
 
 Źródła `jooble`, `adzuna`, `careerjet` i `epraca` wymagają dodatkowo własnych danych konfiguracyjnych opisanych w `.env.example` i README. Źródła bez wymaganej konfiguracji są przez kolektor oznaczane jako wyłączone; nie są zastępowane scrapingiem obchodzącym autoryzację.
+
+Przed realnym runem można wykonać preflight bez ujawniania wartości sekretów:
+
+```bash
+agregator-benchmark preflight \
+  --sources olx,jooble,adzuna \
+  --strict
+```
 
 ## Uruchomienie
 
@@ -66,6 +74,8 @@ Workflow ma dwa zabezpieczenia przed zapętleniem:
 
 Nieudane firmy pozostają pending i mogą zostać ponowione po naprawieniu konfiguracji lub problemu sieciowego.
 
+Enrichment raportuje także `evidence_snapshots`, `evidence_observations` i `evidence_changes`. Snapshot jest immutable treścią evidence, obserwacja reprezentuje konkretny run, a `evidence_changes` zlicza przejścia do nowej wersji treści dla istniejącego kanału.
+
 ## Struktura workspace
 
 ```text
@@ -82,6 +92,7 @@ benchmark/run/
 │   ├── contact_channels.csv
 │   ├── website_verification_runs.csv
 │   ├── contact_evidence_snapshots.csv
+│   ├── contact_evidence_observations.csv
 │   ├── website_page_snapshots.csv
 │   └── manifest.json
 └── labels/
@@ -90,7 +101,7 @@ benchmark/run/
     └── contact_classification_truth.csv
 ```
 
-`dataset/manifest.json` ma schema version `6`. `website_page_snapshots.csv` jest formalną częścią datasetu.
+`dataset/manifest.json` ma schema version `7`.
 
 ## Offline evidence stron WWW
 
@@ -100,6 +111,18 @@ Wiersz może zawierać `verification_id`, `company_id`, finalne `resolution_orig
 
 Jeżeli run nie ma listy prób, np. dla jawnie podanego znanego URL, exporter używa run-level `page_snapshots_json`.
 
+## Timeline evidence kontaktów
+
+`contact_evidence_snapshots.csv` przechowuje deduplikowane immutable wersje tekstu evidence. `contact_evidence_observations.csv` zapisuje każdą obserwację kanału w konkretnym `website_verification_run_id` wraz z:
+
+- `snapshot_id` i `content_sha256`,
+- `decision`, `purpose` i `confidence` z danego runu,
+- `evidence_url` i `evidence_signal`,
+- `snapshot_changed`, które wskazuje zmianę treści względem poprzedniej obserwacji tego kanału,
+- timestampem.
+
+Dzięki temu można rozdzielić „kanał widziany ponownie bez zmian” od „evidence rzeczywiście się zmieniło” i audytować historyczne zmiany klasyfikacji bez nadpisywania poprzedniego stanu.
+
 ## Ground truth domen z provenance
 
 `labels/website_resolution_truth.csv` zawiera poza `truth_domain` również `latest_verification_id`, `verification_outcome`, `predicted_resolution_origin`, `predicted_resolution_source`, `source_website_candidate_count` i `verification_signals_json`.
@@ -108,13 +131,13 @@ Jeżeli run nie ma listy prób, np. dla jawnie podanego znanego URL, exporter u�
 
 ## Ground truth kontaktów z immutable evidence
 
-`labels/contact_classification_truth.csv` przechowuje teraz również:
+`labels/contact_classification_truth.csv` przechowuje także:
 
 - `latest_evidence_snapshot_id`,
 - `evidence_content_sha256`,
 - `evidence_captured_at`.
 
-Dzięki temu ręczna decyzja GREEN/REVIEW/IGNORE może być powiązana z konkretnym immutable snapshotem evidence zamiast wyłącznie z bieżącym stanem rekordu kontaktowego.
+Ewaluator raportuje metryki globalne oraz `decision_by_kind`: osobne accuracy, macro F1, confusion matrix i per-class metrics dla `email` oraz `form`, o ile dany typ występuje w oznaczonej próbce.
 
 ## Postęp labelingu
 
@@ -124,8 +147,6 @@ Po wygenerowaniu pakietu można sprawdzać postęp bez uruchamiania quality gate
 agregator-benchmark status \
   --label-dir benchmark/run/labels
 ```
-
-Raport pokazuje dla każdego pliku liczbę wszystkich, oznaczonych i pozostałych wierszy, completion rate oraz blockery.
 
 Do skryptów/CI można użyć:
 
@@ -145,7 +166,16 @@ Po benchmarku nie należy automatycznie podnosić progów ani rozszerzać auto-m
 - `website_resolution_truth.csv`,
 - `contact_classification_truth.csv`.
 
-Gdy `agregator-benchmark status --strict` przejdzie:
+Gdy `agregator-benchmark status --strict` przejdzie, można wykonać zintegrowaną ewaluację:
+
+```bash
+agregator-benchmark evaluate \
+  --db benchmark/benchmark.sqlite3 \
+  --label-dir benchmark/run/labels \
+  --fail-on-error
+```
+
+Alternatywnie pozostaje dostępne niskopoziomowe:
 
 ```bash
 agregator quality-gate \
