@@ -37,6 +37,7 @@ def _job(
 
 def test_identifier_persistence_normalizes_and_counts_observations(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "identifiers.sqlite3")
+    store.init_schema()
     first = _job("1", "Firma Testowa Sp. z o.o.", nip="123-456-78-90")
     store.upsert_jobs([first])
 
@@ -60,6 +61,7 @@ def test_identifier_persistence_normalizes_and_counts_observations(tmp_path: Pat
 
 def test_invalid_known_identifier_is_not_persisted(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "invalid.sqlite3")
+    store.init_schema()
     job = _job("1", "Firma Testowa", nip="123")
     store.upsert_jobs([job])
 
@@ -73,6 +75,7 @@ def test_same_identifier_on_two_company_records_is_review_conflict_not_merge(
     tmp_path: Path,
 ) -> None:
     store = SQLiteStore(tmp_path / "conflict.sqlite3")
+    store.init_schema()
     left = _job("1", "Alpha Logistics", nip="1234567890", city="Gdańsk")
     right = _job("2", "Beta Retail", nip="1234567890", city="Warszawa")
     store.upsert_jobs([left, right])
