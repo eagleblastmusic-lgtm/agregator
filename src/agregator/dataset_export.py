@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .audit import init_audit_schema
+from .employer_score import rank_companies
 from .storage import SQLiteStore
 
 EXPORT_SCHEMA_VERSION = "2"
@@ -62,6 +63,10 @@ def export_dataset_bundle(
     website_verifications_path = directory / "website_verification_runs.csv"
     evidence_snapshots_path = directory / "contact_evidence_snapshots.csv"
     manifest_path = directory / "manifest.json"
+
+    score_by_company = {
+        item.company_id: item for item in rank_companies(store, min_score=0, limit=1_000_000)
+    }
 
     with store.connect() as connection:
         companies = [
@@ -193,6 +198,13 @@ def export_dataset_bundle(
             ).fetchall()
         ]
 
+    for company in companies:
+        score = score_by_company.get(int(company["company_id"]))
+        company["employer_discovery_score"] = score.score if score else 0
+        company["employer_discovery_signals"] = (
+            " | ".join(score.signals) if score else ""
+        )
+
     _write_csv(companies_path, companies, _company_fields())
     _write_csv(jobs_path, jobs, _job_fields())
     _write_csv(contacts_path, contacts, _contact_fields())
@@ -226,6 +238,9 @@ def export_dataset_bundle(
         "notes": {
             "company_resolution": (
                 "company_resolution_method/confidence describe automatic identity resolution"
+            ),
+            "employer_discovery_score": (
+                "0-100 prioritization score; separate from identity/contact confidence"
             ),
             "contact_decision": "green/review/ignore is preserved with evidence provenance",
             "website_audit": (
@@ -277,6 +292,8 @@ def _company_fields() -> list[str]:
         "identity_confidence",
         "website_url",
         "website_confidence",
+        "employer_discovery_score",
+        "employer_discovery_signals",
         "job_count",
         "job_sources",
         "enriched_at",
