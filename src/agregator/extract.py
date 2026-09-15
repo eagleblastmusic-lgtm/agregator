@@ -9,6 +9,20 @@ from .models import ChannelKind, ContactChannel, Evidence
 from .signals import classify_context, contains_discovery_signal
 
 EMAIL_RE = re.compile(r"(?<![\w.+-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})(?![\w.-])", re.I)
+OBFUSCATED_EMAIL_RE = re.compile(
+    r"(?P<local>[A-Z0-9._%+-]{1,64})\s*"
+    r"(?:\[|\()\s*(?:at|malpa|małpa)\s*(?:\]|\))\s*"
+    r"(?P<domain>[A-Z0-9-]+(?:\.[A-Z0-9-]+)*)\s*"
+    r"(?:\[|\()\s*(?:dot|kropka)\s*(?:\]|\))\s*"
+    r"(?P<tld>[A-Z]{2,24})",
+    re.I,
+)
+OBFUSCATED_AT_RE = re.compile(
+    r"(?P<local>[A-Z0-9._%+-]{1,64})\s*"
+    r"(?:\[|\()\s*(?:at|malpa|małpa)\s*(?:\]|\))\s*"
+    r"(?P<domain>[A-Z0-9-]+(?:\.[A-Z0-9-]+)+)",
+    re.I,
+)
 
 
 def _clean_text(soup: BeautifulSoup) -> str:
@@ -26,23 +40,49 @@ def _context(text: str, needle: str, radius: int = 220) -> str:
     return text[start:end]
 
 
+def _obfuscated_emails(text: str) -> dict[str, str]:
+    found: dict[str, str] = {}
+    occupied: list[tuple[int, int]] = []
+
+    for match in OBFUSCATED_EMAIL_RE.finditer(text):
+        email = (
+            f"{match.group('local')}@{match.group('domain')}.{match.group('tld')}"
+        ).lower()
+        found[email] = match.group(0)
+        occupied.append(match.span())
+
+    for match in OBFUSCATED_AT_RE.finditer(text):
+        start, end = match.span()
+        if any(start >= left and end <= right for left, right in occupied):
+            continue
+        email = f"{match.group('local')}@{match.group('domain')}".lower()
+        found[email] = match.group(0)
+
+    return found
+
+
 def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
     soup = BeautifulSoup(html, "html.parser")
     text = _clean_text(soup)
     found: dict[tuple[str, str], ContactChannel] = {}
 
-    emails = set(EMAIL_RE.findall(text))
+    email_needles: dict[str, str] = {}
+    for email in EMAIL_RE.findall(text):
+        email_needles[email.lower()] = email
+    email_needles.update(_obfuscated_emails(text))
+
     for anchor in soup.select('a[href^="mailto:"]'):
         raw = anchor.get("href", "")[7:].split("?", 1)[0].strip()
         if raw:
-            emails.add(raw)
+            label = " ".join(anchor.stripped_strings).strip()
+            email_needles[raw.lower()] = label or raw
 
-    for email in emails:
-        context = _context(text, email)
+    for email, needle in email_needles.items():
+        context = _context(text, needle)
         purpose, decision, confidence, signal = classify_context(context, email)
         channel = ContactChannel(
             kind=ChannelKind.EMAIL,
-            value=email.lower(),
+            value=email,
             purpose=purpose,
             decision=decision,
             confidence=confidence,
