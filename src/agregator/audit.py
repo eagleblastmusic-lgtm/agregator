@@ -33,6 +33,8 @@ def init_audit_schema(store: SQLiteStore) -> None:
                 outcome TEXT NOT NULL,
                 website_url TEXT,
                 website_confidence REAL NOT NULL DEFAULT 0,
+                resolution_origin TEXT,
+                resolution_source TEXT,
                 verification_signals_json TEXT NOT NULL,
                 search_candidates_json TEXT NOT NULL,
                 website_attempts_json TEXT NOT NULL DEFAULT '[]',
@@ -44,6 +46,8 @@ def init_audit_schema(store: SQLiteStore) -> None:
 
             CREATE INDEX IF NOT EXISTS idx_website_verification_runs_company
                 ON website_verification_runs(company_id, captured_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_website_verification_runs_origin
+                ON website_verification_runs(resolution_origin, resolution_source);
 
             CREATE TABLE IF NOT EXISTS contact_evidence_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,6 +79,24 @@ def init_audit_schema(store: SQLiteStore) -> None:
             "page_snapshots_json",
             "TEXT NOT NULL DEFAULT '[]'",
         )
+        _ensure_column(
+            connection,
+            "website_verification_runs",
+            "resolution_origin",
+            "TEXT",
+        )
+        _ensure_column(
+            connection,
+            "website_verification_runs",
+            "resolution_source",
+            "TEXT",
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_website_verification_runs_origin
+            ON website_verification_runs(resolution_origin, resolution_source)
+            """
+        )
 
 
 def record_discovery_audit(
@@ -92,6 +114,11 @@ def record_discovery_audit(
     attempts = [attempt.model_dump(mode="json") for attempt in result.website_attempts]
     page_snapshots = [snapshot.model_dump(mode="json") for snapshot in result.page_snapshots]
     outcome = "verified" if result.company.website_url else "not_verified"
+    origin = (
+        result.company.website_resolution_origin.value
+        if result.company.website_resolution_origin is not None
+        else None
+    )
 
     with store.connect() as connection:
         connection.execute(
@@ -101,18 +128,22 @@ def record_discovery_audit(
                 outcome,
                 website_url,
                 website_confidence,
+                resolution_origin,
+                resolution_source,
                 verification_signals_json,
                 search_candidates_json,
                 website_attempts_json,
                 scanned_pages_json,
                 page_snapshots_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 company_id,
                 outcome,
                 result.company.website_url,
                 result.company.website_confidence,
+                origin,
+                result.company.website_resolution_source,
                 json.dumps(
                     result.company.website_verification_signals,
                     ensure_ascii=False,
