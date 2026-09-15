@@ -8,6 +8,8 @@ from .models import SearchCandidate
 
 
 class SearchProvider(Protocol):
+    name: str
+
     async def search_company(
         self,
         company_name: str,
@@ -22,6 +24,7 @@ class BraveSearchProvider:
     changing company resolution or crawling logic.
     """
 
+    name = "brave"
     endpoint = "https://api.search.brave.com/res/v1/web/search"
 
     def __init__(self, api_key: str, *, timeout: float = 12.0, count: int = 8) -> None:
@@ -70,6 +73,8 @@ class BraveSearchProvider:
 
 class StaticSearchProvider:
     """Useful for tests and offline benchmarking."""
+
+    name = "static"
 
     def __init__(self, candidates: list[SearchCandidate]) -> None:
         self.candidates = candidates
