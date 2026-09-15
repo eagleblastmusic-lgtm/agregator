@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -12,9 +14,11 @@ from .storage import SQLiteStore
 @dataclass(frozen=True, slots=True)
 class SourceValidation:
     source: str
+    state: str
     access_mode: str
     experimental: bool
     required_env: list[str]
+    missing_required_env: list[str]
     current_jobs: int
     current_companies: int
     linked_companies_with_website: int
@@ -38,6 +42,8 @@ class ValidationReport:
     sources_with_current_jobs: int
     healthy_sources: list[str]
     failing_sources: list[str]
+    access_blocked_sources: list[str]
+    not_configured_sources: list[str]
     unexercised_sources: list[str]
     sources_without_current_jobs: list[str]
     jobs_total: int
@@ -55,6 +61,8 @@ class ValidationReport:
 def build_validation_report(
     store: SQLiteStore,
     registry: SourceRegistry,
+    *,
+    environment: Mapping[str, str] | None = None,
 ) -> ValidationReport:
     """Build a factual P10 validation view for every implemented adapter.
 
@@ -63,6 +71,7 @@ def build_validation_report(
     """
 
     store.init_schema()
+    env = os.environ if environment is None else environment
     names = registry.names()
     benchmark = build_benchmark_report(store)
     health_items = build_source_health(store, names)
@@ -76,12 +85,28 @@ def build_validation_report(
         current_companies = int(row.get("current_companies", 0))
         websites = int(row.get("linked_companies_with_website", 0))
         green = int(row.get("linked_companies_with_green", 0))
+        source_health = dict(
+            health.get(name, {"source": name, "state": "unexercised", "runs": 0})
+        )
+        missing_required = [
+            env_name
+            for env_name in registration.required_env
+            if not str(env.get(env_name, "")).strip()
+        ]
+        state = str(source_health.get("state", "unexercised"))
+        if state == "unexercised" and missing_required:
+            state = "not_configured"
+            source_health["state"] = state
+            source_health["missing_required_env"] = missing_required
+
         source_rows.append(
             SourceValidation(
                 source=name,
+                state=state,
                 access_mode=registration.access_mode,
                 experimental=registration.experimental,
                 required_env=list(registration.required_env),
+                missing_required_env=missing_required,
                 current_jobs=int(row.get("current_jobs", 0)),
                 current_companies=current_companies,
                 linked_companies_with_website=websites,
@@ -91,36 +116,37 @@ def build_validation_report(
                 source_verified_websites=int(
                     benchmark.source_verified_website_counts.get(name, 0)
                 ),
-                source_health=health.get(name, {"source": name, "state": "unexercised"}),
+                source_health=source_health,
                 identity_metrics=benchmark.source_identity_metrics.get(name, {}),
                 provenance_metrics=benchmark.source_provenance_metrics.get(name, {}),
                 website_attempt_metrics=benchmark.source_website_attempt_metrics.get(name, {}),
             )
         )
 
-    healthy = [
-        item.source
-        for item in source_rows
-        if item.source_health.get("state") == "healthy"
+    healthy = [item.source for item in source_rows if item.state == "healthy"]
+    failing = [item.source for item in source_rows if item.state == "failing"]
+    access_blocked = [
+        item.source for item in source_rows if item.state == "access_blocked"
     ]
-    failing = [
-        item.source
-        for item in source_rows
-        if item.source_health.get("state") == "failing"
+    not_configured = [
+        item.source for item in source_rows if item.state == "not_configured"
     ]
     unexercised = [
-        item.source
-        for item in source_rows
-        if item.source_health.get("state") == "unexercised"
+        item.source for item in source_rows if item.state == "unexercised"
     ]
     without_jobs = [item.source for item in source_rows if item.current_jobs == 0]
+    exercised = sum(
+        1 for item in source_rows if int(item.source_health.get("runs", 0) or 0) > 0
+    )
 
     return ValidationReport(
         implemented_sources=len(names),
-        exercised_sources=len(names) - len(unexercised),
+        exercised_sources=exercised,
         sources_with_current_jobs=len(names) - len(without_jobs),
         healthy_sources=healthy,
         failing_sources=failing,
+        access_blocked_sources=access_blocked,
+        not_configured_sources=not_configured,
         unexercised_sources=unexercised,
         sources_without_current_jobs=without_jobs,
         jobs_total=benchmark.jobs_total,
@@ -153,6 +179,8 @@ def render_validation_markdown(report: ValidationReport) -> str:
         "",
         f"- Healthy: `{', '.join(report.healthy_sources) or 'none'}`",
         f"- Failing: `{', '.join(report.failing_sources) or 'none'}`",
+        f"- Access blocked: `{', '.join(report.access_blocked_sources) or 'none'}`",
+        f"- Not configured: `{', '.join(report.not_configured_sources) or 'none'}`",
         f"- Unexercised: `{', '.join(report.unexercised_sources) or 'none'}`",
         (
             "- Bez rekordów w current state: `"
@@ -177,7 +205,7 @@ def render_validation_markdown(report: ValidationReport) -> str:
             "{websites} ({website_rate:.1%}) | {green} ({green_rate:.1%}) | "
             "{name_conf:.3f} | {resolution_conf:.3f} | {access} |".format(
                 source=item.source,
-                state=health.get("state", "unexercised"),
+                state=item.state,
                 runs=int(health.get("runs", 0) or 0),
                 jobs=item.current_jobs,
                 companies=item.current_companies,
