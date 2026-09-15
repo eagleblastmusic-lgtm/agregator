@@ -1,10 +1,13 @@
 import json
 from pathlib import Path
 
+from agregator.audit import record_discovery_audit
+from agregator.company_websites import persist_job_company_website_candidates
 from agregator.models import (
     ChannelKind,
     ChannelPurpose,
     CompanyIdentity,
+    CompanyWebsiteCandidate,
     ContactChannel,
     Decision,
     DiscoveryResult,
@@ -87,6 +90,12 @@ def test_benchmark_report_counts_pipeline_outputs(tmp_path: Path) -> None:
     assert report.companies_with_identifiers == 0
     assert report.identifier_conflicts == 0
     assert report.identifier_company_rate == 0.0
+    assert report.website_candidates_total == 0
+    assert report.companies_with_website_candidates == 0
+    assert report.source_verified_websites == 0
+    assert report.source_website_candidate_company_rate == 0.0
+    assert report.source_verified_website_rate == 0.0
+    assert report.source_verified_share_of_found == 0.0
     assert report.green_channels == 1
     assert report.company_to_job_ratio == 0.5
     assert report.website_find_rate == 1.0
@@ -104,6 +113,56 @@ def test_benchmark_report_counts_pipeline_outputs(tmp_path: Path) -> None:
         "exact_name_city": 1,
         "new_company": 1,
     }
+
+
+def test_benchmark_report_measures_source_website_shortcut(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "source-websites.sqlite3")
+    store.init_schema()
+    job = JobPosting(
+        source="epraca",
+        source_id="1",
+        url="https://jobs.test/1",
+        title="Magazynier",
+        company_name="ACME Logistics",
+        company_name_source="official_feed.pracodawca",
+        company_name_confidence=0.995,
+        company_website_candidates=[
+            CompanyWebsiteCandidate(
+                url="https://acme.test",
+                source="official_feed.adresWww",
+                confidence=0.98,
+            )
+        ],
+        city="Gdańsk",
+    )
+    store.upsert_jobs([job])
+    persist_job_company_website_candidates(store, [job])
+    company_id = int(store.list_companies()[0]["id"])
+    discovery = DiscoveryResult(
+        company=CompanyIdentity(
+            name="ACME Logistics",
+            city="Gdańsk",
+            website_url="https://acme.test",
+            domain="acme.test",
+            website_confidence=0.97,
+            website_verification_signals=[
+                "source_website_candidate:official_feed.adresWww",
+                "accepted",
+            ],
+        ),
+        search_candidates=[],
+    )
+    store.save_discovery_result(company_id, discovery)
+    record_discovery_audit(store, company_id, discovery)
+
+    report = build_benchmark_report(store)
+
+    assert report.website_candidates_total == 1
+    assert report.companies_with_website_candidates == 1
+    assert report.source_verified_websites == 1
+    assert report.source_website_candidate_company_rate == 1.0
+    assert report.source_verified_website_rate == 1.0
+    assert report.source_verified_share_of_found == 1.0
 
 
 def test_export_green_channels_json_and_csv(tmp_path: Path) -> None:
