@@ -27,6 +27,7 @@ def test_default_registry_contains_api_and_public_sources(
         "justjoinit",
         "karierawfinansach",
         "kprm",
+        "manpower",
         "ngo",
         "nofluffjobs",
         "ofertypracyedu",
@@ -43,6 +44,7 @@ def test_default_registry_contains_api_and_public_sources(
     assert registry.create("THEPROTOCOL").name == "theprotocol"
     assert registry.create("BULLDOGJOB").name == "bulldogjob"
     assert registry.create("RANDSTAD").name == "randstad"
+    assert registry.create("MANPOWER").name == "manpower"
     assert registry.create("SKILLSHOT").name == "skillshot"
     assert registry.create("NOFLUFFJOBS").name == "nofluffjobs"
     assert registry.create("JUSTJOINIT").name == "justjoinit"
@@ -90,6 +92,11 @@ def test_default_registry_exposes_access_policy_metadata() -> None:
     assert randstad.access_mode == "public_html"
     assert randstad.experimental is True
     assert randstad.required_env == ()
+
+    manpower = registry.describe("manpower")
+    assert manpower.access_mode == "public_html"
+    assert manpower.experimental is True
+    assert manpower.required_env == ()
 
     skillshot = registry.describe("skillshot")
     assert skillshot.access_mode == "public_html"
