@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -116,6 +117,7 @@ class JobPosting(BaseModel):
     description: str | None = None
     published_at: str | None = None
     refreshed_at: str | None = None
+    source_payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class DiscoveryResult(BaseModel):
