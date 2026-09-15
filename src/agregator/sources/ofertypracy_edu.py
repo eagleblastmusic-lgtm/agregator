@@ -7,7 +7,7 @@ import re
 import urllib.robotparser
 from collections.abc import Iterable
 from typing import Any
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -16,7 +16,7 @@ from ..models import CompanyWebsiteCandidate, JobPosting
 from .base import SourceBatch
 
 BASE_URL = "https://ofertypracy.edu.pl"
-LISTING_URL = BASE_URL + "/?page={page}&per_page=25&search=1&sort=-published_at"
+HOME_URL = BASE_URL + "/"
 _OFFER_PATH = re.compile(r"^/oferty/(\d+)/?$", re.IGNORECASE)
 _OFFICIAL_ID = re.compile(r"\bID:\s*([0-9]+/[0-9]{4})\b", re.IGNORECASE)
 _POSTAL_CITY = re.compile(r"\b\d{2}-\d{3}\s+([^\n]+)")
@@ -27,10 +27,13 @@ _PHONE = re.compile(r"(?<!\d)(?:\+?48[\s/-]?)?(?:\d[\s/-]?){7,12}(?!\d)")
 class OfertyPracyEduPublicSource:
     """Collect public MEN/SIO education vacancies from OfertyPracy.edu.pl.
 
-    The current site is an Inertia application. Public offer records are embedded in
-    the server response as ``#app[data-page]`` JSON, so the adapter reads that public
-    payload instead of depending on client-side rendered anchors. Recruitment contact
-    data stays raw evidence only and is never promoted directly to Faro GREEN.
+    The current site is an Inertia application. Its unfiltered home response reports
+    zero offers, while the same public search returns offers after selecting a
+    voivodeship. The adapter therefore iterates public voivodeship searches and reads
+    ``#app[data-page]`` JSON instead of relying on client-rendered anchors.
+
+    Recruitment contact data stays raw evidence only and is never promoted directly
+    to Faro GREEN.
     """
 
     name = "ofertypracyedu"
@@ -50,8 +53,7 @@ class OfertyPracyEduPublicSource:
         self._robots: urllib.robotparser.RobotFileParser | None = None
 
     async def collect(self, cursor: str | None = None) -> SourceBatch:
-        page = self._parse_page(cursor)
-        listing_url = LISTING_URL.format(page=page)
+        region_index, page = self._parse_cursor(cursor)
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(
             timeout=25,
@@ -64,9 +66,17 @@ class OfertyPracyEduPublicSource:
         )
 
         try:
+            await self._assert_allowed(client, HOME_URL)
+            home_html = await self._get_text(client, HOME_URL)
+            region_ids = extract_voivodeship_ids(home_html)
+            if region_index >= len(region_ids):
+                return SourceBatch(jobs=[], next_cursor=None)
+
+            region_id = region_ids[region_index]
+            listing_url = build_region_listing_url(region_id, page)
             await self._assert_allowed(client, listing_url)
             listing_html = await self._get_text(client, listing_url)
-            links, next_cursor = extract_listing_offer_links(listing_url, listing_html)
+            links, next_page = extract_listing_offer_links(listing_url, listing_html)
             links = links[: self.max_details_per_page]
 
             jobs: list[JobPosting] = []
@@ -85,19 +95,40 @@ class OfertyPracyEduPublicSource:
             if owns_client:
                 await client.aclose()
 
+        if next_page is not None:
+            next_cursor = f"{region_index}:{next_page}"
+        elif region_index + 1 < len(region_ids):
+            next_cursor = f"{region_index + 1}:1"
+        else:
+            next_cursor = None
         return SourceBatch(jobs=jobs, next_cursor=next_cursor)
 
     @staticmethod
-    def _parse_page(cursor: str | None) -> int:
+    def _parse_cursor(cursor: str | None) -> tuple[int, int]:
         if not cursor:
-            return 1
-        try:
-            page = int(cursor)
-        except ValueError as exc:
-            raise ValueError(f"invalid OfertyPracy.edu.pl page cursor: {cursor}") from exc
-        if page < 1:
-            raise ValueError("OfertyPracy.edu.pl page cursor must be positive")
-        return page
+            return 0, 1
+
+        if ":" in cursor:
+            region_raw, page_raw = cursor.split(":", 1)
+            try:
+                region_index = int(region_raw)
+                page = int(page_raw)
+            except ValueError as exc:
+                raise ValueError(
+                    f"invalid OfertyPracy.edu.pl regional cursor: {cursor}"
+                ) from exc
+        else:
+            try:
+                region_index = 0
+                page = int(cursor)
+            except ValueError as exc:
+                raise ValueError(
+                    f"invalid OfertyPracy.edu.pl page cursor: {cursor}"
+                ) from exc
+
+        if region_index < 0 or page < 1:
+            raise ValueError("OfertyPracy.edu.pl cursor values are out of range")
+        return region_index, page
 
     async def _assert_allowed(self, client: httpx.AsyncClient, url: str) -> None:
         if self._robots is None:
@@ -124,11 +155,46 @@ class OfertyPracyEduPublicSource:
         return response.text
 
 
+def build_region_listing_url(region_id: str, page: int) -> str:
+    query = urlencode(
+        {
+            "filter[rspo.voivodeship_id]": region_id,
+            "page": str(page),
+            "per_page": "25",
+            "search": "1",
+            "sort": "-published_at",
+        }
+    )
+    return f"{BASE_URL}/?{query}"
+
+
+def extract_voivodeship_ids(html: str) -> list[str]:
+    payload = _inertia_payload(html)
+    if payload is None:
+        return []
+    props = payload.get("props")
+    props = props if isinstance(props, dict) else {}
+    values = props.get("voivodeships")
+    values = values if isinstance(values, list) else []
+
+    output: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        region_id = _as_identifier(item.get("id"))
+        if region_id is None or region_id in seen:
+            continue
+        seen.add(region_id)
+        output.append(region_id)
+    return output
+
+
 def extract_listing_offer_links(
     listing_url: str,
     html: str,
 ) -> tuple[list[str], str | None]:
-    """Return offer URLs and the next cursor from public Inertia or legacy HTML."""
+    """Return offer URLs and the next page from public Inertia or legacy HTML."""
 
     payload = _inertia_payload(html)
     if payload is not None:
@@ -156,10 +222,10 @@ def extract_listing_offer_links(
 
         current_page = _as_positive_int(meta.get("current_page"))
         last_page = _as_positive_int(meta.get("last_page"))
-        next_cursor = None
+        next_page = None
         if current_page is not None and last_page is not None and current_page < last_page:
-            next_cursor = str(current_page + 1)
-        return output, next_cursor
+            next_page = str(current_page + 1)
+        return output, next_page
 
     links = extract_offer_links(listing_url, html)
     page = _page_from_listing_url(listing_url)
@@ -306,9 +372,12 @@ def _inertia_payload(html: str) -> dict[str, Any] | None:
     if not raw:
         return None
     try:
-        payload = json.loads(html_module.unescape(raw))
+        payload = json.loads(raw)
     except json.JSONDecodeError:
-        return None
+        try:
+            payload = json.loads(html_module.unescape(raw))
+        except json.JSONDecodeError:
+            return None
     return payload if isinstance(payload, dict) else None
 
 
@@ -368,30 +437,16 @@ def _website_candidates_from_offer(
 ) -> list[CompanyWebsiteCandidate]:
     rspo = offer.get("rspo")
     rspo = rspo if isinstance(rspo, dict) else {}
-    output: list[CompanyWebsiteCandidate] = []
-    seen: set[str] = set()
-
-    candidates = (
-        (rspo.get("website"), "ofertypracyedu.inertia.offer.rspo.website", 0.90),
-        (
-            offer.get("sample_statements_available_at"),
-            "ofertypracyedu.inertia.offer.sample_statements_available_at",
-            0.70,
-        ),
-    )
-    for raw, source, confidence in candidates:
-        normalized = _normalize_public_url(raw)
-        if normalized is None or normalized in seen:
-            continue
-        seen.add(normalized)
-        output.append(
-            CompanyWebsiteCandidate(
-                url=normalized,
-                source=source,
-                confidence=confidence,
-            )
+    normalized = _normalize_public_url(rspo.get("website"))
+    if normalized is None:
+        return []
+    return [
+        CompanyWebsiteCandidate(
+            url=normalized,
+            source="ofertypracyedu.inertia.offer.rspo.website",
+            confidence=0.90,
         )
-    return output
+    ]
 
 
 def _normalize_public_url(value: object) -> str | None:
