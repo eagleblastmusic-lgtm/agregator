@@ -9,6 +9,7 @@ import typer
 
 from .catalog import catalog_summary, filter_catalog, load_source_catalog
 from .crawler import WebsiteCrawler
+from .dataset_export import export_dataset_bundle
 from .enrich import enrich_pending_companies
 from .ground_truth import evaluate_company_resolution_csv, export_ground_truth_template
 from .importers import load_jobs_csv
@@ -378,6 +379,16 @@ def export_green(
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(str(path))
+
+
+@app.command("export-dataset")
+def export_dataset(
+    output_dir: str = typer.Option(..., "--output-dir"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+) -> None:
+    store = SQLiteStore(db)
+    result = export_dataset_bundle(store, output_dir)
+    typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
