@@ -37,6 +37,10 @@ class BenchmarkReport:
     green_channels: int
     review_channels: int
     ignored_channels: int
+    contact_evidence_snapshots_total: int
+    contact_evidence_observations_total: int
+    contact_evidence_changes_total: int
+    changed_contact_channels: int
     company_to_job_ratio: float
     website_find_rate: float
     identifier_company_rate: float
@@ -146,6 +150,26 @@ def build_benchmark_report(
             connection,
             "SELECT COUNT(*) FROM contact_channels WHERE decision = 'ignore'",
         )
+        contact_evidence_snapshots_total = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM contact_evidence_snapshots",
+        )
+        contact_evidence_observations_total = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM contact_evidence_observations",
+        )
+        contact_evidence_changes_total = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM contact_evidence_observations WHERE snapshot_changed = 1",
+        )
+        changed_contact_channels = _scalar(
+            connection,
+            """
+            SELECT COUNT(DISTINCT contact_channel_id)
+            FROM contact_evidence_observations
+            WHERE snapshot_changed = 1
+            """,
+        )
         green_companies = _scalar(
             connection,
             """
@@ -251,6 +275,10 @@ def build_benchmark_report(
         green_channels=green_channels,
         review_channels=review_channels,
         ignored_channels=ignored_channels,
+        contact_evidence_snapshots_total=contact_evidence_snapshots_total,
+        contact_evidence_observations_total=contact_evidence_observations_total,
+        contact_evidence_changes_total=contact_evidence_changes_total,
+        changed_contact_channels=changed_contact_channels,
         company_to_job_ratio=_ratio(companies_total, jobs_total),
         website_find_rate=_ratio(websites_found, enriched_companies),
         identifier_company_rate=_ratio(companies_with_identifiers, companies_total),
