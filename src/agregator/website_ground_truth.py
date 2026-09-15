@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .audit import init_audit_schema
+from .company_websites import init_company_website_candidate_schema
 from .storage import SQLiteStore
 
 NO_WEBSITE = "__none__"
@@ -95,20 +97,42 @@ def export_website_ground_truth_template(
     limit: int = 1000,
 ) -> Path:
     store.init_schema()
+    init_audit_schema(store)
+    init_company_website_candidate_schema(store)
     path = Path(output)
     with store.connect() as connection:
         rows = connection.execute(
             """
+            WITH latest_verification AS (
+                SELECT w.*
+                FROM website_verification_runs w
+                JOIN (
+                    SELECT company_id, MAX(id) AS latest_id
+                    FROM website_verification_runs
+                    GROUP BY company_id
+                ) latest ON latest.latest_id = w.id
+            )
             SELECT
                 c.id AS company_id,
                 c.canonical_name,
                 c.city,
                 c.website_url AS predicted_website_url,
                 c.website_confidence,
+                lv.id AS latest_verification_id,
+                lv.outcome AS verification_outcome,
+                lv.resolution_origin AS predicted_resolution_origin,
+                lv.resolution_source AS predicted_resolution_source,
+                lv.verification_signals_json,
+                (
+                    SELECT COUNT(*)
+                    FROM company_website_candidates cwc
+                    WHERE cwc.company_id = c.id
+                ) AS source_website_candidate_count,
                 COUNT(DISTINCT j.id) AS job_count,
                 GROUP_CONCAT(DISTINCT j.source) AS sources
             FROM companies c
             LEFT JOIN job_postings j ON j.company_id = c.id
+            LEFT JOIN latest_verification lv ON lv.company_id = c.id
             GROUP BY c.id
             ORDER BY job_count DESC, c.id ASC
             LIMIT ?
@@ -124,6 +148,12 @@ def export_website_ground_truth_template(
         "predicted_website_url",
         "predicted_domain",
         "website_confidence",
+        "latest_verification_id",
+        "verification_outcome",
+        "predicted_resolution_origin",
+        "predicted_resolution_source",
+        "source_website_candidate_count",
+        "verification_signals_json",
         "job_count",
         "sources",
     ]
@@ -141,6 +171,14 @@ def export_website_ground_truth_template(
                     "predicted_website_url": row["predicted_website_url"],
                     "predicted_domain": normalize_domain(row["predicted_website_url"]),
                     "website_confidence": row["website_confidence"],
+                    "latest_verification_id": row["latest_verification_id"],
+                    "verification_outcome": row["verification_outcome"],
+                    "predicted_resolution_origin": row["predicted_resolution_origin"],
+                    "predicted_resolution_source": row["predicted_resolution_source"],
+                    "source_website_candidate_count": row[
+                        "source_website_candidate_count"
+                    ],
+                    "verification_signals_json": row["verification_signals_json"],
                     "job_count": row["job_count"],
                     "sources": row["sources"],
                 }
