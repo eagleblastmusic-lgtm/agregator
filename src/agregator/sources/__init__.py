@@ -6,6 +6,7 @@ import os
 
 from .adzuna import AdzunaApiSource
 from .careerjet import CareerjetApiSource
+from .epraca import EPracaSource
 from .jooble import JoobleApiSource
 from .olx import OlxPublicSource
 from .registry import SourceRegistry
@@ -74,18 +75,43 @@ def _careerjet_from_env() -> CareerjetApiSource:
     )
 
 
+def _epraca_from_env() -> EPracaSource:
+    partner = os.getenv("EPRACA_PARTNER", "")
+    if not partner:
+        raise ValueError("Ustaw EPRACA_PARTNER nadany przez MRPiPS")
+
+    voivodeship = os.getenv("EPRACA_WOJEWODZTWO") or None
+    unit = os.getenv("EPRACA_JEDNOSTKA") or None
+    all_offers = os.getenv("EPRACA_ALL", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "tak",
+    }
+
+    return EPracaSource(
+        partner,
+        language=os.getenv("EPRACA_LANGUAGE", "pl"),
+        voivodeship=voivodeship,
+        unit=unit,
+        all_offers=all_offers,
+    )
+
+
 def default_registry() -> SourceRegistry:
     registry = SourceRegistry()
     registry.register("olx", OlxPublicSource)
     registry.register("jooble", _jooble_from_env)
     registry.register("adzuna", _adzuna_from_env)
     registry.register("careerjet", _careerjet_from_env)
+    registry.register("epraca", _epraca_from_env)
     return registry
 
 
 __all__ = [
     "AdzunaApiSource",
     "CareerjetApiSource",
+    "EPracaSource",
     "JoobleApiSource",
     "OlxPublicSource",
     "SourceRegistry",
