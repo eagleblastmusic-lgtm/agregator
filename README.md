@@ -32,14 +32,18 @@ Projekt **nie wysyła wiadomości**, nie omija logowania, CAPTCHA, paywalli ani 
 - search fallback przez wymienny `SearchProvider` (Brave),
 - strukturalne provenance rozwiązania domeny: `source_candidate`, `search`, `known_url`,
 - crawler first-party z `robots.txt`, limitami, rate limitingiem i `sitemap.xml`,
-- ekstrakcja e-maili, formularzy i typowych obfuskowanych adresów,
+- ekstrakcja e-maili, formularzy i wariantów publicznej obfuskacji,
+- bogatsza semantyka formularzy z atrybutów i kontrolek,
+- konserwatywna kanonikalizacja i deduplikacja aliasów URL,
 - klasyfikacja `GREEN / REVIEW / IGNORE`,
+- osobne metryki klasyfikatora dla `email` i `form`,
 - append-only audit website verification i evidence,
 - immutable SHA-256 page/contact snapshots,
+- append-only timeline `contact_evidence_observations`,
 - ręcznie etykietowane quality gates dla Company Resolution, domen i kontaktów,
 - Employer Discovery Score 0–100,
 - kontrolowany benchmark end-to-end 1000 ofert,
-- eksport Faro **schema v6**.
+- eksport Faro **schema v7**.
 
 ## Instalacja
 
@@ -117,7 +121,15 @@ source website candidates
 
 ## Kontrolowany benchmark end-to-end
 
-Pełny workflow ma osobny entrypoint:
+Najpierw można sprawdzić konfigurację bez wypisywania wartości sekretów:
+
+```bash
+agregator-benchmark preflight \
+  --sources olx,jooble,adzuna \
+  --strict
+```
+
+Pełny workflow:
 
 ```bash
 agregator-benchmark run \
@@ -140,7 +152,7 @@ collection
   -> contact crawl/classification
   -> benchmark report
   -> dataset export
-  -> offline website snapshots
+  -> offline website/contact evidence
   -> ground-truth templates
 ```
 
@@ -161,7 +173,24 @@ agregator export-quality-labels \
   --contact-limit 1000
 ```
 
-Po ręcznym oznaczeniu:
+Postęp ręcznego labelingu:
+
+```bash
+agregator-benchmark status \
+  --label-dir benchmark/labels \
+  --strict
+```
+
+Po kompletnym oznaczeniu można uruchomić zintegrowaną ewaluację:
+
+```bash
+agregator-benchmark evaluate \
+  --db agregator.sqlite3 \
+  --label-dir benchmark/labels \
+  --fail-on-error
+```
+
+Niskopoziomowy quality gate pozostaje dostępny:
 
 ```bash
 agregator quality-gate \
@@ -178,9 +207,9 @@ Domyślne progi:
 - Website Resolution F1 >= 0.95,
 - Contact decision macro F1 >= 0.90.
 
-`website_resolution_truth.csv` zawiera także latest verification provenance, dzięki czemu można powiązać etykietę z zachowanymi snapshotami strony.
+`website_resolution_truth.csv` zawiera latest verification provenance, dzięki czemu można powiązać etykietę z zachowanymi snapshotami strony. Ewaluator kontaktów raportuje również `decision_by_kind` z osobnymi metrykami dla `email` i `form`.
 
-## Eksport Faro — schema v6
+## Eksport Faro — schema v7
 
 ```bash
 agregator export-dataset \
@@ -198,21 +227,26 @@ company_website_candidates.csv
 contact_channels.csv
 website_verification_runs.csv
 contact_evidence_snapshots.csv
+contact_evidence_observations.csv
 website_page_snapshots.csv
 manifest.json
 ```
 
-`website_page_snapshots.csv` jest spłaszczonym, offline evidence z audit trailu. Zawiera także snapshoty odrzuconych `WebsiteVerificationAttempt`, hash SHA-256, URL, status HTTP, excerpt oraz provenance próby. Nie wymaga ponownego crawlowania strony podczas późniejszego labelingu.
+`website_page_snapshots.csv` jest spłaszczonym offline evidence z audit trailu. Zawiera także snapshoty odrzuconych `WebsiteVerificationAttempt`, hash SHA-256, URL, status HTTP, excerpt oraz provenance próby. Nie wymaga ponownego crawlowania strony podczas późniejszego labelingu.
+
+`contact_evidence_snapshots.csv` przechowuje immutable wersje treści dowodu. `contact_evidence_observations.csv` zapisuje każdą obserwację w konkretnym `website_verification_run_id` razem z decision/purpose/confidence i flagą `snapshot_changed`, dzięki czemu ponowne wykrycie kanału można odróżnić od rzeczywistej zmiany evidence.
 
 ## Kontakty i evidence
 
 Crawler priorytetyzuje first-party ścieżki takie jak `/kontakt`, `/wspolpraca`, `/partnerzy`, `/b2b`, `/dla-firm`, `/dostawcy`, `/franczyza`.
 
+Ekstraktor wykorzystuje widoczny tekst oraz bezpieczne sygnały strukturalne formularza, m.in. `aria-label`, `name`, `id`, `placeholder`, action/method i nazwy kontrolek. Kanonikalizacja URL usuwa fragmenty, domyślne porty i znane parametry trackingowe, ale zachowuje parametry funkcjonalne.
+
 - `GREEN` — mocny publiczny sygnał zgodny z celem,
 - `REVIEW` — wymaga ręcznej oceny,
 - `IGNORE` — kanał nieodpowiedni.
 
-Sama obecność e-maila lub checkboxa informacji handlowej nie oznacza automatycznie `GREEN`.
+Sama obecność e-maila, rola w local-part albo checkbox informacji handlowej nie oznacza automatycznie `GREEN`.
 
 ```bash
 agregator green --db agregator.sqlite3 --limit 100
