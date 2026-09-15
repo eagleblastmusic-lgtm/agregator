@@ -11,7 +11,8 @@ zbieranie ofert
     -> raport benchmarku
     -> eksport datasetu
     -> offline snapshoty stron i timeline evidence
-    -> deterministycznie próbkowany pakiet do ręcznego ground truth
+    -> deterministycznie próbkowany pakiet ground truth
+    -> blind primary labeling + osobne prediction reference
 ```
 
 Nie wykonuje outreachu ani wysyłki wiadomości.
@@ -102,14 +103,18 @@ benchmark/run/
     ├── company_resolution_truth.csv
     ├── website_resolution_truth.csv
     ├── contact_classification_truth.csv
-    └── sampling_manifest.json
+    ├── sampling_manifest.json
+    └── prediction_reference/
+        ├── company_resolution_reference.csv
+        ├── website_resolution_reference.csv
+        └── contact_classification_reference.csv
 ```
 
-`dataset/manifest.json` ma schema version `7`. `benchmark_run_manifest.json` ma schema version `4` i zapisuje m.in. seed oraz ścieżkę do manifestu samplingu.
+`dataset/manifest.json` ma schema version `7`. `benchmark_run_manifest.json` ma schema version `5` i zapisuje m.in. seed, ścieżkę manifestu samplingu oraz ścieżki prediction-reference.
 
 ## Deterministyczny sampling ground truth
 
-Eksport labeli nie bierze już po prostu pierwszych N rekordów z SQLite. Najpierw budowana jest pełna pula kandydatów, a następnie — jeśli populacja przekracza limit — dobierana jest próbka warstwowa.
+Eksport labeli nie bierze po prostu pierwszych N rekordów z SQLite. Najpierw budowana jest pełna pula kandydatów, a następnie — jeśli populacja przekracza limit — dobierana jest próbka warstwowa.
 
 Warstwy są definiowane osobno dla trzech zadań:
 
@@ -130,13 +135,36 @@ Dla Company Resolution część próbki jest rezerwowana na **pairwise anchors**
 
 Manifest samplingu jest elementem provenance benchmarku. Zmiana seeda jest dozwolona np. dla niezależnej próbki kontrolnej, ale przy porównywaniu dwóch wersji algorytmu należy zachować ten sam dataset, limity i seed.
 
+## Blind primary labeling
+
+Po wybraniu próbki Faro **kopiuje pełne, prediction-rich rekordy do `labels/prediction_reference/`, a główne pliki `*_truth.csv` usuwa z widoku annotatora kolumny z prognozą modelu**. Celem jest ograniczenie confirmation bias.
+
+Primary labeler powinien pracować tylko na plikach:
+
+```text
+labels/company_resolution_truth.csv
+labels/website_resolution_truth.csv
+labels/contact_classification_truth.csv
+```
+
+W nich pozostają identyfikatory wiersza, puste pola truth i kontekst/evidence niezbędny do oceny, ale nie pozostają np. `predicted_company_id`, `predicted_website_url`, `predicted_decision`, predicted confidence ani classifier signal.
+
+Pliki w `labels/prediction_reference/` zachowują pełny sampled row wraz z prognozami i służą dopiero do:
+
+- późniejszego adjudication,
+- analizy false positive / false negative,
+- porównania ground truth z heurystykami,
+- reprodukcji decyzji benchmarku.
+
+Nie należy otwierać prediction-reference przed zapisaniem niezależnej etykiety, jeśli benchmark ma mierzyć model bez confirmation bias.
+
 ## Offline evidence stron WWW
 
 `website_page_snapshots.csv` powstaje z append-only audit trailu, bez ponownego pobierania stron. Dla automatycznego website resolution preferowane są snapshoty zapisane przy `WebsiteVerificationAttempt`, więc plik obejmuje również kandydatów odrzuconych przed wyborem poprawnej domeny.
 
 Wiersz może zawierać `verification_id`, `company_id`, finalne `resolution_origin`/`resolution_source`, URL i wynik próby, `attempt_origin`/`attempt_source`, URL konkretnej strony, kod HTTP, SHA-256, tekstowy excerpt i timestamp.
 
-Jeżeli run nie ma listy prób, np. dla jawnie podanego znanego URL, exporter używa run-level `page_snapshots_json`.
+Uwaga metodologiczna: pola takie jak `accepted`, score lub predicted origin również są wynikiem systemu. Jeśli annotator korzysta z `website_page_snapshots.csv` podczas **primary** labelingu, powinien ignorować te kolumny i oceniać zawartość strony niezależnie. Najczystszy ground truth domeny powstaje przez niezależne ustalenie oficjalnej domeny na podstawie nazwy/lokalizacji firmy, a snapshoty służą później do adjudication i audytu.
 
 ## Timeline evidence kontaktów
 
@@ -150,19 +178,36 @@ Jeżeli run nie ma listy prób, np. dla jawnie podanego znanego URL, exporter u�
 
 Dzięki temu można rozdzielić „kanał widziany ponownie bez zmian” od „evidence rzeczywiście się zmieniło” i audytować historyczne zmiany klasyfikacji bez nadpisywania poprzedniego stanu.
 
-## Ground truth domen z provenance
+## Ground truth domen
 
-`labels/website_resolution_truth.csv` zawiera poza `truth_domain` również `latest_verification_id`, `verification_outcome`, `predicted_resolution_origin`, `predicted_resolution_source`, `source_website_candidate_count` i `verification_signals_json`.
+Blind `labels/website_resolution_truth.csv` zawiera przede wszystkim:
 
-`latest_verification_id` pozwala powiązać wiersz labelingu z `website_page_snapshots.csv` i zobaczyć evidence zaakceptowanej domeny oraz wcześniejszych kandydatów odrzuconych przez verifier.
+```text
+company_id
+truth_domain
+canonical_name
+city
+job_count
+sources
+```
 
-## Ground truth kontaktów z immutable evidence
+Pełne pola prognozy — m.in. `predicted_website_url`, `predicted_domain`, confidence, verification outcome, origin/source i signals — znajdują się w `labels/prediction_reference/website_resolution_reference.csv`.
 
-`labels/contact_classification_truth.csv` przechowuje także:
+Wartość `__none__` oznacza ręcznie potwierdzony brak oficjalnej strony WWW.
 
-- `latest_evidence_snapshot_id`,
-- `evidence_content_sha256`,
-- `evidence_captured_at`.
+## Ground truth kontaktów
+
+Blind `labels/contact_classification_truth.csv` zachowuje:
+
+- `contact_id`,
+- `truth_decision`,
+- `truth_purpose`,
+- nazwę firmy,
+- typ i wartość kanału,
+- publiczny `evidence_url` i `evidence_text`,
+- identyfikator/hash/timestamp immutable evidence.
+
+Prognozowane `decision`, `purpose`, confidence i classifier signal są dostępne wyłącznie w `labels/prediction_reference/contact_classification_reference.csv`.
 
 Ewaluator raportuje metryki globalne oraz `decision_by_kind`: osobne accuracy, macro F1, confusion matrix i per-class metrics dla `email` oraz `form`, o ile dany typ występuje w oznaczonej próbce.
 
@@ -183,7 +228,9 @@ agregator-benchmark status \
   --strict
 ```
 
-`--strict` zwraca kod `2`, dopóki wszystkie trzy pliki ground truth nie istnieją, mają prawidłową kolumnę etykiety, nie są puste i nie są w pełni oznaczone. `sampling_manifest.json` nie jest czwartym plikiem do ręcznego oznaczania — służy wyłącznie jako audit/provenance próbki.
+`--strict` zwraca kod `2`, dopóki wszystkie trzy pliki ground truth nie istnieją, mają prawidłową kolumnę etykiety, nie są puste i nie są w pełni oznaczone.
+
+Status raportuje także `sampling_manifest`: seed, schema, poprawność manifestu oraz zgodność deklarowanej liczby sampled rows z faktyczną liczbą wierszy w trzech plikach labelingu. Brak/stary/niespójny manifest pojawia się jako `audit_warnings`; dla kompatybilności nie jest osobnym quality-gate blockerem.
 
 ## Następny krok: ręczny ground truth
 
