@@ -53,6 +53,13 @@ def _search_provider() -> BraveSearchProvider:
     return BraveSearchProvider(api_key)
 
 
+def _optional_search_provider() -> BraveSearchProvider | None:
+    api_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
+    if not api_key:
+        return None
+    return BraveSearchProvider(api_key)
+
+
 def _source_result(result: IngestResult, db: str) -> dict[str, object]:
     return {
         "run_id": result.run_id,
@@ -320,7 +327,7 @@ def enrich_db(
         store = SQLiteStore(db)
         pipeline = EmployerDiscoveryPipeline(
             crawler=_crawler(),
-            search_provider=_search_provider(),
+            search_provider=_optional_search_provider(),
         )
         stats = await enrich_pending_companies(
             store,
