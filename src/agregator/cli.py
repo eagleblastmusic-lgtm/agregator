@@ -9,6 +9,7 @@ import typer
 
 from .crawler import WebsiteCrawler
 from .enrich import enrich_pending_companies
+from .importers import load_jobs_csv
 from .ingest import ingest_source
 from .pipeline import EmployerDiscoveryPipeline
 from .search import BraveSearchProvider
@@ -122,6 +123,19 @@ def collect_olx(
 ) -> None:
     result = asyncio.run(_collect("olx", db, pages, fresh))
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@app.command("import-csv")
+def import_csv(
+    path: str = typer.Option(..., "--path"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    default_source: str = typer.Option("csv", "--default-source"),
+) -> None:
+    store = SQLiteStore(db)
+    store.init_schema()
+    jobs = load_jobs_csv(path, default_source=default_source)
+    stats = store.upsert_jobs(jobs)
+    typer.echo(json.dumps(asdict(stats), ensure_ascii=False, indent=2))
 
 
 @app.command("enrich-db")
