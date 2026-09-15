@@ -15,6 +15,7 @@ Jeden przebieg łączy istniejące etapy:
     -> first-party crawl
     -> GREEN / REVIEW / IGNORE
     -> Excel: jedna firma = jeden wiersz
+    -> historyczny source health
 ```
 
 ## Uruchomienie
@@ -66,6 +67,22 @@ Awaria jednego portalu nie zatrzymuje pozostałych źródeł. Wynik workflow otr
 
 `--strict` zwraca kod procesu `2`, jeżeli którekolwiek faktycznie uruchomione źródło zakończyło się błędem. Źródło pominięte z powodu brakujących opcjonalnych poświadczeń nie jest błędem workflow.
 
+## Source health
+
+Każdy przebieg zwraca także `source_health` zbudowany z trwałej historii `source_runs`, a nie tylko z bieżącego wykonania.
+
+Dla każdego żądanego źródła raportowane są m.in.:
+
+- `state`: `healthy`, `failing` albo `unexercised`,
+- liczba wszystkich runów, sukcesów i błędów,
+- `success_rate`,
+- łączna liczba `jobs_seen`, `jobs_inserted`, `jobs_updated` i `companies_created`,
+- ostatni status i czas uruchomienia,
+- czas ostatniego sukcesu,
+- typ i treść ostatniego błędu.
+
+Dzięki temu regresja źródła pozostaje widoczna również wtedy, gdy poprzednie przebiegi działały poprawnie.
+
 ## Wynik JSON
 
 Runner raportuje m.in.:
@@ -75,7 +92,8 @@ Runner raportuje m.in.:
 - `skipped_sources` wraz z `missing_env`,
 - `successful_sources`,
 - `failed_sources`,
-- statystyki każdego source runu,
+- `source_results` dla bieżącego przebiegu,
+- `source_health` z historią działania źródeł,
 - statystyki enrichmentu (`websites_found`, `green_channels`, `search_skipped`, itd.),
 - ścieżkę oraz liczbę firm w finalnym eksporcie Excel.
 
