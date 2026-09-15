@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+import csv
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+from .storage import SQLiteStore
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkReport:
+    jobs_total: int
+    companies_total: int
+    sources_total: int
+    high_confidence_companies: int
+    enriched_companies: int
+    websites_found: int
+    contact_channels_total: int
+    green_channels: int
+    review_channels: int
+    ignored_channels: int
+    company_to_job_ratio: float
+    website_find_rate: float
+    green_company_rate: float
+    source_job_counts: dict[str, int]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def build_benchmark_report(
+    store: SQLiteStore,
+    *,
+    high_confidence_threshold: float = 0.7,
+) -> BenchmarkReport:
+    store.init_schema()
+    with store.connect() as connection:
+        jobs_total = _scalar(connection, "SELECT COUNT(*) FROM job_postings")
+        companies_total = _scalar(connection, "SELECT COUNT(*) FROM companies")
+        sources_total = _scalar(
+            connection,
+            "SELECT COUNT(DISTINCT source) FROM job_postings",
+        )
+        high_confidence_companies = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM companies WHERE identity_confidence >= ?",
+            (high_confidence_threshold,),
+        )
+        enriched_companies = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM companies WHERE enriched_at IS NOT NULL",
+        )
+        websites_found = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM companies WHERE website_url IS NOT NULL",
+        )
+        contact_channels_total = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM contact_channels",
+        )
+        green_channels = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM contact_channels WHERE decision = 'green'",
+        )
+        review_channels = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM contact_channels WHERE decision = 'review'",
+        )
+        ignored_channels = _scalar(
+            connection,
+            "SELECT COUNT(*) FROM contact_channels WHERE decision = 'ignore'",
+        )
+        green_companies = _scalar(
+            connection,
+            """
+            SELECT COUNT(DISTINCT company_id)
+            FROM contact_channels
+            WHERE decision = 'green'
+            """,
+        )
+        source_rows = connection.execute(
+            """
+            SELECT source, COUNT(*) AS jobs
+            FROM job_postings
+            GROUP BY source
+            ORDER BY jobs DESC, source ASC
+            """
+        ).fetchall()
+
+    source_job_counts = {str(row["source"]): int(row["jobs"]) for row in source_rows}
+    return BenchmarkReport(
+        jobs_total=jobs_total,
+        companies_total=companies_total,
+        sources_total=sources_total,
+        high_confidence_companies=high_confidence_companies,
+        enriched_companies=enriched_companies,
+        websites_found=websites_found,
+        contact_channels_total=contact_channels_total,
+        green_channels=green_channels,
+        review_channels=review_channels,
+        ignored_channels=ignored_channels,
+        company_to_job_ratio=_ratio(companies_total, jobs_total),
+        website_find_rate=_ratio(websites_found, enriched_companies),
+        green_company_rate=_ratio(green_companies, enriched_companies),
+        source_job_counts=source_job_counts,
+    )
+
+
+def export_green_channels(
+    store: SQLiteStore,
+    output: str | Path,
+    *,
+    format: str | None = None,
+    limit: int = 100_000,
+) -> Path:
+    store.init_schema()
+    path = Path(output)
+    export_format = (format or path.suffix.lstrip(".") or "json").lower()
+    rows = store.list_green_channels(limit=limit)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if export_format == "json":
+        path.write_text(
+            json.dumps(rows, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return path
+
+    if export_format == "csv":
+        fieldnames = [
+            "canonical_name",
+            "city",
+            "website_url",
+            "kind",
+            "value",
+            "purpose",
+            "confidence",
+            "evidence_url",
+            "evidence_text",
+            "verified_at",
+        ]
+        with path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        return path
+
+    raise ValueError(f"unsupported export format: {export_format}")
+
+
+def _scalar(connection: Any, query: str, params: tuple[object, ...] = ()) -> int:
+    row = connection.execute(query, params).fetchone()
+    return int(row[0]) if row is not None else 0
+
+
+def _ratio(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round(numerator / denominator, 4)
