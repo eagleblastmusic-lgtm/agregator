@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .audit_export import WebsiteSnapshotExportResult, export_website_page_snapshots
 from .benchmark_runner import BenchmarkCollectionResult, collect_benchmark
 from .dataset_export import DatasetExportResult, export_dataset_bundle
 from .enrich import EnrichmentStats, enrich_pending_companies
@@ -59,6 +60,7 @@ class BenchmarkPipelineResult:
     enrichment: BenchmarkEnrichmentSummary
     benchmark: BenchmarkReport
     dataset: DatasetExportResult
+    website_snapshots: WebsiteSnapshotExportResult
     quality_labels: QualityLabelBundle
 
     def to_dict(self) -> dict[str, Any]:
@@ -72,6 +74,7 @@ class BenchmarkPipelineResult:
             "enrichment": self.enrichment.to_dict(),
             "benchmark": self.benchmark.to_dict(),
             "dataset": self.dataset.to_dict(),
+            "website_snapshots": self.website_snapshots.to_dict(),
             "quality_labels": self.quality_labels.to_dict(),
         }
 
@@ -142,6 +145,10 @@ async def run_benchmark_pipeline(
     _write_json(benchmark_report_path, benchmark.to_dict())
 
     dataset = export_dataset_bundle(store, directory / "dataset")
+    website_snapshots = export_website_page_snapshots(
+        store,
+        directory / "dataset" / "website_page_snapshots.csv",
+    )
     quality_labels = export_quality_label_bundle(
         store,
         directory / "labels",
@@ -151,7 +158,7 @@ async def run_benchmark_pipeline(
     )
 
     manifest = {
-        "schema_version": "1",
+        "schema_version": "2",
         "created_at": datetime.now(UTC).isoformat(),
         "database": str(store.path),
         "configuration": {
@@ -172,12 +179,14 @@ async def run_benchmark_pipeline(
         "enrichment": enrichment.to_dict(),
         "benchmark": benchmark.to_dict(),
         "dataset": dataset.to_dict(),
+        "website_snapshots": website_snapshots.to_dict(),
         "quality_labels": quality_labels.to_dict(),
         "files": {
             "collection": collection_path.name,
             "enrichment": enrichment_path.name,
             "benchmark_report": benchmark_report_path.name,
             "dataset_dir": "dataset",
+            "website_page_snapshots": "dataset/website_page_snapshots.csv",
             "labels_dir": "labels",
         },
     }
@@ -193,6 +202,7 @@ async def run_benchmark_pipeline(
         enrichment=enrichment,
         benchmark=benchmark,
         dataset=dataset,
+        website_snapshots=website_snapshots,
         quality_labels=quality_labels,
     )
 
