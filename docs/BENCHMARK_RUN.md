@@ -28,8 +28,6 @@ BRAVE_SEARCH_API_KEY=...
 
 ## Uruchomienie
 
-Po instalacji projektu dostępna jest osobna komenda:
-
 ```bash
 agregator-benchmark run \
   --db benchmark/benchmark.sqlite3 \
@@ -41,24 +39,36 @@ agregator-benchmark run \
   --max-enrichment-companies 1000
 ```
 
-Domyślny `target_jobs=1000` oznacza całkowitą liczbę ofert w bazie benchmarkowej. Jeżeli baza zawiera już co najmniej target, etap collection kończy się jako `target_already_reached` i workflow przechodzi dalej.
+`target_jobs=1000` oznacza całkowitą liczbę ofert w bazie benchmarkowej. Jeżeli baza ma już co najmniej target, collection kończy się jako `target_already_reached` i workflow idzie dalej.
 
-`--fresh-collection` resetuje kursory wybranych źródeł, ale nie kasuje istniejących rekordów z bazy. Do całkowicie nowego benchmarku najlepiej użyć nowej ścieżki SQLite.
+`--fresh-collection` resetuje kursory wybranych źródeł, ale nie kasuje rekordów z bazy. Do całkowicie nowego benchmarku najlepiej użyć nowej ścieżki SQLite.
+
+### Tryb strict
+
+Do formalnego gate przed ręcznym labelingiem można dodać:
+
+```bash
+agregator-benchmark run ... --strict
+```
+
+Tryb `--strict` nadal zapisuje raporty i manifest, ale kończy proces kodem `2`, jeśli nie osiągnięto `target_jobs` albo enrichment nie zakończył się stanem `no_pending_companies`.
+
+`benchmark_run_manifest.json` zawiera strukturę `readiness`: `collection_target_reached`, `enrichment_complete`, `dataset_exported`, `ground_truth_templates_generated`, `ready_for_manual_labeling`, `manual_ground_truth_required` oraz `blockers`.
+
+`ready_for_manual_labeling=true` nie oznacza przejścia quality gate. Oznacza tylko, że techniczny run jest kompletny i można rozpocząć ręczne oznaczanie ground truth.
 
 ## Enrichment
 
-Firmy są pobierane do enrichmentu partiami. Domyślnie kwalifikują się rekordy z `identity_confidence >= 0.7` i bez wcześniejszego `enriched_at`.
+Firmy są pobierane partiami. Domyślnie kwalifikują się rekordy z `identity_confidence >= 0.7` i bez wcześniejszego `enriched_at`.
 
 Workflow ma dwa zabezpieczenia przed zapętleniem:
 
-- `--max-enrichment-companies` ogranicza liczbę wybranych prób enrichmentu,
-- jeżeli cała wybrana partia kończy się błędem, run zatrzymuje enrichment z `batch_all_failed` zamiast powtarzać w nieskończoność te same firmy.
+- `--max-enrichment-companies` ogranicza liczbę prób enrichmentu,
+- jeżeli cała wybrana partia kończy się błędem, run zatrzymuje enrichment z `batch_all_failed`.
 
-Nieudane firmy pozostają pending i mogą zostać ponowione w kolejnym uruchomieniu po naprawieniu konfiguracji lub problemu sieciowego.
+Nieudane firmy pozostają pending i mogą zostać ponowione po naprawieniu konfiguracji lub problemu sieciowego.
 
 ## Struktura workspace
-
-Przykładowy wynik:
 
 ```text
 benchmark/run/
@@ -82,37 +92,31 @@ benchmark/run/
     └── contact_classification_truth.csv
 ```
 
-`benchmark_run_manifest.json` zapisuje konfigurację runu, wynik collection, zagregowane statystyki enrichmentu, pełny raport benchmarku, wynik eksportu snapshotów oraz ścieżki eksportów.
+`dataset/manifest.json` ma schema version `6`. `website_page_snapshots.csv` jest formalną częścią datasetu.
 
 ## Offline evidence stron WWW
 
-`website_page_snapshots.csv` jest tworzony z append-only audit trailu, bez ponownego pobierania stron. Dla automatycznego website resolution preferowane są snapshoty zapisane przy poszczególnych `WebsiteVerificationAttempt`, dzięki czemu plik obejmuje także kandydatów odrzuconych przed wyborem poprawnej domeny.
+`website_page_snapshots.csv` powstaje z append-only audit trailu, bez ponownego pobierania stron. Dla automatycznego website resolution preferowane są snapshoty zapisane przy `WebsiteVerificationAttempt`, więc plik obejmuje również kandydatów odrzuconych przed wyborem poprawnej domeny.
 
-Każdy wiersz może zawierać m.in.:
+Wiersz może zawierać `verification_id`, `company_id`, finalne `resolution_origin`/`resolution_source`, URL i wynik próby, `attempt_origin`/`attempt_source`, URL konkretnej strony, kod HTTP, SHA-256, tekstowy excerpt i timestamp.
 
-- `verification_id` i `company_id`,
-- finalne `resolution_origin` i `resolution_source`,
-- URL sprawdzanego kandydata i informację, czy został zaakceptowany,
-- provenance próby (`attempt_origin`, `attempt_source`),
-- URL konkretnej strony,
-- kod HTTP,
-- SHA-256 treści,
-- tekstowy excerpt zapisany w chwili weryfikacji,
-- timestamp runu.
+Jeżeli run nie ma listy prób, np. dla jawnie podanego znanego URL, exporter używa run-level `page_snapshots_json`.
 
-Jeżeli run nie posiada listy prób, np. dla jawnie podanego znanego URL, exporter używa run-level `page_snapshots_json`. Dzięki temu ręczny audyt domen nie musi zależeć od tego, czy strona nadal wygląda tak samo w późniejszym terminie.
+## Ground truth domen z provenance
+
+`labels/website_resolution_truth.csv` zawiera poza `truth_domain` również `latest_verification_id`, `verification_outcome`, `predicted_resolution_origin`, `predicted_resolution_source`, `source_website_candidate_count` i `verification_signals_json`.
+
+`latest_verification_id` pozwala powiązać wiersz labelingu z `website_page_snapshots.csv` i zobaczyć evidence zaakceptowanej domeny oraz wcześniejszych kandydatów odrzuconych przez verifier.
 
 ## Następny krok: ręczny ground truth
 
-Po wykonaniu benchmarku nie należy automatycznie podnosić progów ani rozszerzać auto-merge. Najpierw należy ręcznie oznaczyć pliki w `labels/`:
+Po benchmarku nie należy automatycznie podnosić progów ani rozszerzać auto-merge. Najpierw należy ręcznie oznaczyć:
 
 - `company_resolution_truth.csv`,
 - `website_resolution_truth.csv`,
 - `contact_classification_truth.csv`.
 
-Przy oznaczaniu domen można wspierać się `website_page_snapshots.csv` i `website_verification_runs.csv`, aby zobaczyć nie tylko finalną domenę, ale również odrzucone kandydatury i evidence z momentu runu.
-
-Następnie można uruchomić istniejący `quality-gate`:
+Następnie:
 
 ```bash
 agregator quality-gate \
@@ -123,4 +127,4 @@ agregator quality-gate \
   --fail-on-error
 ```
 
-Dopiero wyniki ground truth powinny decydować o zmianach w Company Resolution, website verification i klasyfikacji GREEN/REVIEW/IGNORE.
+Dopiero ground truth powinien decydować o zmianach w Company Resolution, website verification i klasyfikacji GREEN/REVIEW/IGNORE.
