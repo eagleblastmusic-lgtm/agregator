@@ -6,8 +6,8 @@ def test_source_catalog_matches_master_list() -> None:
     summary = catalog_summary(entries)
 
     assert summary["total"] == 91
-    assert summary["implemented"] == 18
-    assert summary["remaining"] == 73
+    assert summary["implemented"] == 19
+    assert summary["remaining"] == 72
     assert summary["priorities"] == {"A0": 14, "A1": 36, "B": 24, "C": 17}
     assert summary["implemented_adapters"] == [
         "pracuj",
@@ -23,6 +23,7 @@ def test_source_catalog_matches_master_list() -> None:
         "jooble",
         "careerjet",
         "randstad",
+        "manpower",
         "ngo",
         "karierawfinansach",
         "skillshot",
