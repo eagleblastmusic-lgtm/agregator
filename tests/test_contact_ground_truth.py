@@ -26,9 +26,11 @@ def _channel(
     purpose: ChannelPurpose,
     decision: Decision,
     confidence: float,
+    *,
+    kind: ChannelKind = ChannelKind.EMAIL,
 ) -> ContactChannel:
     return ContactChannel(
-        kind=ChannelKind.EMAIL,
+        kind=kind,
         value=value,
         purpose=purpose,
         decision=decision,
@@ -87,6 +89,13 @@ def _seed(store: SQLiteStore) -> dict[str, int]:
                     Decision.IGNORE,
                     0.99,
                 ),
+                _channel(
+                    "https://firma.test/partnerzy",
+                    ChannelPurpose.BUSINESS_PARTNERSHIP,
+                    Decision.GREEN,
+                    0.95,
+                    kind=ChannelKind.FORM,
+                ),
             ],
         ),
     )
@@ -129,8 +138,34 @@ def test_contact_evaluation_reports_confusion_and_macro_f1(tmp_path: Path) -> No
     assert report.decision_confusion["green"]["green"] == 1
     assert report.decision_confusion["green"]["review"] == 1
     assert report.decision_by_class["green"].recall == 0.5
+    assert report.decision_by_kind["email"].matched_rows == 3
+    assert report.decision_by_kind["email"].decision_macro_f1 == 0.8334
+    assert "form" not in report.decision_by_kind
     assert report.purpose_labeled_rows == 2
     assert report.purpose_accuracy == 1.0
+
+
+def test_contact_evaluation_reports_metrics_separately_by_kind(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "contact-kinds.sqlite3")
+    ids = _seed(store)
+
+    report = evaluate_contact_classification(
+        store,
+        [
+            ContactGroundTruthLabel(ids["partnerzy@firma.test"], Decision.GREEN),
+            ContactGroundTruthLabel(ids["kontakt@firma.test"], Decision.REVIEW),
+            ContactGroundTruthLabel(ids["rodo@firma.test"], Decision.IGNORE),
+            ContactGroundTruthLabel(ids["https://firma.test/partnerzy"], Decision.GREEN),
+        ],
+    )
+
+    assert report.decision_accuracy == 1.0
+    assert report.decision_by_kind["email"].matched_rows == 3
+    assert report.decision_by_kind["email"].decision_accuracy == 1.0
+    assert report.decision_by_kind["email"].decision_macro_f1 == 1.0
+    assert report.decision_by_kind["form"].matched_rows == 1
+    assert report.decision_by_kind["form"].decision_accuracy == 1.0
+    assert report.decision_by_kind["form"].decision_macro_f1 == 1.0
 
 
 def test_contact_ground_truth_template_and_loader(tmp_path: Path) -> None:
