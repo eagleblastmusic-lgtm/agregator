@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import httpx
+
 from agregator.source_health import build_source_health
 from agregator.storage import SQLiteStore, UpsertStats
 
@@ -56,3 +58,32 @@ def test_source_health_aggregates_persisted_runs(tmp_path: Path) -> None:
     assert beta.runs == 0
     assert beta.success_rate is None
     assert beta.latest_status is None
+
+
+def test_source_health_distinguishes_http_access_block(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "blocked.sqlite3")
+    store.init_schema()
+    run_id = store.start_source_run("blocked", cursor_before=None, pages_requested=1)
+    response = httpx.Response(
+        403,
+        request=httpx.Request("GET", "https://example.test/jobs"),
+    )
+    error = httpx.HTTPStatusError(
+        "Client error '403 Forbidden' for url 'https://example.test/jobs'",
+        request=response.request,
+        response=response,
+    )
+    store.finish_source_run(
+        run_id,
+        status="failed",
+        cursor_after=None,
+        pages_processed=0,
+        stats=UpsertStats(),
+        error=error,
+    )
+
+    health = build_source_health(store, ["blocked"])[0]
+
+    assert health.state == "access_blocked"
+    assert health.failed_runs == 1
+    assert health.last_error_type == "HTTPStatusError"
