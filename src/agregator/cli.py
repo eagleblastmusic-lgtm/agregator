@@ -14,6 +14,7 @@ from .ingest import ingest_source
 from .pipeline import EmployerDiscoveryPipeline
 from .search import BraveSearchProvider
 from .sources import default_registry
+from .sources.jooble import JoobleApiSource
 from .storage import SQLiteStore
 
 app = typer.Typer(help="Faro Employer Discovery Engine")
@@ -34,20 +35,7 @@ def _search_provider() -> BraveSearchProvider:
     return BraveSearchProvider(api_key)
 
 
-async def _collect(
-    source_name: str,
-    db: str,
-    pages: int,
-    fresh: bool,
-) -> dict[str, object]:
-    registry = default_registry()
-    try:
-        source = registry.create(source_name)
-    except KeyError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-
-    store = SQLiteStore(db)
-    result = await ingest_source(source, store, pages=pages, resume=not fresh)
+def _source_result(result: object, db: str) -> dict[str, object]:
     return {
         "run_id": result.run_id,
         "source": result.source,
@@ -59,6 +47,23 @@ async def _collect(
         "companies_created": result.stats.companies_created,
         "db": db,
     }
+
+
+async def _collect(
+    source_name: str,
+    db: str,
+    pages: int,
+    fresh: bool,
+) -> dict[str, object]:
+    registry = default_registry()
+    try:
+        source = registry.create(source_name)
+    except (KeyError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    store = SQLiteStore(db)
+    result = await ingest_source(source, store, pages=pages, resume=not fresh)
+    return _source_result(result, db)
 
 
 @app.command("scan-url")
@@ -124,6 +129,35 @@ def collect_olx(
 ) -> None:
     result = asyncio.run(_collect("olx", db, pages, fresh))
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@app.command("collect-jooble")
+def collect_jooble(
+    keywords: str = typer.Option(..., "--keywords"),
+    location: str = typer.Option(..., "--location"),
+    db: str = typer.Option("agregator.sqlite3", "--db"),
+    pages: int = typer.Option(1, "--pages", min=1, max=20),
+    result_on_page: int = typer.Option(20, "--result-on-page", min=1, max=100),
+    radius: str | None = typer.Option(None, "--radius"),
+    fresh: bool = typer.Option(False, "--fresh"),
+) -> None:
+    api_key = os.getenv("JOOBLE_API_KEY", "")
+    if not api_key:
+        raise typer.BadParameter("Ustaw JOOBLE_API_KEY przed użyciem collect-jooble")
+
+    async def run() -> None:
+        store = SQLiteStore(db)
+        source = JoobleApiSource(
+            api_key,
+            keywords=keywords,
+            location=location,
+            result_on_page=result_on_page,
+            radius=radius,
+        )
+        result = await ingest_source(source, store, pages=pages, resume=not fresh)
+        typer.echo(json.dumps(_source_result(result, db), ensure_ascii=False, indent=2))
+
+    asyncio.run(run())
 
 
 @app.command("runs")
