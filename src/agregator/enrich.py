@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from .audit import record_discovery_audit
 from .company_websites import list_company_website_candidates
-from .models import DiscoveryResult, WebsiteVerificationAttempt
+from .models import CompanyIdentity, DiscoveryResult, WebsiteVerificationAttempt
 from .pipeline import EmployerDiscoveryPipeline
 from .storage import SQLiteStore
 
@@ -22,6 +22,7 @@ class EnrichmentStats:
     source_website_candidates_checked: int = 0
     source_website_candidates_verified: int = 0
     search_fallbacks: int = 0
+    search_skipped: int = 0
     failed: int = 0
 
 
@@ -104,6 +105,24 @@ async def _discover_company(
         if result.company.website_url:
             stats.source_website_candidates_verified += 1
             return result
+
+    if pipeline.search_provider is None:
+        # Source-provided URLs remain useful without a paid/external search provider.
+        # Preserve rejected verification attempts for audit instead of turning the
+        # whole company enrichment into a failure just because search is unavailable.
+        stats.search_skipped += 1
+        return DiscoveryResult(
+            company=CompanyIdentity(
+                name=company_name,
+                city=city,
+                website_verification_signals=["search_provider_unavailable"],
+            ),
+            channels=[],
+            scanned_pages=[],
+            page_snapshots=[],
+            search_candidates=[],
+            website_attempts=source_attempts,
+        )
 
     stats.search_fallbacks += 1
     result = await pipeline.discover(company_name, city)
