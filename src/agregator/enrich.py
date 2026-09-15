@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .audit import record_discovery_audit
 from .pipeline import EmployerDiscoveryPipeline
 from .storage import SQLiteStore
 
@@ -13,6 +14,7 @@ class EnrichmentStats:
     websites_found: int = 0
     channels_found: int = 0
     green_channels: int = 0
+    evidence_snapshots: int = 0
     failed: int = 0
 
 
@@ -38,12 +40,15 @@ async def enrich_pending_companies(
                 str(company["canonical_name"]),
                 str(company["city"]) if company["city"] else None,
             )
-            store.save_discovery_result(int(company["id"]), result)
+            company_id = int(company["id"])
+            store.save_discovery_result(company_id, result)
+            audit_stats = record_discovery_audit(store, company_id, result)
         except Exception:
             stats.failed += 1
             continue
 
         stats.enriched += 1
+        stats.evidence_snapshots += audit_stats.evidence_snapshots_recorded
         if result.company.website_url:
             stats.websites_found += 1
         stats.channels_found += len(result.channels)
