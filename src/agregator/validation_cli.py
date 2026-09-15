@@ -12,6 +12,11 @@ from .validation import build_validation_report, render_validation_markdown
 app = typer.Typer(help="Faro P10 real-source validation reports")
 
 
+@app.callback()
+def main() -> None:
+    """Generate factual P10 validation reports for implemented sources."""
+
+
 @app.command("report")
 def report(
     db: str = typer.Option("agregator.sqlite3", "--db"),
