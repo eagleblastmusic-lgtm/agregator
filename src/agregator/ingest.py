@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from .company_identifiers import persist_job_company_identifiers
 from .company_websites import persist_job_company_website_candidates
+from .job_observations import record_job_observations
 from .sources.base import JobSource
 from .storage import SQLiteStore, UpsertStats
 
@@ -39,6 +40,12 @@ async def ingest_source(
     try:
         for _ in range(requested_pages):
             batch = await source.collect(cursor)
+
+            # Preserve every record returned by every source before any normalized
+            # current-state upsert or company linking happens. This is deliberately
+            # append-only and performs no cross-source deduplication.
+            record_job_observations(store, batch.jobs, source_run_id=run_id)
+
             stats = store.upsert_jobs(batch.jobs)
             persist_job_company_identifiers(store, batch.jobs)
             persist_job_company_website_candidates(store, batch.jobs)
