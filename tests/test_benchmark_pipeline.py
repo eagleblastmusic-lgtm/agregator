@@ -103,6 +103,11 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert result.benchmark.companies_total == 1
     assert result.benchmark.websites_found == 1
     assert result.benchmark.green_channels == 1
+    assert result.readiness.collection_target_reached is True
+    assert result.readiness.enrichment_complete is True
+    assert result.readiness.ready_for_manual_labeling is True
+    assert result.readiness.manual_ground_truth_required is True
+    assert result.readiness.blockers == ()
     assert crawler.calls == [official_url]
 
     assert result.collection_path.exists()
@@ -118,11 +123,14 @@ async def test_benchmark_pipeline_collects_enriches_and_exports_workspace(tmp_pa
     assert result.quality_labels.contact_classification_path.exists()
 
     manifest = json.loads(result.run_manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "2"
+    assert manifest["schema_version"] == "3"
     assert manifest["collection"]["target_reached"] is True
     assert manifest["enrichment"]["enriched"] == 1
     assert manifest["benchmark"]["websites_found"] == 1
     assert manifest["website_snapshots"]["rows"] == 1
+    assert manifest["dataset"]["schema_version"] == "6"
+    assert manifest["readiness"]["ready_for_manual_labeling"] is True
+    assert manifest["readiness"]["blockers"] == []
     assert manifest["files"]["dataset_dir"] == "dataset"
     assert manifest["files"]["website_page_snapshots"] == (
         "dataset/website_page_snapshots.csv"
@@ -168,4 +176,8 @@ async def test_benchmark_pipeline_stops_after_all_failed_enrichment_batch(tmp_pa
     assert result.enrichment.failed == 1
     assert result.enrichment.stopped_reason == "batch_all_failed"
     assert result.website_snapshots.rows == 0
+    assert result.readiness.collection_target_reached is True
+    assert result.readiness.enrichment_complete is False
+    assert result.readiness.ready_for_manual_labeling is False
+    assert result.readiness.blockers == ("enrichment_incomplete:batch_all_failed",)
     assert result.run_manifest_path.exists()
