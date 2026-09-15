@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .company_identifiers import persist_job_company_identifiers
 from .sources.base import JobSource
 from .storage import SQLiteStore, UpsertStats
 
@@ -38,6 +39,7 @@ async def ingest_source(
         for _ in range(requested_pages):
             batch = await source.collect(cursor)
             stats = store.upsert_jobs(batch.jobs)
+            persist_job_company_identifiers(store, batch.jobs)
             aggregate.jobs_seen += stats.jobs_seen
             aggregate.jobs_inserted += stats.jobs_inserted
             aggregate.jobs_updated += stats.jobs_updated
