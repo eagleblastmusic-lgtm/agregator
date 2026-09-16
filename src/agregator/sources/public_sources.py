@@ -8,6 +8,7 @@ from ..models import CompanyWebsiteCandidate
 from .base import SourceBatch
 from .karierawfinansach import KarieraWFinansachPublicSource
 from .public_html import HtmlJobSourceConfig, PublicHtmlJobSource
+from .rocketjobs import RocketJobsPublicSource
 from .sitemap_html import SitemapHtmlJobSource, SitemapJobSourceConfig
 from .skillshot import SkillshotPublicSource
 
@@ -144,17 +145,7 @@ def justjoinit_source() -> PublicHtmlJobSource:
 
 
 def rocketjobs_source() -> PublicHtmlJobSource:
-    return PublicHtmlJobSource(
-        HtmlJobSourceConfig(
-            name="rocketjobs",
-            base_url="https://rocketjobs.pl",
-            listing_url_template="https://rocketjobs.pl/",
-            offer_path_patterns=(r"^/oferta-pracy/",),
-            paginated=False,
-            max_offer_links=50,
-            company_selectors=("a[href*='/company/']", "a[href*='/companies/']"),
-            description_selectors=("main", "article"),
-        ),
+    return RocketJobsPublicSource(
         user_agent=_user_agent(),
         request_delay=_delay(),
     )
