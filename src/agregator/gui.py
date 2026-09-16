@@ -708,7 +708,10 @@ def main() -> None:
             if not config.database_path.exists():
                 messagebox.showerror(
                     "Brak bazy",
-                    "Nie znaleziono bazy z Etapu 1. Najpierw pobierz oferty albo wskaż istniejącą bazę.",
+                    (
+                        "Nie znaleziono bazy z Etapu 1. Najpierw pobierz oferty "
+                        "albo wskaż istniejącą bazę."
+                    ),
                 )
                 return
             config.output_path.parent.mkdir(parents=True, exist_ok=True)
