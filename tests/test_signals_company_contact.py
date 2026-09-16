@@ -2,7 +2,7 @@ from agregator.models import ChannelPurpose, Decision
 from agregator.signals import classify_context
 
 
-def test_explicit_company_contact_beats_generic_support_word() -> None:
+def test_explicit_company_contact_beats_generic_support_word_for_business_mailbox() -> None:
     purpose, decision, confidence, signal = classify_context(
         "Kontakt dla firm. Pomoc seniorom i wsparcie społeczne.",
         "biznes@example.org",
@@ -14,15 +14,41 @@ def test_explicit_company_contact_beats_generic_support_word() -> None:
     assert signal == "kontakt dla firm"
 
 
-def test_explicit_business_cooperation_is_green() -> None:
+def test_dedicated_business_contact_route_allows_generic_mailbox_green() -> None:
     purpose, decision, _, signal = classify_context(
-        "Współpraca z biznesem. Porozmawiajmy o zaangażowaniu firmy.",
+        (
+            "Współpraca z biznesem. Porozmawiajmy o zaangażowaniu firmy. "
+            "https://example.org/wspolpraca-z-biznesem/kontakt-dla-firm/"
+        ),
         "kontakt@example.org",
     )
 
     assert purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
     assert decision == Decision.GREEN
-    assert signal == "wspolpraca z biznesem"
+    assert signal == "kontakt dla firm"
+
+
+def test_nearby_company_heading_does_not_promote_media_mailbox() -> None:
+    purpose, decision, _, _ = classify_context(
+        (
+            "Kontakt dla firm Danuta biznes@example.org Kontakt dla darczyńców "
+            "Marta darczyncy@example.org Kontakt dla mediów Paulina"
+        ),
+        "media@example.org",
+    )
+
+    assert decision != Decision.GREEN
+    assert purpose != ChannelPurpose.NEGATIVE
+
+
+def test_nearby_company_heading_does_not_promote_donor_mailbox() -> None:
+    purpose, decision, _, _ = classify_context(
+        "Kontakt dla firm biznes@example.org Kontakt dla darczyńców Marta",
+        "marta@example.org",
+    )
+
+    assert decision != Decision.GREEN
+    assert purpose != ChannelPurpose.NEGATIVE
 
 
 def test_support_only_context_remains_ignored() -> None:
