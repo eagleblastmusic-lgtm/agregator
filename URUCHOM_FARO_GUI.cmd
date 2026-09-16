@@ -53,9 +53,9 @@ if errorlevel 1 (
     goto :error
 )
 
-".venv\Scripts\python.exe" -c "import agregator" >nul 2>&1
+".venv\Scripts\python.exe" -c "import agregator; import playwright.async_api" >nul 2>&1
 if errorlevel 1 (
-    echo [FARO] Instaluje aplikacje i zaleznosci...
+    echo [FARO] Instaluje lub aktualizuje aplikacje i zaleznosci...
     ".venv\Scripts\python.exe" -m pip install --upgrade pip
     if errorlevel 1 goto :error
     ".venv\Scripts\python.exe" -m pip install -e .
