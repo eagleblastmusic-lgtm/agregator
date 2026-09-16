@@ -33,8 +33,6 @@ EXPLICIT_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("nawiaz wspolprace", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("zapraszamy do wspolpracy", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("kontakt dla partnerow", ChannelPurpose.BUSINESS_PARTNERSHIP),
-    ("kontakt dla firm", ChannelPurpose.BUSINESS_PARTNERSHIP),
-    ("wspolpraca z biznesem", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("partnerzy biznesowi", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("zostan partnerem", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("wspolpraca b2b", ChannelPurpose.BUSINESS_PARTNERSHIP),
@@ -64,6 +62,15 @@ EXPLICIT_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("franchise enquiries", ChannelPurpose.FRANCHISE),
     ("franchise inquiries", ChannelPurpose.FRANCHISE),
 ]
+
+EXPLICIT_COMPANY_CONTACT_SIGNALS = (
+    "kontakt dla firm",
+    "wspolpraca z biznesem",
+)
+DEDICATED_COMPANY_CONTACT_PATHS = (
+    "kontakt-dla-firm",
+    "wspolpraca-z-biznesem",
+)
 
 COMMERCIAL_CONSENT_SIGNALS = [
     "zgadzam sie na otrzymywanie informacji handlowych",
@@ -186,6 +193,13 @@ def _local_part_purpose(value: str) -> tuple[ChannelPurpose | None, str | None]:
     return None, None
 
 
+def _explicit_company_contact_signal(normalized: str) -> str | None:
+    for phrase in EXPLICIT_COMPANY_CONTACT_SIGNALS:
+        if _contains_phrase(normalized, phrase):
+            return phrase
+    return None
+
+
 def classify_context(context: str, value: str = "") -> tuple[ChannelPurpose, Decision, float, str]:
     normalized = normalize_text(f"{context} {value}")
 
@@ -209,10 +223,25 @@ def classify_context(context: str, value: str = "") -> tuple[ChannelPurpose, Dec
     if any(_contains_phrase(normalized, signal) for signal in RECRUITMENT_SIGNALS):
         return ChannelPurpose.RECRUITMENT, Decision.IGNORE, 0.94, "recruitment"
 
+    local_part_purpose, local_part = _local_part_purpose(value)
+    company_contact_signal = _explicit_company_contact_signal(normalized)
+    dedicated_company_route = any(
+        marker in normalized for marker in DEDICATED_COMPANY_CONTACT_PATHS
+    )
+    if company_contact_signal and (
+        local_part_purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
+        or dedicated_company_route
+    ):
+        return (
+            ChannelPurpose.BUSINESS_PARTNERSHIP,
+            Decision.GREEN,
+            0.95,
+            company_contact_signal,
+        )
+
     if any(_contains_phrase(normalized, signal) for signal in SUPPORT_SIGNALS):
         return ChannelPurpose.SUPPORT, Decision.IGNORE, 0.90, "support"
 
-    local_part_purpose, local_part = _local_part_purpose(value)
     if local_part_purpose is not None and local_part is not None:
         return local_part_purpose, Decision.REVIEW, 0.82, f"localpart:{local_part}"
 
@@ -226,6 +255,7 @@ def classify_context(context: str, value: str = "") -> tuple[ChannelPurpose, Dec
 def contains_discovery_signal(text: str) -> bool:
     normalized = normalize_text(text)
     phrases = [phrase for phrase, _ in EXPLICIT_SIGNALS + REVIEW_SIGNALS]
+    phrases.extend(EXPLICIT_COMPANY_CONTACT_SIGNALS)
     phrases.extend(COMMERCIAL_CONSENT_SIGNALS)
     phrases.extend(NEGATIVE_SIGNALS)
     return any(_contains_phrase(normalized, phrase) for phrase in phrases)
