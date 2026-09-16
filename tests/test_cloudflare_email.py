@@ -1,7 +1,6 @@
 from agregator.extract import extract_channels
 from agregator.models import ChannelPurpose, Decision
 
-
 CF_EMAIL = "11736462787f74626251637473747d3c667e7d6774623f727e7c"
 
 
