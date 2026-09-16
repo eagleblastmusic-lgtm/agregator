@@ -1,0 +1,219 @@
+name: P11 Full Aggregate E2E
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - feat/m0-employer-discovery-core
+    paths:
+      - ".github/workflows/p11-full-aggregate-e2e.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faro-p11-full-aggregate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      AGREGATOR_USER_AGENT: FaroEmployerDiscoveryP11Full/0.1
+      AGREGATOR_MAX_PAGES: "5"
+      AGREGATOR_REQUEST_DELAY: "0.5"
+      P11_SOURCES: aplikuj,justjoinit,karierawfinansach,manpower,ngo,nofluffjobs,ofertypracyedu,rocketjobs,skillshot
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Prepare workspace
+        shell: bash
+        run: |
+          mkdir -p p11-full
+          echo "99" > p11-full/exit_code.txt
+
+      - name: Run aggregate end-to-end slice
+        shell: bash
+        run: |
+          set +e
+          agregator-run run \
+            --sources "$P11_SOURCES" \
+            --pages-per-source 1 \
+            --enrichment-limit 50 \
+            --fresh-sources \
+            --db p11-full/full.sqlite3 \
+            --output p11-full/full-leads.xlsx \
+            --strict \
+            > p11-full/result.json
+          code=$?
+          echo "$code" > p11-full/exit_code.txt
+          exit 0
+
+      - name: Build aggregate audit metrics
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          root = Path("p11-full")
+          result_path = root / "result.json"
+          db_path = root / "full.sqlite3"
+          xlsx_path = root / "full-leads.xlsx"
+
+          result = {}
+          if result_path.exists():
+              try:
+                  result = json.loads(result_path.read_text(encoding="utf-8"))
+              except json.JSONDecodeError:
+                  result = {"status": "invalid_json"}
+
+          db = {
+              "companies": 0,
+              "companies_enriched": 0,
+              "companies_with_website": 0,
+              "companies_with_green": 0,
+              "contact_channels": 0,
+              "decisions": {},
+          }
+          if db_path.exists():
+              con = sqlite3.connect(db_path)
+              db["companies"] = con.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+              db["companies_enriched"] = con.execute(
+                  "SELECT COUNT(*) FROM companies WHERE enriched_at IS NOT NULL"
+              ).fetchone()[0]
+              db["companies_with_website"] = con.execute(
+                  "SELECT COUNT(*) FROM companies WHERE website_url IS NOT NULL"
+              ).fetchone()[0]
+              db["companies_with_green"] = con.execute(
+                  "SELECT COUNT(DISTINCT company_id) FROM contact_channels WHERE decision='green'"
+              ).fetchone()[0]
+              db["contact_channels"] = con.execute(
+                  "SELECT COUNT(*) FROM contact_channels"
+              ).fetchone()[0]
+              db["decisions"] = {
+                  row[0]: row[1]
+                  for row in con.execute(
+                      "SELECT decision, COUNT(*) FROM contact_channels GROUP BY decision"
+                  )
+              }
+              con.close()
+
+          source_results = result.get("source_results") or []
+          per_source = {
+              item.get("source", "unknown"): {
+                  "status": item.get("status"),
+                  "jobs_seen": int(item.get("jobs_seen", 0) or 0),
+                  "companies_created": int(item.get("companies_created", 0) or 0),
+                  "error_type": item.get("error_type"),
+                  "error": item.get("error"),
+              }
+              for item in source_results
+          }
+          payload = {
+              "workflow": result,
+              "per_source": per_source,
+              "totals": {
+                  "jobs_seen": sum(item["jobs_seen"] for item in per_source.values()),
+                  "companies_created": sum(
+                      item["companies_created"] for item in per_source.values()
+                  ),
+              },
+              "database": db,
+              "xlsx_exists": xlsx_path.exists(),
+              "xlsx_bytes": xlsx_path.stat().st_size if xlsx_path.exists() else 0,
+          }
+          (root / "metrics.json").write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          enrichment = result.get("enrichment") or {}
+          lines = [
+              "## P11 Full Aggregate E2E",
+              "",
+              f"- Workflow status: `{result.get('status')}`",
+              f"- Selected sources: `{len(result.get('selected_sources') or [])}`",
+              f"- Successful sources: `{len(result.get('successful_sources') or [])}`",
+              f"- Failed sources: `{json.dumps(result.get('failed_sources') or [], ensure_ascii=False)}`",
+              f"- Jobs seen total: `{payload['totals']['jobs_seen']}`",
+              f"- Companies created by ingest: `{payload['totals']['companies_created']}`",
+              f"- Unique companies in DB: `{db['companies']}`",
+              f"- Enrichment candidates: `{enrichment.get('candidates', 0)}`",
+              f"- Companies with WWW: `{db['companies_with_website']}`",
+              f"- Companies with GREEN: `{db['companies_with_green']}`",
+              f"- Contact decisions: `{json.dumps(db['decisions'], ensure_ascii=False, sort_keys=True)}`",
+              f"- XLSX bytes: `{payload['xlsx_bytes']}`",
+              "",
+              "### Per source",
+          ]
+          for name, item in per_source.items():
+              lines.append(
+                  f"- `{name}`: status=`{item['status']}`, jobs=`{item['jobs_seen']}`, "
+                  f"companies_created=`{item['companies_created']}`"
+              )
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(
+              "\n".join(lines) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload aggregate E2E artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: faro-p11-full-aggregate-${{ github.run_id }}
+          path: p11-full/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce aggregate proof
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          expected = set(os.environ["P11_SOURCES"].split(","))
+          root = Path("p11-full")
+          code = int((root / "exit_code.txt").read_text().strip())
+          metrics = json.loads((root / "metrics.json").read_text(encoding="utf-8"))
+          result = metrics.get("workflow") or {}
+          per_source = metrics.get("per_source") or {}
+          enrichment = result.get("enrichment") or {}
+
+          checks = {
+              "runner_exit_zero": code == 0,
+              "workflow_success": result.get("status") == "success",
+              "all_expected_selected": set(result.get("selected_sources") or []) == expected,
+              "all_expected_successful": set(result.get("successful_sources") or []) == expected,
+              "no_failed_sources": not (result.get("failed_sources") or []),
+              "all_sources_reported": set(per_source) == expected,
+              "every_source_collected_jobs": all(
+                  int(per_source.get(name, {}).get("jobs_seen", 0) or 0) > 0
+                  for name in expected
+              ),
+              "aggregate_companies_created": int(metrics["database"].get("companies", 0) or 0) > 0,
+              "enrichment_exercised": int(enrichment.get("candidates", 0) or 0) > 0,
+              "xlsx_created": bool(metrics.get("xlsx_exists")) and int(metrics.get("xlsx_bytes", 0) or 0) > 0,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          print(json.dumps(checks, indent=2))
+          if failed:
+              raise SystemExit("P11 Full Aggregate E2E proof failed: " + ", ".join(failed))
+          PY
