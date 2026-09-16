@@ -9,22 +9,19 @@ from agregator.workflow import resolve_workflow_sources, run_collection_workflow
 def test_hold_source_is_skipped_before_collection() -> None:
     requested, selected, skipped = resolve_workflow_sources(
         default_registry(),
-        "olx",
+        "pracuj",
         environment={},
     )
 
-    assert requested == ["olx"]
+    assert requested == ["pracuj"]
     assert selected == []
     assert skipped == [
         {
-            "source": "olx",
+            "source": "pracuj",
             "status": "skipped",
             "reason": "hold_access_blocked",
-            "detail": (
-                "OLX automated collection route is access-blocked "
-                "(HTTP 403 / robots policy)"
-            ),
-            "access_mode": "public_web_endpoint",
+            "detail": "public route currently unavailable for the collector (HTTP 406/403)",
+            "access_mode": "public_sitemap_html",
         }
     ]
 
@@ -35,7 +32,7 @@ async def test_hold_only_collection_finishes_without_strict_failure(tmp_path: Pa
 
     result = await run_collection_workflow(
         db=str(db),
-        sources="olx",
+        sources="pracuj",
         pages_per_source=5,
         fresh_sources=True,
         registry=default_registry(),

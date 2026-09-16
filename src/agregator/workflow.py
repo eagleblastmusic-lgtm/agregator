@@ -12,12 +12,12 @@ from .lead_export import export_company_leads_xlsx
 from .pipeline import EmployerDiscoveryPipeline
 from .source_health import build_source_health
 from .sources import SourceRegistry, default_registry
+from .sources.olx import OLX_FULL_CATALOG_MAX_BATCHES
 from .storage import SQLiteStore
 
 
 HOLD_SOURCE_REASONS: dict[str, str] = {
     "pracuj": "public route currently unavailable for the collector (HTTP 406/403)",
-    "olx": "OLX automated collection route is access-blocked (HTTP 403 / robots policy)",
     "theprotocol": "robots.txt disallows the listing route used by the adapter",
     "bulldogjob": "public listing route currently returns HTTP 403",
 }
@@ -140,10 +140,11 @@ async def run_collection_workflow(
     """Collect job offers only, without website/contact enrichment or Excel export."""
 
     registry = registry or default_registry()
+    env = os.environ if environment is None else environment
     requested, selected, skipped = resolve_workflow_sources(
         registry,
         sources,
-        environment=environment,
+        environment=env,
     )
 
     store = SQLiteStore(db)
@@ -154,12 +155,18 @@ async def run_collection_workflow(
 
     for source_name in selected:
         registration = registry.describe(source_name)
+        full_olx = source_name == "olx" and _env_truthy(
+            env.get("AGREGATOR_OLX_FULL_CATALOG", "1")
+        )
+        requested_pages = (
+            OLX_FULL_CATALOG_MAX_BATCHES if full_olx else max(1, pages_per_source)
+        )
         try:
             source = registry.create(source_name)
             ingest = await ingest_source(
                 source,
                 store,
-                pages=max(1, pages_per_source),
+                pages=requested_pages,
                 resume=not fresh_sources,
             )
             successful.append(source_name)
@@ -169,6 +176,7 @@ async def run_collection_workflow(
                     "status": "success",
                     "access_mode": registration.access_mode,
                     "experimental": registration.experimental,
+                    "collection_mode": "full_catalog" if full_olx else "bounded_pages",
                     **asdict(ingest.stats),
                     "pages": ingest.pages,
                     "next_cursor": ingest.next_cursor,
@@ -183,6 +191,7 @@ async def run_collection_workflow(
                     "status": "failed",
                     "access_mode": registration.access_mode,
                     "experimental": registration.experimental,
+                    "collection_mode": "full_catalog" if full_olx else "bounded_pages",
                     "error_type": type(exc).__name__,
                     "error": str(exc)[:1000],
                 }
@@ -288,3 +297,7 @@ async def run_end_to_end_workflow(
         enrichment=enrichment.enrichment,
         export=enrichment.export,
     )
+
+
+def _env_truthy(value: object) -> bool:
+    return str(value).strip().lower() not in {"0", "false", "no", "off"}

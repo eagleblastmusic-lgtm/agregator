@@ -11,6 +11,7 @@ on:
       - "src/agregator/workflow.py"
       - "src/agregator/workflow_cli.py"
       - "src/agregator/gui.py"
+      - "src/agregator/gui_app.py"
 
 permissions:
   contents: read
@@ -26,6 +27,7 @@ jobs:
     env:
       AGREGATOR_USER_AGENT: FaroSourceVerification/0.1
       AGREGATOR_REQUEST_DELAY: "0.8"
+      AGREGATOR_OLX_FULL_CATALOG: "0"
       JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
       ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
       ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
@@ -190,7 +192,7 @@ jobs:
 
           root = Path("source-verification")
           required_live = {"kprm", "randstad"}
-          hold_sources = {"pracuj", "olx", "theprotocol", "bulldogjob"}
+          hold_sources = {"pracuj", "theprotocol", "bulldogjob"}
           public_names = [
               "pracuj",
               "olx",
@@ -226,8 +228,21 @@ jobs:
                   item = by_source.get(name, {})
                   jobs_seen = int(item.get("jobs_seen", 0) or 0)
                   ok = item.get("status") == "success" and jobs_seen > 0
+                  error = str(item.get("error") or "")
 
-                  if name in required_live:
+                  if name == "olx":
+                      if ok:
+                          status = "verified_live"
+                      elif "403 Forbidden" in error:
+                          # OLX currently blocks GitHub-hosted runner IPs even though
+                          # the same public listing is available to ordinary clients.
+                          # Keep this visible as an infrastructure diagnostic, not a
+                          # reason to disable the local public-HTML collector.
+                          status = "runner_access_blocked"
+                      else:
+                          status = "failed_live"
+                          hard_failure = True
+                  elif name in required_live:
                       status = "verified_live" if ok else "failed_live"
                       hard_failure = hard_failure or not ok
                   elif name in hold_sources:
@@ -260,6 +275,11 @@ jobs:
               "sources": rows,
               "verified_live": [
                   row["source"] for row in rows if row["status"] == "verified_live"
+              ],
+              "runner_access_blocked": [
+                  row["source"]
+                  for row in rows
+                  if row["status"] == "runner_access_blocked"
               ],
               "hold_access_blocked": [
                   row["source"]
