@@ -33,7 +33,7 @@ def test_preflight_cli_requires_explicit_opt_in_for_olx(monkeypatch) -> None:
     assert allowed.exit_code == 0, allowed.output
     payload = json.loads(allowed.output)
     assert payload["ready"] is True
-    assert payload["sources"][0]["access_mode"] == "public_web_endpoint"
+    assert payload["sources"][0]["access_mode"] == "public_html"
     assert payload["warnings"]
 
 
