@@ -11,6 +11,7 @@ from .public_html import HtmlJobSourceConfig, PublicHtmlJobSource
 
 BASE_URL = "https://www.karierawfinansach.pl"
 LISTING_URL = BASE_URL + "/praca"
+_PORTAL_ROOT_HOST = "karierawfinansach.pl"
 
 _CONFIG = HtmlJobSourceConfig(
     name="karierawfinansach",
@@ -131,7 +132,6 @@ def extract_employer_profile_url(
     company_name: str,
 ) -> str | None:
     soup = BeautifulSoup(html, "html.parser")
-    expected_host = _registrable_portal_host(urlparse(BASE_URL).hostname or "")
     normalized_company = _normalized_label(company_name)
     fallback: str | None = None
 
@@ -143,7 +143,7 @@ def extract_employer_profile_url(
             continue
         absolute = _clean_url(urljoin(detail_url, raw))
         parsed = urlparse(absolute)
-        if _registrable_portal_host(parsed.hostname or "") != expected_host:
+        if not _is_portal_host(parsed.hostname or ""):
             continue
         if not parsed.path.startswith("/pracodawca/"):
             continue
@@ -164,12 +164,11 @@ def extract_employer_website(
 
     Live profiles place the employer website/careers URL before additional campaign links
     and before the portal-wide MBE/Careers in Poland/TechKariera footer. Known social,
-    app-store and portal-owned destinations are excluded explicitly. The portal's bare and
-    ``www`` host variants are treated as the same first-party domain.
+    app-store and portal-owned destinations are excluded explicitly. The portal root,
+    ``www`` variant and every portal subdomain are always treated as first-party.
     """
 
     soup = BeautifulSoup(html, "html.parser")
-    portal_host = _registrable_portal_host(urlparse(BASE_URL).hostname or "")
 
     for anchor in soup.select("a[href]"):
         if not isinstance(anchor, Tag):
@@ -182,7 +181,7 @@ def extract_employer_website(
         host = (parsed.hostname or "").lower()
         if parsed.scheme not in {"http", "https"} or not host:
             continue
-        if _registrable_portal_host(host) == portal_host:
+        if _is_portal_host(host):
             continue
         if host in _EXCLUDED_EXTERNAL_HOSTS:
             continue
@@ -196,9 +195,9 @@ def extract_employer_website(
     return None
 
 
-def _registrable_portal_host(value: str) -> str:
+def _is_portal_host(value: str) -> bool:
     host = value.strip().lower().rstrip(".")
-    return host[4:] if host.startswith("www.") else host
+    return host == _PORTAL_ROOT_HOST or host.endswith(f".{_PORTAL_ROOT_HOST}")
 
 
 def _clean_url(url: str) -> str:
