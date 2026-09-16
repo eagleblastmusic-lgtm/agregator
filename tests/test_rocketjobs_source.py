@@ -9,6 +9,14 @@ from agregator.sources.rocketjobs import (
 )
 
 
+def _rsc_social_media(*entries: tuple[str, str]) -> str:
+    payload = '{"socialMedia":[' + ",".join(
+        f'{{"link":"{url}","type":"{kind}"}}' for url, kind in entries
+    ) + "]}"
+    escaped = payload.replace('"', r'\"')
+    return f'self.__next_f.push([1,"{escaped} "])'
+
+
 def test_profile_url_prefers_dedicated_company_profile_cta() -> None:
     html = """
     <html><body>
@@ -60,16 +68,19 @@ def test_exact_company_name_link_can_identify_profile_without_cta() -> None:
 
 
 def test_profile_website_uses_serialized_website_type_not_first_external() -> None:
-    html = r'''
+    serialized = _rsc_social_media(
+        ("https://levelupmedia.pl/", "Website"),
+        ("https://www.facebook.com/LVLUPMEDIA", "Facebook"),
+        ("https://www.linkedin.com/company/lvl-up-media/", "LinkedIn"),
+    )
+    html = f"""
     <html><body>
       <a href="https://www.facebook.com/LVLUPMEDIA"></a>
       <a href="https://levelupmedia.pl/"></a>
       <a href="https://www.linkedin.com/company/lvl-up-media/"></a>
-      <script>
-        self.__next_f.push([1,"{\"socialMedia\":[{\"link\":\"https://levelupmedia.pl/\",\"type\":\"Website\"},{\"link\":\"https://www.facebook.com/LVLUPMEDIA\",\"type\":\"Facebook\"},{\"link\":\"https://www.linkedin.com/company/lvl-up-media/\",\"type\":\"LinkedIn\"}]} "])
-      </script>
+      <script>{serialized}</script>
     </body></html>
-    '''
+    """
 
     candidate = extract_employer_website(
         html,
@@ -83,14 +94,13 @@ def test_profile_website_uses_serialized_website_type_not_first_external() -> No
 
 
 def test_profile_website_must_also_be_rendered_as_external_anchor() -> None:
-    html = r'''
+    serialized = _rsc_social_media(("https://hidden.example/", "Website"))
+    html = f"""
     <html><body>
       <a href="https://www.facebook.com/example"></a>
-      <script>
-        self.__next_f.push([1,"{\"socialMedia\":[{\"link\":\"https://hidden.example/\",\"type\":\"Website\"}]} "])
-      </script>
+      <script>{serialized}</script>
     </body></html>
-    '''
+    """
 
     assert extract_employer_website(
         html,
@@ -99,14 +109,13 @@ def test_profile_website_must_also_be_rendered_as_external_anchor() -> None:
 
 
 def test_profile_website_rejects_rocketjobs_as_source_portal() -> None:
-    html = r'''
+    serialized = _rsc_social_media(("https://rocketjobs.pl/", "Website"))
+    html = f"""
     <html><body>
       <a href="https://rocketjobs.pl/"></a>
-      <script>
-        self.__next_f.push([1,"{\"socialMedia\":[{\"link\":\"https://rocketjobs.pl/\",\"type\":\"Website\"}]} "])
-      </script>
+      <script>{serialized}</script>
     </body></html>
-    '''
+    """
 
     assert extract_employer_website(
         html,
@@ -140,15 +149,17 @@ async def test_collect_caches_profile_and_filters_portal_jsonld_candidate() -> N
       <footer><a href="/brands/story/rocket-jobs">O nas</a></footer>
     </body></html>
     """
-    profile = r'''
+    serialized = _rsc_social_media(
+        ("https://levelupmedia.pl/", "Website"),
+        ("https://www.facebook.com/LVLUPMEDIA", "Facebook"),
+    )
+    profile = f"""
     <html><body>
       <a href="https://levelupmedia.pl/"></a>
       <a href="https://www.facebook.com/LVLUPMEDIA"></a>
-      <script>
-        self.__next_f.push([1,"{\"socialMedia\":[{\"link\":\"https://levelupmedia.pl/\",\"type\":\"Website\"},{\"link\":\"https://www.facebook.com/LVLUPMEDIA\",\"type\":\"Facebook\"}]} "])
-      </script>
+      <script>{serialized}</script>
     </body></html>
-    '''
+    """
     requests: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
