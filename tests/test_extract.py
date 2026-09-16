@@ -219,3 +219,46 @@ def test_javascript_form_action_uses_page_as_stable_channel_url() -> None:
     form = next(item for item in channels if item.kind.value == "form")
     assert form.value == "https://example.pl/contact"
     assert form.decision == Decision.GREEN
+
+
+def test_mailto_percent_encoded_whitespace_is_not_part_of_email() -> None:
+    html = """
+    <html><body>
+      <p>Any additional questions? Contact us at:
+      <a href="mailto:contact@polishedgames.com%20">contact@polishedgames.com</a></p>
+    </body></html>
+    """
+
+    channels = extract_channels(html, "https://polishedgames.com/")
+    values = {item.value for item in channels if item.kind.value == "email"}
+
+    assert "contact@polishedgames.com" in values
+    assert "contact@polishedgames.com%20" not in values
+
+
+def test_partner_word_in_destination_url_does_not_create_pseudo_form() -> None:
+    html = """
+    <html><body>
+      <a href="https://news.xbox.com/en-us/2026/03/26/hunter-reckoning-xbox-partner-preview/">
+        Xbox
+      </a>
+    </body></html>
+    """
+
+    channels = extract_channels(
+        html,
+        "https://teyon.com/news/what-hunter-the-reckoning-deathwish-is-about/",
+    )
+
+    assert [item for item in channels if item.kind.value == "form"] == []
+
+
+def test_visible_partnership_link_remains_a_reviewable_channel() -> None:
+    html = '<a href="/about">Our partnership</a>'
+
+    channels = extract_channels(html, "https://example.pl/")
+    form = next(item for item in channels if item.kind.value == "form")
+
+    assert form.value == "https://example.pl/about"
+    assert form.decision == Decision.REVIEW
+    assert form.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
