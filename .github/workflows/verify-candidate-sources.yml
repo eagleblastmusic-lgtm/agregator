@@ -49,7 +49,7 @@ jobs:
       - name: Prepare verification workspace
         run: mkdir -p source-verification
 
-      - name: Verify public candidate sources live
+      - name: Probe public candidate sources live
         id: public
         continue-on-error: true
         shell: bash
@@ -88,7 +88,11 @@ jobs:
 
           for name in names:
               registration = registry.describe(name)
-              missing = [key for key in registration.required_env if not os.getenv(key, "").strip()]
+              missing = [
+                  key
+                  for key in registration.required_env
+                  if not os.getenv(key, "").strip()
+              ]
               if missing:
                   report.append(
                       {
@@ -176,7 +180,7 @@ jobs:
           )
           PY
 
-      - name: Build verification report and enforce live proof
+      - name: Build verification report and enforce required live proof
         if: always()
         shell: bash
         run: |
@@ -185,12 +189,23 @@ jobs:
           from pathlib import Path
 
           root = Path("source-verification")
-          public_names = ["pracuj", "olx", "theprotocol", "bulldogjob", "kprm", "randstad"]
+          required_live = {"kprm", "randstad"}
+          hold_sources = {"pracuj", "olx", "theprotocol", "bulldogjob"}
+          public_names = [
+              "pracuj",
+              "olx",
+              "theprotocol",
+              "bulldogjob",
+              "kprm",
+              "randstad",
+          ]
           hard_failure = False
           rows = []
 
           try:
-              public = json.loads((root / "public.json").read_text(encoding="utf-8"))
+              public = json.loads(
+                  (root / "public.json").read_text(encoding="utf-8")
+              )
           except Exception as exc:
               public = {}
               hard_failure = True
@@ -203,36 +218,67 @@ jobs:
                   }
               )
           else:
-              by_source = {item.get("source"): item for item in public.get("source_results", [])}
+              by_source = {
+                  item.get("source"): item
+                  for item in public.get("source_results", [])
+              }
               for name in public_names:
                   item = by_source.get(name, {})
                   jobs_seen = int(item.get("jobs_seen", 0) or 0)
                   ok = item.get("status") == "success" and jobs_seen > 0
+
+                  if name in required_live:
+                      status = "verified_live" if ok else "failed_live"
+                      hard_failure = hard_failure or not ok
+                  elif name in hold_sources:
+                      status = "candidate_live_available" if ok else "hold_access_blocked"
+                  else:
+                      status = "verified_live" if ok else "failed_live"
+
                   rows.append(
                       {
                           "source": name,
-                          "status": "verified_live" if ok else "failed_live",
+                          "status": status,
                           "jobs_seen": jobs_seen,
                           "jobs_inserted": int(item.get("jobs_inserted", 0) or 0),
                           "error": item.get("error"),
                       }
                   )
-                  hard_failure = hard_failure or not ok
 
           partner_path = root / "partner-report.json"
           if partner_path.exists():
               rows.extend(json.loads(partner_path.read_text(encoding="utf-8")))
-          if (root / "partner-hard-failure.txt").read_text(encoding="utf-8").strip() == "1":
+          partner_failure_path = root / "partner-hard-failure.txt"
+          if (
+              partner_failure_path.exists()
+              and partner_failure_path.read_text(encoding="utf-8").strip() == "1"
+          ):
               hard_failure = True
 
           report = {
               "status": "failed" if hard_failure else "success",
               "sources": rows,
-              "verified_live": [row["source"] for row in rows if row["status"] == "verified_live"],
-              "blocked_missing_credentials": [
-                  row["source"] for row in rows if row["status"] == "blocked_missing_credentials"
+              "verified_live": [
+                  row["source"] for row in rows if row["status"] == "verified_live"
               ],
-              "failed_live": [row["source"] for row in rows if row["status"] == "failed_live"],
+              "hold_access_blocked": [
+                  row["source"]
+                  for row in rows
+                  if row["status"] == "hold_access_blocked"
+              ],
+              "candidate_live_available": [
+                  row["source"]
+                  for row in rows
+                  if row["status"] == "candidate_live_available"
+              ],
+              "blocked_missing_credentials": [
+                  row["source"]
+                  for row in rows
+                  if row["status"] == "blocked_missing_credentials"
+              ],
+              "failed_live": [
+                  row["source"] for row in rows if row["status"] == "failed_live"
+              ],
           }
           (root / "verification-report.json").write_text(
               json.dumps(report, ensure_ascii=False, indent=2),
@@ -248,7 +294,8 @@ jobs:
           for row in rows:
               detail = row.get("error") or ", ".join(row.get("missing_env", []))
               lines.append(
-                  f"| {row['source']} | {row['status']} | {row.get('jobs_seen', 0)} | {detail or ''} |"
+                  f"| {row['source']} | {row['status']} | "
+                  f"{row.get('jobs_seen', 0)} | {detail or ''} |"
               )
           Path("source-verification/summary.md").write_text(
               "\n".join(lines) + "\n",
