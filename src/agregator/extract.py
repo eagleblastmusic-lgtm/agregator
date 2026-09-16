@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import unquote
 
 from bs4 import BeautifulSoup
 from bs4.element import Tag
@@ -172,10 +173,13 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
     email_needles.update(_obfuscated_emails(text))
 
     for anchor in soup.select('a[href^="mailto:"]'):
-        raw = anchor.get("href", "")[7:].split("?", 1)[0].strip()
-        if raw:
-            label = " ".join(anchor.stripped_strings).strip()
-            email_needles[raw.lower()] = label or raw
+        encoded = anchor.get("href", "")[7:].split("?", 1)[0]
+        decoded = unquote(encoded).strip()
+        if not decoded:
+            continue
+        label = " ".join(anchor.stripped_strings).strip()
+        for email in EMAIL_RE.findall(decoded):
+            email_needles[email.lower()] = label or email
 
     for email, needle in email_needles.items():
         context = _context(text, needle)
@@ -217,13 +221,14 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
     for anchor in soup.find_all("a", href=True):
         if not isinstance(anchor, Tag):
             continue
-        label = " ".join(anchor.stripped_strings)
+        label = " ".join(anchor.stripped_strings).strip()
         href = _attribute_text(anchor, "href")
-        combined = f"{label} {href}"
-        if not contains_discovery_signal(combined):
+        discovery_probe = label or href
+        if not contains_discovery_signal(discovery_probe):
             continue
         if href.lower().startswith("mailto:"):
             continue
+        combined = f"{label} {href}"
         value = _channel_url(href, page_url)
         if value is None and (
             href.startswith("#") or href.lower().startswith("javascript:")
