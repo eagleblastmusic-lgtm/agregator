@@ -8,12 +8,19 @@ from urllib.parse import urljoin, urlparse, urlunparse
 import httpx
 from bs4 import BeautifulSoup, Tag
 
-from ..models import JobPosting
+from ..models import CompanyWebsiteCandidate, JobPosting
 from .base import SourceBatch
 from .public_html import HtmlJobSourceConfig, parse_job_detail_html
 
 BASE_URL = "https://www.manpower.pl"
 ALL_JOBS_URL = BASE_URL + "/pl/all-jobs"
+AGENCY_NAME = "ManpowerGroup Sp. z o.o."
+AGENCY_WEBSITE = BASE_URL + "/"
+AGENCY_IDENTITY_SOURCE = "manpower.agency_fallback"
+# This confidence describes the identity of the visible listing agency, not the
+# undisclosed end-client employer. The latter remains explicitly unknown in
+# source_payload so downstream code never treats Manpower as a disclosed client.
+AGENCY_IDENTITY_CONFIDENCE = 0.98
 _OFFER_PATH = re.compile(r"^/pl/job/(\d+)/[^/?#]+/?$", re.IGNORECASE)
 _REFERENCE = re.compile(
     r"\b(?:reference\s+number|reference-number|numer\s+ref\.?|nr\s+ref\.?)\s*:?\s*(\d+)\b",
@@ -217,9 +224,16 @@ def parse_manpower_detail(url: str, html: str) -> JobPosting | None:
         source_id=source_id,
         url=url,
         title=title,
-        company_name="ManpowerGroup Sp. z o.o.",
-        company_name_source="manpower.agency_fallback",
-        company_name_confidence=0.35,
+        company_name=AGENCY_NAME,
+        company_name_source=AGENCY_IDENTITY_SOURCE,
+        company_name_confidence=AGENCY_IDENTITY_CONFIDENCE,
+        company_website_candidates=[
+            CompanyWebsiteCandidate(
+                url=AGENCY_WEBSITE,
+                source="manpower.listing_agency.website",
+                confidence=1.0,
+            )
+        ],
         city=_city_from_text(visible_text),
         description=visible_text,
         published_at=_published_date(visible_text),
@@ -227,6 +241,7 @@ def parse_manpower_detail(url: str, html: str) -> JobPosting | None:
             "portal_offer_id": source_id,
             "visible_text": visible_text,
             "agency_fallback": True,
+            "represented_entity": "listing_agency",
             "client_employer_disclosed": False,
         },
     )
@@ -240,6 +255,7 @@ def _augment_job(job: JobPosting, text: str) -> None:
     if not job.city:
         job.city = _city_from_text(text)
 
+    is_agency_fallback = job.company_name_source == AGENCY_IDENTITY_SOURCE
     reference = _REFERENCE.search(text)
     payload = dict(job.source_payload)
     payload.update(
@@ -247,9 +263,9 @@ def _augment_job(job: JobPosting, text: str) -> None:
             "portal_offer_id": job.source_id,
             "reference_number": reference.group(1) if reference else None,
             "visible_text": text,
-            "agency_fallback": job.company_name_source == "manpower.agency_fallback",
-            "client_employer_disclosed": job.company_name_source
-            != "manpower.agency_fallback",
+            "agency_fallback": is_agency_fallback,
+            "represented_entity": "listing_agency" if is_agency_fallback else "client_employer",
+            "client_employer_disclosed": not is_agency_fallback,
             "discovery_source": ALL_JOBS_URL,
         }
     )
