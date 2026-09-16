@@ -33,6 +33,8 @@ EXPLICIT_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("nawiaz wspolprace", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("zapraszamy do wspolpracy", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("kontakt dla partnerow", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("kontakt dla firm", ChannelPurpose.BUSINESS_PARTNERSHIP),
+    ("wspolpraca z biznesem", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("partnerzy biznesowi", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("zostan partnerem", ChannelPurpose.BUSINESS_PARTNERSHIP),
     ("wspolpraca b2b", ChannelPurpose.BUSINESS_PARTNERSHIP),
