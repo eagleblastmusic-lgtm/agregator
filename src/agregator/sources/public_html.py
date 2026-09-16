@@ -104,7 +104,10 @@ class PublicHtmlJobSource:
         if self._robots is None:
             parsed = urlparse(self.config.base_url)
             robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-            response = await client.get(robots_url)
+            response = await client.get(
+                robots_url,
+                headers={"Accept": "text/plain,*/*;q=0.1"},
+            )
             parser = urllib.robotparser.RobotFileParser()
             parser.set_url(robots_url)
             if response.status_code in {401, 403}:
