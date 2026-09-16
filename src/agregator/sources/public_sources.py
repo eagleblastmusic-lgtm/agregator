@@ -1,9 +1,22 @@
 from __future__ import annotations
 
 import os
+import re
+from urllib.parse import unquote, urlparse
 
+from ..models import CompanyWebsiteCandidate
+from .base import SourceBatch
 from .public_html import HtmlJobSourceConfig, PublicHtmlJobSource
 from .sitemap_html import SitemapHtmlJobSource, SitemapJobSourceConfig
+
+
+_NOFLUFF_STATIC_HOSTS = {
+    "static-dev.nofluffjobs.com",
+    "www.static-dev.nofluffjobs.com",
+}
+_DOMAIN_PATH = re.compile(
+    r"^(?:www\.)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,}(?:/.*)?$"
+)
 
 
 def _delay() -> float:
@@ -12,6 +25,59 @@ def _delay() -> float:
 
 def _user_agent() -> str:
     return os.getenv("AGREGATOR_USER_AGENT", "FaroEmployerDiscovery/0.2")
+
+
+def _repair_nofluff_company_website(value: str) -> str | None:
+    """Repair malformed employer URLs currently emitted by NoFluffJobs JSON-LD.
+
+    The source sometimes wraps a real employer URL below static-dev.nofluffjobs.com,
+    e.g. ``.../https://silvair.com/`` or ``.../www.veritahr.com``. Only that known
+    wrapper host is rewritten; normal first-party/external URLs are left untouched.
+    """
+
+    candidate = unquote(value.strip())
+    parsed = urlparse(candidate)
+    host = (parsed.hostname or "").lower()
+    if host not in _NOFLUFF_STATIC_HOSTS:
+        return parsed._replace(fragment="").geturl()
+
+    wrapped = parsed.path.lstrip("/").strip()
+    if wrapped.startswith(("http://", "https://")):
+        repaired = wrapped
+    elif _DOMAIN_PATH.fullmatch(wrapped):
+        repaired = f"https://{wrapped}"
+    else:
+        return None
+
+    repaired_parsed = urlparse(repaired)
+    if not repaired_parsed.hostname:
+        return None
+    return repaired_parsed._replace(fragment="").geturl()
+
+
+class _NoFluffJobsSource(PublicHtmlJobSource):
+    async def collect(self, cursor: str | None = None) -> SourceBatch:
+        batch = await super().collect(cursor)
+        for job in batch.jobs:
+            repaired: list[CompanyWebsiteCandidate] = []
+            seen: set[str] = set()
+            for website in job.company_website_candidates:
+                url = _repair_nofluff_company_website(website.url)
+                if url is None or url in seen:
+                    continue
+                seen.add(url)
+                source = website.source
+                if url != website.url:
+                    source = f"{source}.repaired_nofluff_static_wrapper"
+                repaired.append(
+                    CompanyWebsiteCandidate(
+                        url=url,
+                        source=source,
+                        confidence=website.confidence,
+                    )
+                )
+            job.company_website_candidates = repaired
+        return batch
 
 
 def skillshot_source() -> PublicHtmlJobSource:
@@ -37,7 +103,7 @@ def skillshot_source() -> PublicHtmlJobSource:
 
 
 def nofluffjobs_source() -> PublicHtmlJobSource:
-    return PublicHtmlJobSource(
+    return _NoFluffJobsSource(
         HtmlJobSourceConfig(
             name="nofluffjobs",
             base_url="https://nofluffjobs.com",
