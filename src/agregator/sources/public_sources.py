@@ -6,6 +6,7 @@ from urllib.parse import unquote, urlparse
 
 from ..models import CompanyWebsiteCandidate
 from .base import SourceBatch
+from .karierawfinansach import KarieraWFinansachPublicSource
 from .public_html import HtmlJobSourceConfig, PublicHtmlJobSource
 from .sitemap_html import SitemapHtmlJobSource, SitemapJobSourceConfig
 
@@ -200,17 +201,7 @@ def theprotocol_source() -> PublicHtmlJobSource:
 
 
 def karierawfinansach_source() -> PublicHtmlJobSource:
-    return PublicHtmlJobSource(
-        HtmlJobSourceConfig(
-            name="karierawfinansach",
-            base_url="https://www.karierawfinansach.pl",
-            listing_url_template="https://www.karierawfinansach.pl/praca",
-            offer_path_patterns=(r"^/oferta-pracy/\d+",),
-            paginated=False,
-            max_offer_links=50,
-            company_selectors=("a[href*='/pracodawca/']", ".company-name"),
-            description_selectors=("main", "article", ".offer-content"),
-        ),
+    return KarieraWFinansachPublicSource(
         user_agent=_user_agent(),
         request_delay=_delay(),
     )
