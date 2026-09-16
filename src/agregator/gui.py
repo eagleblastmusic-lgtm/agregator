@@ -19,16 +19,27 @@ VERIFIED_SOURCES = (
     "ofertypracyedu",
     "rocketjobs",
     "skillshot",
+    "kprm",
+    "randstad",
 )
 
-EXPERIMENTAL_SOURCES = (
+HOLD_SOURCES = (
     "pracuj",
     "olx",
+    "theprotocol",
+    "bulldogjob",
 )
 
-ALL_GUI_SOURCES = VERIFIED_SOURCES + EXPERIMENTAL_SOURCES
+CREDENTIAL_SOURCES = (
+    "epraca",
+    "jooble",
+    "careerjet",
+    "adzuna",
+)
 
-# Kept for compatibility with the first GUI revision.
+# Compatibility alias used by earlier GUI tests/callers.
+EXPERIMENTAL_SOURCES = HOLD_SOURCES + CREDENTIAL_SOURCES
+ALL_GUI_SOURCES = VERIFIED_SOURCES + HOLD_SOURCES + CREDENTIAL_SOURCES
 DEFAULT_SOURCES = VERIFIED_SOURCES
 
 SOURCE_LABELS = {
@@ -41,13 +52,41 @@ SOURCE_LABELS = {
     "ofertypracyedu": "OfertyPracy.edu.pl",
     "rocketjobs": "RocketJobs",
     "skillshot": "Skillshot.pl",
-    "pracuj": "Pracuj.pl",
-    "olx": "OLX Praca",
+    "kprm": "Nabory KPRM",
+    "randstad": "Randstad Polska",
+    "pracuj": "Pracuj.pl — HOLD (403)",
+    "olx": "OLX Praca — HOLD (403)",
+    "theprotocol": "theprotocol.it — HOLD (robots.txt)",
+    "bulldogjob": "Bulldogjob — HOLD (403 / dostęp)",
+    "epraca": "ePraca / CBOP",
+    "jooble": "Jooble Polska",
+    "careerjet": "Careerjet Polska",
+    "adzuna": "Adzuna Polska",
 }
 
 
 @dataclass(frozen=True)
+class CollectionConfig:
+    sources: tuple[str, ...]
+    pages_per_source: int
+    database_path: Path
+    fresh_sources: bool = True
+    strict: bool = True
+
+
+@dataclass(frozen=True)
+class ContactConfig:
+    database_path: Path
+    output_path: Path
+    enrichment_limit: int
+    refresh_enrichment: bool = False
+    strict: bool = True
+
+
+@dataclass(frozen=True)
 class RunConfig:
+    """Compatibility config retained for callers of the first GUI revision."""
+
     sources: tuple[str, ...]
     pages_per_source: int
     enrichment_limit: int
@@ -58,17 +97,46 @@ class RunConfig:
     strict: bool = True
 
 
-def validate_run_config(config: RunConfig) -> None:
+def _validate_database_path(path: Path) -> None:
+    if path.suffix.lower() not in {".sqlite3", ".sqlite", ".db"}:
+        raise ValueError("Baza powinna mieć rozszerzenie .sqlite3, .sqlite albo .db.")
+
+
+def validate_collection_config(config: CollectionConfig) -> None:
     if not config.sources:
         raise ValueError("Wybierz co najmniej jedno źródło.")
     if not 1 <= config.pages_per_source <= 1000:
         raise ValueError("Liczba stron na źródło musi być w zakresie 1–1000.")
+    _validate_database_path(config.database_path)
+
+
+def validate_contact_config(config: ContactConfig) -> None:
     if not 1 <= config.enrichment_limit <= 500:
-        raise ValueError("Limit enrichmentu musi być w zakresie 1–500.")
+        raise ValueError("Limit firm musi być w zakresie 1–500.")
+    _validate_database_path(config.database_path)
     if config.output_path.suffix.lower() != ".xlsx":
         raise ValueError("Plik wynikowy musi mieć rozszerzenie .xlsx.")
-    if config.database_path.suffix.lower() not in {".sqlite3", ".sqlite", ".db"}:
-        raise ValueError("Baza powinna mieć rozszerzenie .sqlite3, .sqlite albo .db.")
+
+
+def validate_run_config(config: RunConfig) -> None:
+    validate_collection_config(
+        CollectionConfig(
+            sources=config.sources,
+            pages_per_source=config.pages_per_source,
+            database_path=config.database_path,
+            fresh_sources=config.fresh_sources,
+            strict=config.strict,
+        )
+    )
+    validate_contact_config(
+        ContactConfig(
+            database_path=config.database_path,
+            output_path=config.output_path,
+            enrichment_limit=config.enrichment_limit,
+            refresh_enrichment=config.refresh_enrichment,
+            strict=config.strict,
+        )
+    )
 
 
 def _default_runner_python() -> str:
@@ -80,11 +148,65 @@ def _default_runner_python() -> str:
     return str(executable)
 
 
+def build_collection_command(
+    config: CollectionConfig,
+    *,
+    python_executable: str | None = None,
+) -> list[str]:
+    validate_collection_config(config)
+    executable = python_executable or _default_runner_python()
+    command = [
+        executable,
+        "-m",
+        "agregator.workflow_cli",
+        "collect",
+        "--sources",
+        ",".join(config.sources),
+        "--pages-per-source",
+        str(config.pages_per_source),
+        "--db",
+        str(config.database_path),
+    ]
+    if config.fresh_sources:
+        command.append("--fresh-sources")
+    if config.strict:
+        command.append("--strict")
+    return command
+
+
+def build_contact_command(
+    config: ContactConfig,
+    *,
+    python_executable: str | None = None,
+) -> list[str]:
+    validate_contact_config(config)
+    executable = python_executable or _default_runner_python()
+    command = [
+        executable,
+        "-m",
+        "agregator.workflow_cli",
+        "enrich",
+        "--db",
+        str(config.database_path),
+        "--output",
+        str(config.output_path),
+        "--enrichment-limit",
+        str(config.enrichment_limit),
+    ]
+    if config.refresh_enrichment:
+        command.append("--refresh-enrichment")
+    if config.strict:
+        command.append("--strict")
+    return command
+
+
 def build_run_command(
     config: RunConfig,
     *,
     python_executable: str | None = None,
 ) -> list[str]:
+    """Compatibility builder for the legacy one-shot command."""
+
     validate_run_config(config)
     executable = python_executable or _default_runner_python()
     command = [
@@ -126,11 +248,12 @@ def main() -> None:
     class FaroGui:
         def __init__(self, root: tk.Tk) -> None:
             self.root = root
-            self.root.title("Faro Emaile — Employer Discovery")
-            self.root.geometry("1180x820")
-            self.root.minsize(980, 720)
+            self.root.title("Faro Emaile — 2 etapy")
+            self.root.geometry("1220x920")
+            self.root.minsize(1040, 800)
 
             self.process: subprocess.Popen[str] | None = None
+            self.active_stage: str | None = None
             self.events: queue.Queue[tuple[str, object]] = queue.Queue()
 
             self.source_vars = {
@@ -138,14 +261,20 @@ def main() -> None:
                 for source in ALL_GUI_SOURCES
             }
             self.pages_var = tk.IntVar(value=5)
-            self.enrichment_var = tk.IntVar(value=300)
-            self.output_dir_var = tk.StringVar(value=str(default_output_dir))
-            self.xlsx_name_var = tk.StringVar(value="Faro_Firmy_Kontakt.xlsx")
-            self.db_name_var = tk.StringVar(value="production.sqlite3")
             self.fresh_var = tk.BooleanVar(value=True)
+            self.collection_strict_var = tk.BooleanVar(value=True)
+
+            self.database_var = tk.StringVar(
+                value=str(default_output_dir / "faro_oferty.sqlite3")
+            )
+            self.output_var = tk.StringVar(
+                value=str(default_output_dir / "Faro_Firmy_Kontakt.xlsx")
+            )
+            self.enrichment_var = tk.IntVar(value=300)
             self.refresh_var = tk.BooleanVar(value=False)
-            self.strict_var = tk.BooleanVar(value=True)
-            self.status_var = tk.StringVar(value="Gotowy")
+            self.contact_strict_var = tk.BooleanVar(value=True)
+            self.brave_key_var = tk.StringVar(value=os.getenv("BRAVE_SEARCH_API_KEY", ""))
+            self.status_var = tk.StringVar(value="Gotowy — wybierz etap")
 
             self._configure_style()
             self._build_ui()
@@ -158,11 +287,12 @@ def main() -> None:
                 style.theme_use("vista")
             style.configure("Title.TLabel", font=("Segoe UI", 20, "bold"))
             style.configure("Subtitle.TLabel", font=("Segoe UI", 10))
+            style.configure("Step.TLabel", font=("Segoe UI", 15, "bold"))
             style.configure("Section.TLabelframe.Label", font=("Segoe UI", 10, "bold"))
             style.configure(
                 "Primary.TButton",
                 font=("Segoe UI", 10, "bold"),
-                padding=(14, 8),
+                padding=(14, 9),
             )
 
         def _build_ui(self) -> None:
@@ -173,149 +303,197 @@ def main() -> None:
             ttk.Label(
                 outer,
                 text=(
-                    "Zbieranie ofert → rozpoznanie firm → oficjalne WWW → "
-                    "kontakty biznesowe → Excel"
+                    "Etap 1 zbiera wyłącznie oferty. Etap 2 pracuje na zapisanej bazie firm "
+                    "i wyszukuje właściwe kontakty biznesowe."
                 ),
                 style="Subtitle.TLabel",
-            ).pack(anchor="w", pady=(2, 14))
+            ).pack(anchor="w", pady=(2, 12))
 
-            body = ttk.Frame(outer)
-            body.pack(fill="both", expand=True)
-            body.columnconfigure(0, weight=0)
-            body.columnconfigure(1, weight=1)
-            body.rowconfigure(0, weight=1)
+            notebook = ttk.Notebook(outer)
+            notebook.pack(fill="both", expand=True)
 
-            left = ttk.Frame(body)
-            left.grid(row=0, column=0, sticky="nsw", padx=(0, 16))
-            right = ttk.Frame(body)
-            right.grid(row=0, column=1, sticky="nsew")
-            right.rowconfigure(1, weight=1)
-            right.columnconfigure(0, weight=1)
+            collect_tab = ttk.Frame(notebook, padding=14)
+            contact_tab = ttk.Frame(notebook, padding=14)
+            notebook.add(collect_tab, text="1. Scraping ofert")
+            notebook.add(contact_tab, text="2. Wyszukiwanie maili / kontaktów")
 
-            self._build_sources_panel(left)
-            self._build_settings_panel(left)
-            self._build_output_panel(left)
-            self._build_actions_panel(left)
-            self._build_log_panel(right)
+            self._build_collection_tab(collect_tab)
+            self._build_contact_tab(contact_tab)
+            self._build_log_panel(outer)
 
-        def _build_sources_panel(self, parent: object) -> None:
+        def _build_collection_tab(self, parent: object) -> None:
+            parent.columnconfigure(0, weight=1)
+            ttk.Label(
+                parent,
+                text="Etap 1 — tylko pobieranie ofert",
+                style="Step.TLabel",
+            ).grid(row=0, column=0, sticky="w")
+            ttk.Label(
+                parent,
+                text=(
+                    "Ten etap nie szuka stron firm, nie analizuje maili i nie tworzy Excela "
+                    "kontaktowego. Wynikiem jest baza SQLite z ofertami i firmami."
+                ),
+                wraplength=1040,
+                justify="left",
+            ).grid(row=1, column=0, sticky="w", pady=(3, 10))
+
             sources_frame = ttk.LabelFrame(
                 parent,
-                text="Źródła",
+                text="Źródła ofert",
                 padding=12,
                 style="Section.TLabelframe",
             )
-            sources_frame.pack(fill="x")
+            sources_frame.grid(row=2, column=0, sticky="ew")
+            for column in range(4):
+                sources_frame.columnconfigure(column, weight=1)
 
-            ttk.Label(
+            row = self._source_group(
                 sources_frame,
-                text="Zweryfikowane produkcyjnie",
-                font=("Segoe UI", 9, "bold"),
-            ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
-
-            for index, source in enumerate(VERIFIED_SOURCES):
-                row = 1 + index // 3
-                column = index % 3
-                ttk.Checkbutton(
-                    sources_frame,
-                    text=SOURCE_LABELS[source],
-                    variable=self.source_vars[source],
-                ).grid(row=row, column=column, sticky="w", padx=(0, 14), pady=3)
-
-            experimental_row = 1 + (len(VERIFIED_SOURCES) + 2) // 3
+                row=0,
+                title="Zweryfikowane live / produkcyjnie",
+                sources=VERIFIED_SOURCES,
+            )
             ttk.Separator(sources_frame).grid(
-                row=experimental_row,
+                row=row,
                 column=0,
-                columnspan=3,
+                columnspan=4,
                 sticky="ew",
-                pady=(8, 8),
+                pady=(7, 7),
             )
-            ttk.Label(
+            row = self._source_group(
                 sources_frame,
-                text="Dodatkowe / eksperymentalne",
-                font=("Segoe UI", 9, "bold"),
-            ).grid(
-                row=experimental_row + 1,
-                column=0,
-                columnspan=3,
-                sticky="w",
-                pady=(0, 3),
+                row=row + 1,
+                title="HOLD — blokada dostępu / robots.txt; domyślnie wyłączone",
+                sources=HOLD_SOURCES,
             )
-
-            for index, source in enumerate(EXPERIMENTAL_SOURCES):
-                ttk.Checkbutton(
-                    sources_frame,
-                    text=SOURCE_LABELS[source],
-                    variable=self.source_vars[source],
-                ).grid(
-                    row=experimental_row + 2,
-                    column=index,
-                    sticky="w",
-                    padx=(0, 14),
-                    pady=3,
-                )
-
             ttk.Label(
                 sources_frame,
                 text=(
-                    "Pracuj.pl i OLX są dostępne, ale nie przeszły końcowego "
-                    "production gate. Przy trybie strict błąd takiego źródła "
-                    "oznaczy cały run jako nieudany."
+                    "HOLD oznacza, że adapter pozostaje w kodzie, ale Faro nie próbuje "
+                    "obchodzić odpowiedzi 403, robots.txt ani innych ograniczeń dostępu."
                 ),
-                wraplength=450,
+                wraplength=980,
                 justify="left",
-            ).grid(
-                row=experimental_row + 3,
+            ).grid(row=row, column=0, columnspan=4, sticky="w", pady=(3, 0))
+            row += 1
+            ttk.Separator(sources_frame).grid(
+                row=row,
                 column=0,
-                columnspan=3,
-                sticky="w",
-                pady=(4, 0),
+                columnspan=4,
+                sticky="ew",
+                pady=(7, 7),
+            )
+            row = self._source_group(
+                sources_frame,
+                row=row + 1,
+                title="Partner/API — wymagają danych dostępowych",
+                sources=CREDENTIAL_SOURCES,
             )
 
-            source_buttons = ttk.Frame(sources_frame)
-            source_buttons.grid(
-                row=experimental_row + 4,
-                column=0,
-                columnspan=3,
-                sticky="w",
-                pady=(10, 0),
+            buttons = ttk.Frame(sources_frame)
+            buttons.grid(row=row, column=0, columnspan=4, sticky="w", pady=(10, 0))
+            ttk.Button(buttons, text="Tylko zweryfikowane", command=self._select_verified).pack(
+                side="left"
             )
             ttk.Button(
-                source_buttons,
-                text="Zaznacz wszystkie",
+                buttons,
+                text="Zaznacz wszystkie (także HOLD)",
                 command=self._select_all,
-            ).pack(side="left")
-            ttk.Button(
-                source_buttons,
-                text="Tylko zweryfikowane",
-                command=self._select_verified,
             ).pack(side="left", padx=(6, 0))
-            ttk.Button(
-                source_buttons,
-                text="Wyczyść",
-                command=self._clear_all,
-            ).pack(side="left", padx=(6, 0))
+            ttk.Button(buttons, text="Wyczyść", command=self._clear_all).pack(
+                side="left", padx=(6, 0)
+            )
 
-        def _build_settings_panel(self, parent: object) -> None:
-            settings = ttk.LabelFrame(
+            options = ttk.LabelFrame(
                 parent,
-                text="Zakres skanowania",
+                text="Ustawienia Etapu 1",
                 padding=12,
                 style="Section.TLabelframe",
             )
-            settings.pack(fill="x", pady=(12, 0))
-            ttk.Label(settings, text="Strony / batche na źródło:").grid(
+            options.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+            ttk.Label(options, text="Strony / batche na źródło:").grid(
                 row=0, column=0, sticky="w"
             )
             ttk.Spinbox(
-                settings,
+                options,
                 from_=1,
                 to=1000,
                 textvariable=self.pages_var,
                 width=9,
-            ).grid(row=0, column=1, sticky="e", padx=(12, 0))
-            ttk.Label(settings, text="Limit firm do enrichmentu:").grid(
+            ).grid(row=0, column=1, sticky="w", padx=(10, 20))
+            ttk.Checkbutton(
+                options,
+                text="Zacznij źródła od początku",
+                variable=self.fresh_var,
+            ).grid(row=0, column=2, sticky="w")
+            ttk.Checkbutton(
+                options,
+                text="Strict — błąd źródła kończy etap kodem błędu",
+                variable=self.collection_strict_var,
+            ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(7, 0))
+
+            self._database_row(options, row=2, label="Baza ofert / firm:")
+
+            actions = ttk.Frame(parent)
+            actions.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+            self.collect_button = ttk.Button(
+                actions,
+                text="▶  ETAP 1 — POBIERZ OFERTY",
+                command=self._start_collection,
+                style="Primary.TButton",
+            )
+            self.collect_button.pack(side="left", fill="x", expand=True)
+            ttk.Button(
+                actions,
+                text="Kopiuj polecenie",
+                command=self._copy_collection_command,
+            ).pack(side="left", padx=(8, 0))
+
+        def _build_contact_tab(self, parent: object) -> None:
+            parent.columnconfigure(0, weight=1)
+            ttk.Label(
+                parent,
+                text="Etap 2 — wyszukiwanie kontaktów biznesowych",
+                style="Step.TLabel",
+            ).grid(row=0, column=0, sticky="w")
+            ttk.Label(
+                parent,
+                text=(
+                    "Ten etap nie pobiera nowych ofert. Otwiera bazę z Etapu 1, identyfikuje "
+                    "oficjalne strony firm, przeszukuje je, klasyfikuje kanały GREEN / REVIEW / "
+                    "IGNORE i tworzy końcowy Excel z kwalifikowanymi kontaktami."
+                ),
+                wraplength=1040,
+                justify="left",
+            ).grid(row=1, column=0, sticky="w", pady=(3, 12))
+
+            settings = ttk.LabelFrame(
+                parent,
+                text="Ustawienia Etapu 2",
+                padding=12,
+                style="Section.TLabelframe",
+            )
+            settings.grid(row=2, column=0, sticky="ew")
+            settings.columnconfigure(1, weight=1)
+
+            self._database_row(settings, row=0, label="Baza z Etapu 1:")
+
+            ttk.Label(settings, text="Końcowy Excel:").grid(
                 row=1, column=0, sticky="w", pady=(8, 0)
+            )
+            output_row = ttk.Frame(settings)
+            output_row.grid(row=1, column=1, columnspan=2, sticky="ew", pady=(8, 0))
+            output_row.columnconfigure(0, weight=1)
+            ttk.Entry(output_row, textvariable=self.output_var).grid(
+                row=0, column=0, sticky="ew"
+            )
+            ttk.Button(output_row, text="…", width=3, command=self._choose_output).grid(
+                row=0, column=1, padx=(5, 0)
+            )
+
+            ttk.Label(settings, text="Limit firm w jednym przebiegu:").grid(
+                row=2, column=0, sticky="w", pady=(8, 0)
             )
             ttk.Spinbox(
                 settings,
@@ -323,104 +501,112 @@ def main() -> None:
                 to=500,
                 textvariable=self.enrichment_var,
                 width=9,
-            ).grid(row=1, column=1, sticky="e", padx=(12, 0), pady=(8, 0))
+            ).grid(row=2, column=1, sticky="w", pady=(8, 0))
 
             ttk.Checkbutton(
                 settings,
-                text="Zacznij źródła od początku",
-                variable=self.fresh_var,
-            ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
-            ttk.Checkbutton(
-                settings,
-                text="Odśwież wcześniej wzbogacone firmy",
+                text="Odśwież także firmy analizowane wcześniej",
                 variable=self.refresh_var,
-            ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
+            ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
             ttk.Checkbutton(
                 settings,
-                text="Tryb strict — błąd źródła = błąd runu",
-                variable=self.strict_var,
-            ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
+                text="Strict — błąd enrichmentu kończy etap kodem błędu",
+                variable=self.contact_strict_var,
+            ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
-        def _build_output_panel(self, parent: object) -> None:
-            output = ttk.LabelFrame(
-                parent,
-                text="Wyniki",
-                padding=12,
-                style="Section.TLabelframe",
+            ttk.Label(settings, text="Brave Search API key (opcjonalny):").grid(
+                row=5, column=0, sticky="w", pady=(10, 0)
             )
-            output.pack(fill="x", pady=(12, 0))
-            ttk.Label(output, text="Folder:").grid(row=0, column=0, sticky="w")
-            folder_row = ttk.Frame(output)
-            folder_row.grid(row=1, column=0, sticky="ew", pady=(3, 8))
-            ttk.Entry(folder_row, textvariable=self.output_dir_var, width=45).pack(
-                side="left", fill="x", expand=True
+            ttk.Entry(settings, textvariable=self.brave_key_var, show="•").grid(
+                row=5, column=1, sticky="ew", pady=(10, 0)
             )
-            ttk.Button(
-                folder_row,
-                text="…",
-                width=3,
-                command=self._choose_folder,
-            ).pack(side="left", padx=(5, 0))
+            ttk.Label(
+                settings,
+                text=(
+                    "Bez klucza system nadal sprawdza strony WWW podane przez źródła ofert; "
+                    "klucz włącza dodatkowy fallback wyszukiwania oficjalnej strony firmy."
+                ),
+                wraplength=780,
+                justify="left",
+            ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
-            ttk.Label(output, text="Excel:").grid(row=2, column=0, sticky="w")
-            ttk.Entry(output, textvariable=self.xlsx_name_var, width=49).grid(
-                row=3, column=0, sticky="ew", pady=(3, 8)
-            )
-            ttk.Label(output, text="Baza SQLite:").grid(row=4, column=0, sticky="w")
-            ttk.Entry(output, textvariable=self.db_name_var, width=49).grid(
-                row=5, column=0, sticky="ew", pady=(3, 0)
-            )
-
-        def _build_actions_panel(self, parent: object) -> None:
             actions = ttk.Frame(parent)
-            actions.pack(fill="x", pady=(14, 0))
-            self.start_button = ttk.Button(
+            actions.grid(row=3, column=0, sticky="ew", pady=(14, 0))
+            self.contact_button = ttk.Button(
                 actions,
-                text="▶  Uruchom skanowanie",
-                command=self._start,
+                text="▶  ETAP 2 — ZNAJDŹ KONTAKTY I UTWÓRZ EXCEL",
+                command=self._start_contacts,
                 style="Primary.TButton",
             )
-            self.start_button.pack(fill="x")
-            self.stop_button = ttk.Button(
+            self.contact_button.pack(side="left", fill="x", expand=True)
+            ttk.Button(
                 actions,
-                text="■  Zatrzymaj",
-                command=self._stop,
-                state="disabled",
-            )
-            self.stop_button.pack(fill="x", pady=(6, 0))
+                text="Kopiuj polecenie",
+                command=self._copy_contact_command,
+            ).pack(side="left", padx=(8, 0))
             ttk.Button(
                 actions,
                 text="Otwórz folder wyników",
                 command=self._open_output_folder,
-            ).pack(fill="x", pady=(6, 0))
-            ttk.Button(
-                actions,
-                text="Kopiuj polecenie",
-                command=self._copy_command,
-            ).pack(fill="x", pady=(6, 0))
+            ).pack(side="left", padx=(8, 0))
+
+        def _source_group(
+            self,
+            parent: object,
+            *,
+            row: int,
+            title: str,
+            sources: tuple[str, ...],
+        ) -> int:
+            ttk.Label(parent, text=title, font=("Segoe UI", 9, "bold")).grid(
+                row=row,
+                column=0,
+                columnspan=4,
+                sticky="w",
+                pady=(0, 4),
+            )
+            checkbox_start = row + 1
+            for index, source in enumerate(sources):
+                ttk.Checkbutton(
+                    parent,
+                    text=SOURCE_LABELS[source],
+                    variable=self.source_vars[source],
+                ).grid(
+                    row=checkbox_start + index // 4,
+                    column=index % 4,
+                    sticky="w",
+                    padx=(0, 14),
+                    pady=2,
+                )
+            return checkbox_start + (len(sources) + 3) // 4
+
+        def _database_row(self, parent: object, *, row: int, label: str) -> None:
+            ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=(8, 0))
+            db_row = ttk.Frame(parent)
+            db_row.grid(row=row, column=1, columnspan=2, sticky="ew", pady=(8, 0))
+            db_row.columnconfigure(0, weight=1)
+            ttk.Entry(db_row, textvariable=self.database_var).grid(row=0, column=0, sticky="ew")
+            ttk.Button(db_row, text="…", width=3, command=self._choose_database).grid(
+                row=0, column=1, padx=(5, 0)
+            )
 
         def _build_log_panel(self, parent: object) -> None:
             status_frame = ttk.Frame(parent)
-            status_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-            status_frame.columnconfigure(0, weight=1)
-            ttk.Label(status_frame, textvariable=self.status_var).grid(
-                row=0, column=0, sticky="w"
-            )
-            self.progress = ttk.Progressbar(status_frame, mode="indeterminate", length=180)
-            self.progress.grid(row=0, column=1, sticky="e")
+            status_frame.pack(fill="x", pady=(12, 6))
+            ttk.Label(status_frame, textvariable=self.status_var).pack(side="left")
+            self.progress = ttk.Progressbar(status_frame, mode="indeterminate", length=190)
+            self.progress.pack(side="right")
 
             log_frame = ttk.LabelFrame(
                 parent,
-                text="Log",
+                text="Log bieżącego etapu",
                 padding=8,
                 style="Section.TLabelframe",
             )
-            log_frame.grid(row=1, column=0, sticky="nsew")
-            log_frame.rowconfigure(0, weight=1)
-            log_frame.columnconfigure(0, weight=1)
-
+            log_frame.pack(fill="both", expand=False)
             self.log = tk.Text(
                 log_frame,
+                height=11,
                 wrap="word",
                 state="disabled",
                 font=("Consolas", 9),
@@ -429,12 +615,25 @@ def main() -> None:
             )
             scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
             self.log.configure(yscrollcommand=scrollbar.set)
-            self.log.grid(row=0, column=0, sticky="nsew")
-            scrollbar.grid(row=0, column=1, sticky="ns")
+            self.log.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+
+            controls = ttk.Frame(parent)
+            controls.pack(fill="x", pady=(6, 0))
+            self.stop_button = ttk.Button(
+                controls,
+                text="■  Zatrzymaj bieżący etap",
+                command=self._stop,
+                state="disabled",
+            )
+            self.stop_button.pack(side="left")
+            ttk.Button(controls, text="Wyczyść log", command=self._clear_log).pack(
+                side="left", padx=(6, 0)
+            )
 
             self._append_log(
-                "Gotowy. Domyślnie wybrane jest 9 zweryfikowanych źródeł. "
-                "Pracuj.pl i OLX są dostępne jako opcjonalne źródła eksperymentalne.\n"
+                "Gotowy. Najpierw uruchom Etap 1. Etap 2 może zostać uruchomiony później "
+                "na tej samej bazie SQLite.\n"
             )
 
         def _select_all(self) -> None:
@@ -449,52 +648,106 @@ def main() -> None:
             for variable in self.source_vars.values():
                 variable.set(False)
 
-        def _choose_folder(self) -> None:
-            selected = filedialog.askdirectory(
-                initialdir=self.output_dir_var.get() or str(Path.cwd())
-            )
-            if selected:
-                self.output_dir_var.set(selected)
-
         def _selected_sources(self) -> tuple[str, ...]:
-            return tuple(
-                source for source in ALL_GUI_SOURCES if self.source_vars[source].get()
-            )
+            return tuple(source for source in ALL_GUI_SOURCES if self.source_vars[source].get())
 
-        def _current_config(self) -> RunConfig:
-            output_dir = Path(self.output_dir_var.get()).expanduser()
-            return RunConfig(
+        def _collection_config(self) -> CollectionConfig:
+            return CollectionConfig(
                 sources=self._selected_sources(),
                 pages_per_source=int(self.pages_var.get()),
-                enrichment_limit=int(self.enrichment_var.get()),
-                database_path=output_dir / self.db_name_var.get().strip(),
-                output_path=output_dir / self.xlsx_name_var.get().strip(),
+                database_path=Path(self.database_var.get()).expanduser(),
                 fresh_sources=self.fresh_var.get(),
-                refresh_enrichment=self.refresh_var.get(),
-                strict=self.strict_var.get(),
+                strict=self.collection_strict_var.get(),
             )
 
-        def _start(self) -> None:
+        def _contact_config(self) -> ContactConfig:
+            return ContactConfig(
+                database_path=Path(self.database_var.get()).expanduser(),
+                output_path=Path(self.output_var.get()).expanduser(),
+                enrichment_limit=int(self.enrichment_var.get()),
+                refresh_enrichment=self.refresh_var.get(),
+                strict=self.contact_strict_var.get(),
+            )
+
+        def _choose_database(self) -> None:
+            selected = filedialog.asksaveasfilename(
+                initialfile=Path(self.database_var.get()).name,
+                initialdir=str(Path(self.database_var.get()).parent),
+                defaultextension=".sqlite3",
+                filetypes=[("SQLite", "*.sqlite3 *.sqlite *.db"), ("Wszystkie", "*.*")],
+            )
+            if selected:
+                self.database_var.set(selected)
+
+        def _choose_output(self) -> None:
+            selected = filedialog.asksaveasfilename(
+                initialfile=Path(self.output_var.get()).name,
+                initialdir=str(Path(self.output_var.get()).parent),
+                defaultextension=".xlsx",
+                filetypes=[("Excel", "*.xlsx")],
+            )
+            if selected:
+                self.output_var.set(selected)
+
+        def _start_collection(self) -> None:
             if self.process is not None:
                 return
             try:
-                config = self._current_config()
-                command = build_run_command(config)
+                config = self._collection_config()
+                command = build_collection_command(config)
             except (ValueError, tk.TclError) as exc:
-                messagebox.showerror("Nieprawidłowa konfiguracja", str(exc))
+                messagebox.showerror("Nieprawidłowa konfiguracja Etapu 1", str(exc))
                 return
-
             config.database_path.parent.mkdir(parents=True, exist_ok=True)
-            self._append_log("\n=== NOWY RUN ===\n")
+            self._start_process(command, "Etap 1 — scraping ofert")
+
+        def _start_contacts(self) -> None:
+            if self.process is not None:
+                return
+            try:
+                config = self._contact_config()
+                command = build_contact_command(config)
+            except (ValueError, tk.TclError) as exc:
+                messagebox.showerror("Nieprawidłowa konfiguracja Etapu 2", str(exc))
+                return
+            if not config.database_path.exists():
+                messagebox.showerror(
+                    "Brak bazy",
+                    (
+                        "Nie znaleziono bazy z Etapu 1. Najpierw pobierz oferty "
+                        "albo wskaż istniejącą bazę."
+                    ),
+                )
+                return
+            config.output_path.parent.mkdir(parents=True, exist_ok=True)
+            extra_env: dict[str, str] = {}
+            brave_key = self.brave_key_var.get().strip()
+            if brave_key:
+                extra_env["BRAVE_SEARCH_API_KEY"] = brave_key
+            self._start_process(command, "Etap 2 — wyszukiwanie kontaktów", extra_env=extra_env)
+
+        def _start_process(
+            self,
+            command: list[str],
+            stage_label: str,
+            *,
+            extra_env: dict[str, str] | None = None,
+        ) -> None:
+            self._append_log(f"\n=== {stage_label.upper()} ===\n")
             self._append_log(_quote_command(command) + "\n\n")
-            self.status_var.set("Skanowanie w toku…")
-            self.start_button.configure(state="disabled")
+            self.status_var.set(stage_label + " — w toku…")
+            self.active_stage = stage_label
+            self.collect_button.configure(state="disabled")
+            self.contact_button.configure(state="disabled")
             self.stop_button.configure(state="normal")
             self.progress.start(12)
 
             creationflags = 0
             if os.name == "nt":
                 creationflags = subprocess.CREATE_NO_WINDOW
+            env = os.environ.copy()
+            if extra_env:
+                env.update(extra_env)
 
             try:
                 self.process = subprocess.Popen(
@@ -507,12 +760,12 @@ def main() -> None:
                     errors="replace",
                     bufsize=1,
                     creationflags=creationflags,
+                    env=env,
                 )
             except OSError as exc:
                 self.process = None
                 self._finish_run(1, f"Nie udało się uruchomić procesu: {exc}")
                 return
-
             threading.Thread(target=self._read_process_output, daemon=True).start()
 
         def _read_process_output(self) -> None:
@@ -538,17 +791,20 @@ def main() -> None:
             self.root.after(100, self._poll_events)
 
         def _finish_run(self, code: int, detail: str | None = None) -> None:
+            stage = self.active_stage or "Etap"
             self.progress.stop()
-            self.start_button.configure(state="normal")
+            self.collect_button.configure(state="normal")
+            self.contact_button.configure(state="normal")
             self.stop_button.configure(state="disabled")
             self.process = None
+            self.active_stage = None
             if detail:
                 self._append_log(detail + "\n")
             if code == 0:
-                self.status_var.set("Gotowe — run zakończony sukcesem")
+                self.status_var.set(stage + " — zakończony sukcesem")
                 self._append_log("\n=== GOTOWE ===\n")
             else:
-                self.status_var.set(f"Run zakończony kodem {code}")
+                self.status_var.set(f"{stage} — kod {code}")
                 self._append_log(f"\n=== ZAKOŃCZONO KODEM {code} ===\n")
 
         def _stop(self) -> None:
@@ -557,13 +813,32 @@ def main() -> None:
                 return
             self.status_var.set("Zatrzymywanie…")
             self._append_log("\nŻądanie zatrzymania procesu…\n")
-            try:
+            with contextlib.suppress(OSError):
                 process.terminate()
-            except OSError as exc:
-                self._append_log(f"Nie udało się zatrzymać procesu: {exc}\n")
+
+        def _copy_collection_command(self) -> None:
+            try:
+                command = build_collection_command(self._collection_config())
+            except (ValueError, tk.TclError) as exc:
+                messagebox.showerror("Nieprawidłowa konfiguracja Etapu 1", str(exc))
+                return
+            self._copy_to_clipboard(_quote_command(command), "Polecenie Etapu 1 skopiowane")
+
+        def _copy_contact_command(self) -> None:
+            try:
+                command = build_contact_command(self._contact_config())
+            except (ValueError, tk.TclError) as exc:
+                messagebox.showerror("Nieprawidłowa konfiguracja Etapu 2", str(exc))
+                return
+            self._copy_to_clipboard(_quote_command(command), "Polecenie Etapu 2 skopiowane")
+
+        def _copy_to_clipboard(self, text: str, status: str) -> None:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.status_var.set(status)
 
         def _open_output_folder(self) -> None:
-            folder = Path(self.output_dir_var.get()).expanduser()
+            folder = Path(self.output_var.get()).expanduser().parent
             folder.mkdir(parents=True, exist_ok=True)
             if os.name == "nt":
                 os.startfile(folder)  # type: ignore[attr-defined]
@@ -572,28 +847,22 @@ def main() -> None:
             else:
                 subprocess.Popen(["xdg-open", str(folder)])
 
-        def _copy_command(self) -> None:
-            try:
-                command = build_run_command(self._current_config())
-            except (ValueError, tk.TclError) as exc:
-                messagebox.showerror("Nieprawidłowa konfiguracja", str(exc))
-                return
-            text = _quote_command(command)
-            self.root.clipboard_clear()
-            self.root.clipboard_append(text)
-            self.status_var.set("Polecenie skopiowane do schowka")
-
         def _append_log(self, text: str) -> None:
             self.log.configure(state="normal")
             self.log.insert("end", text)
             self.log.see("end")
             self.log.configure(state="disabled")
 
+        def _clear_log(self) -> None:
+            self.log.configure(state="normal")
+            self.log.delete("1.0", "end")
+            self.log.configure(state="disabled")
+
         def _on_close(self) -> None:
             if self.process is not None:
                 if not messagebox.askyesno(
-                    "Skanowanie trwa",
-                    "Skanowanie nadal trwa. Zatrzymać je i zamknąć program?",
+                    "Proces trwa",
+                    "Bieżący etap nadal trwa. Zatrzymać go i zamknąć program?",
                 ):
                     return
                 with contextlib.suppress(OSError):

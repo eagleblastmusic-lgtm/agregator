@@ -1,0 +1,317 @@
+name: Verify Candidate Sources
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/verify-candidate-sources.yml"
+      - "src/agregator/sources/**"
+      - "src/agregator/workflow.py"
+      - "src/agregator/workflow_cli.py"
+      - "src/agregator/gui.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faro-verify-candidate-sources-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      AGREGATOR_USER_AGENT: FaroSourceVerification/0.1
+      AGREGATOR_REQUEST_DELAY: "0.8"
+      JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
+      ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+      ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+      CAREERJET_API_KEY: ${{ secrets.CAREERJET_API_KEY }}
+      CAREERJET_REFERER: ${{ secrets.CAREERJET_REFERER }}
+      CAREERJET_USER_IP: ${{ secrets.CAREERJET_USER_IP }}
+      CAREERJET_USER_AGENT: ${{ secrets.CAREERJET_USER_AGENT }}
+      EPRACA_PARTNER: ${{ secrets.EPRACA_PARTNER }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Prepare verification workspace
+        run: mkdir -p source-verification
+
+      - name: Probe public candidate sources live
+        id: public
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          python -m agregator.workflow_cli collect \
+            --sources "pracuj,olx,theprotocol,bulldogjob,kprm,randstad" \
+            --pages-per-source 1 \
+            --fresh-sources \
+            --db source-verification/public.sqlite3 \
+            > source-verification/public.json
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "$code" > source-verification/public-exit-code.txt
+          exit 0
+
+      - name: Verify credentialed candidate sources when configured
+        id: partner
+        continue-on-error: true
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          from agregator.sources import default_registry
+
+          root = Path("source-verification")
+          registry = default_registry()
+          names = ["epraca", "jooble", "careerjet", "adzuna"]
+          report = []
+          hard_failure = False
+
+          for name in names:
+              registration = registry.describe(name)
+              missing = [
+                  key
+                  for key in registration.required_env
+                  if not os.getenv(key, "").strip()
+              ]
+              if missing:
+                  report.append(
+                      {
+                          "source": name,
+                          "status": "blocked_missing_credentials",
+                          "missing_env": missing,
+                          "access_mode": registration.access_mode,
+                      }
+                  )
+                  continue
+
+              db = root / f"partner-{name}.sqlite3"
+              command = [
+                  sys.executable,
+                  "-m",
+                  "agregator.workflow_cli",
+                  "collect",
+                  "--sources",
+                  name,
+                  "--pages-per-source",
+                  "1",
+                  "--fresh-sources",
+                  "--db",
+                  str(db),
+              ]
+              completed = subprocess.run(
+                  command,
+                  check=False,
+                  capture_output=True,
+                  text=True,
+                  encoding="utf-8",
+                  errors="replace",
+              )
+              (root / f"partner-{name}.stdout.txt").write_text(
+                  completed.stdout,
+                  encoding="utf-8",
+              )
+              (root / f"partner-{name}.stderr.txt").write_text(
+                  completed.stderr,
+                  encoding="utf-8",
+              )
+
+              try:
+                  payload = json.loads(completed.stdout)
+              except Exception as exc:
+                  report.append(
+                      {
+                          "source": name,
+                          "status": "failed_live",
+                          "returncode": completed.returncode,
+                          "error": f"result_json_parse_failed: {exc}",
+                      }
+                  )
+                  hard_failure = True
+                  continue
+
+              source_results = payload.get("source_results", [])
+              source_result = source_results[0] if source_results else {}
+              jobs_seen = int(source_result.get("jobs_seen", 0) or 0)
+              ok = (
+                  completed.returncode == 0
+                  and payload.get("successful_sources") == [name]
+                  and jobs_seen > 0
+              )
+              report.append(
+                  {
+                      "source": name,
+                      "status": "verified_live" if ok else "failed_live",
+                      "returncode": completed.returncode,
+                      "jobs_seen": jobs_seen,
+                      "jobs_inserted": int(source_result.get("jobs_inserted", 0) or 0),
+                      "error": source_result.get("error"),
+                      "access_mode": registration.access_mode,
+                  }
+              )
+              hard_failure = hard_failure or not ok
+
+          (root / "partner-report.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          (root / "partner-hard-failure.txt").write_text(
+              "1" if hard_failure else "0",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Build verification report and enforce required live proof
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("source-verification")
+          required_live = {"kprm", "randstad"}
+          hold_sources = {"pracuj", "olx", "theprotocol", "bulldogjob"}
+          public_names = [
+              "pracuj",
+              "olx",
+              "theprotocol",
+              "bulldogjob",
+              "kprm",
+              "randstad",
+          ]
+          hard_failure = False
+          rows = []
+
+          try:
+              public = json.loads(
+                  (root / "public.json").read_text(encoding="utf-8")
+              )
+          except Exception as exc:
+              public = {}
+              hard_failure = True
+              rows.append(
+                  {
+                      "source": "public_batch",
+                      "status": "failed_live",
+                      "jobs_seen": 0,
+                      "error": f"public_result_parse_failed: {exc}",
+                  }
+              )
+          else:
+              by_source = {
+                  item.get("source"): item
+                  for item in public.get("source_results", [])
+              }
+              for name in public_names:
+                  item = by_source.get(name, {})
+                  jobs_seen = int(item.get("jobs_seen", 0) or 0)
+                  ok = item.get("status") == "success" and jobs_seen > 0
+
+                  if name in required_live:
+                      status = "verified_live" if ok else "failed_live"
+                      hard_failure = hard_failure or not ok
+                  elif name in hold_sources:
+                      status = "candidate_live_available" if ok else "hold_access_blocked"
+                  else:
+                      status = "verified_live" if ok else "failed_live"
+
+                  rows.append(
+                      {
+                          "source": name,
+                          "status": status,
+                          "jobs_seen": jobs_seen,
+                          "jobs_inserted": int(item.get("jobs_inserted", 0) or 0),
+                          "error": item.get("error"),
+                      }
+                  )
+
+          partner_path = root / "partner-report.json"
+          if partner_path.exists():
+              rows.extend(json.loads(partner_path.read_text(encoding="utf-8")))
+          partner_failure_path = root / "partner-hard-failure.txt"
+          if (
+              partner_failure_path.exists()
+              and partner_failure_path.read_text(encoding="utf-8").strip() == "1"
+          ):
+              hard_failure = True
+
+          report = {
+              "status": "failed" if hard_failure else "success",
+              "sources": rows,
+              "verified_live": [
+                  row["source"] for row in rows if row["status"] == "verified_live"
+              ],
+              "hold_access_blocked": [
+                  row["source"]
+                  for row in rows
+                  if row["status"] == "hold_access_blocked"
+              ],
+              "candidate_live_available": [
+                  row["source"]
+                  for row in rows
+                  if row["status"] == "candidate_live_available"
+              ],
+              "blocked_missing_credentials": [
+                  row["source"]
+                  for row in rows
+                  if row["status"] == "blocked_missing_credentials"
+              ],
+              "failed_live": [
+                  row["source"] for row in rows if row["status"] == "failed_live"
+              ],
+          }
+          (root / "verification-report.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+
+          lines = [
+              "## Faro candidate source verification",
+              "",
+              "| Source | Status | Jobs seen | Error / missing credentials |",
+              "|---|---|---:|---|",
+          ]
+          for row in rows:
+              detail = row.get("error") or ", ".join(row.get("missing_env", []))
+              lines.append(
+                  f"| {row['source']} | {row['status']} | "
+                  f"{row.get('jobs_seen', 0)} | {detail or ''} |"
+              )
+          Path("source-verification/summary.md").write_text(
+              "\n".join(lines) + "\n",
+              encoding="utf-8",
+          )
+          print("\n".join(lines))
+
+          if hard_failure:
+              raise SystemExit(2)
+          PY
+          cat source-verification/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload verification artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: faro-candidate-source-verification-${{ github.run_id }}
+          path: source-verification/
+          retention-days: 14

@@ -4,15 +4,23 @@ import pytest
 
 from agregator.gui import (
     ALL_GUI_SOURCES,
+    CREDENTIAL_SOURCES,
     EXPERIMENTAL_SOURCES,
+    HOLD_SOURCES,
     VERIFIED_SOURCES,
+    CollectionConfig,
+    ContactConfig,
     RunConfig,
+    build_collection_command,
+    build_contact_command,
     build_run_command,
+    validate_collection_config,
+    validate_contact_config,
     validate_run_config,
 )
 
 
-def _config(**overrides: object) -> RunConfig:
+def _legacy_config(**overrides: object) -> RunConfig:
     values = {
         "sources": ("aplikuj", "ngo"),
         "pages_per_source": 5,
@@ -27,60 +35,137 @@ def _config(**overrides: object) -> RunConfig:
     return RunConfig(**values)  # type: ignore[arg-type]
 
 
-def test_gui_exposes_pracuj_and_olx_as_optional_sources() -> None:
-    assert "pracuj" in EXPERIMENTAL_SOURCES
-    assert "olx" in EXPERIMENTAL_SOURCES
-    assert "pracuj" in ALL_GUI_SOURCES
-    assert "olx" in ALL_GUI_SOURCES
-    assert "pracuj" not in VERIFIED_SOURCES
-    assert "olx" not in VERIFIED_SOURCES
+def test_gui_exposes_all_implemented_sources_with_verified_states() -> None:
+    assert len(ALL_GUI_SOURCES) == 19
+    assert "kprm" in VERIFIED_SOURCES
+    assert "randstad" in VERIFIED_SOURCES
+    assert set(HOLD_SOURCES) == {"pracuj", "olx", "theprotocol", "bulldogjob"}
+    assert set(CREDENTIAL_SOURCES) == {"epraca", "jooble", "careerjet", "adzuna"}
+    assert set(EXPERIMENTAL_SOURCES) == set(HOLD_SOURCES + CREDENTIAL_SOURCES)
+    assert not (set(VERIFIED_SOURCES) & set(EXPERIMENTAL_SOURCES))
+    assert set(ALL_GUI_SOURCES) == (
+        set(VERIFIED_SOURCES) | set(HOLD_SOURCES) | set(CREDENTIAL_SOURCES)
+    )
 
 
-def test_build_run_command_contains_gui_selection() -> None:
-    command = build_run_command(_config(), python_executable="python")
+def test_collection_command_does_not_run_enrichment_or_export() -> None:
+    config = CollectionConfig(
+        sources=("aplikuj", "kprm", "randstad"),
+        pages_per_source=5,
+        database_path=Path("wyniki/faro.sqlite3"),
+        fresh_sources=True,
+        strict=True,
+    )
 
-    assert command[:4] == ["python", "-m", "agregator.workflow_cli", "run"]
-    assert command[command.index("--sources") + 1] == "aplikuj,ngo"
+    command = build_collection_command(config, python_executable="python")
+
+    assert command[:4] == ["python", "-m", "agregator.workflow_cli", "collect"]
+    assert command[command.index("--sources") + 1] == "aplikuj,kprm,randstad"
     assert command[command.index("--pages-per-source") + 1] == "5"
-    assert command[command.index("--enrichment-limit") + 1] == "300"
     assert "--fresh-sources" in command
     assert "--strict" in command
-    assert "--refresh-enrichment" not in command
+    assert "--enrichment-limit" not in command
+    assert "--output" not in command
 
 
-def test_build_run_command_supports_pracuj_and_olx() -> None:
-    command = build_run_command(
-        _config(sources=("pracuj", "olx")),
-        python_executable="python",
+def test_collection_command_can_explicitly_include_hold_sources() -> None:
+    config = CollectionConfig(
+        sources=("pracuj", "olx", "theprotocol", "bulldogjob"),
+        pages_per_source=1,
+        database_path=Path("wyniki/faro.sqlite3"),
+        strict=False,
     )
 
-    assert command[command.index("--sources") + 1] == "pracuj,olx"
+    command = build_collection_command(config, python_executable="python")
 
-
-def test_build_run_command_supports_refresh_without_strict() -> None:
-    command = build_run_command(
-        _config(fresh_sources=False, refresh_enrichment=True, strict=False),
-        python_executable="python",
+    assert command[command.index("--sources") + 1] == (
+        "pracuj,olx,theprotocol,bulldogjob"
     )
-
-    assert "--fresh-sources" not in command
-    assert "--refresh-enrichment" in command
     assert "--strict" not in command
 
 
+def test_contact_command_does_not_collect_sources() -> None:
+    config = ContactConfig(
+        database_path=Path("wyniki/faro.sqlite3"),
+        output_path=Path("wyniki/Faro_Firmy_Kontakt.xlsx"),
+        enrichment_limit=300,
+        refresh_enrichment=True,
+        strict=True,
+    )
+
+    command = build_contact_command(config, python_executable="python")
+
+    assert command[:4] == ["python", "-m", "agregator.workflow_cli", "enrich"]
+    assert command[command.index("--enrichment-limit") + 1] == "300"
+    assert "--refresh-enrichment" in command
+    assert "--strict" in command
+    assert "--sources" not in command
+    assert "--pages-per-source" not in command
+    assert "--fresh-sources" not in command
+
+
+def test_legacy_one_shot_builder_is_kept_for_compatibility() -> None:
+    command = build_run_command(_legacy_config(), python_executable="python")
+
+    assert command[:4] == ["python", "-m", "agregator.workflow_cli", "run"]
+    assert command[command.index("--sources") + 1] == "aplikuj,ngo"
+    assert command[command.index("--enrichment-limit") + 1] == "300"
+
+
 @pytest.mark.parametrize(
-    ("overrides", "message"),
+    ("config", "message"),
     [
-        ({"sources": ()}, "co najmniej jedno źródło"),
-        ({"pages_per_source": 0}, "1–1000"),
-        ({"enrichment_limit": 501}, "1–500"),
-        ({"output_path": Path("wyniki/faro.csv")}, ".xlsx"),
-        ({"database_path": Path("wyniki/faro.txt")}, ".sqlite3"),
+        (
+            CollectionConfig((), 1, Path("wyniki/faro.sqlite3")),
+            "co najmniej jedno źródło",
+        ),
+        (
+            CollectionConfig(("aplikuj",), 0, Path("wyniki/faro.sqlite3")),
+            "1–1000",
+        ),
+        (
+            CollectionConfig(("aplikuj",), 1, Path("wyniki/faro.txt")),
+            ".sqlite3",
+        ),
     ],
 )
-def test_validate_run_config_rejects_invalid_values(
-    overrides: dict[str, object],
+def test_validate_collection_config_rejects_invalid_values(
+    config: CollectionConfig,
     message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        validate_run_config(_config(**overrides))
+        validate_collection_config(config)
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        (
+            ContactConfig(
+                Path("wyniki/faro.sqlite3"),
+                Path("wyniki/Faro.xlsx"),
+                501,
+            ),
+            "1–500",
+        ),
+        (
+            ContactConfig(Path("wyniki/faro.txt"), Path("wyniki/Faro.xlsx"), 10),
+            ".sqlite3",
+        ),
+        (
+            ContactConfig(Path("wyniki/faro.sqlite3"), Path("wyniki/Faro.csv"), 10),
+            ".xlsx",
+        ),
+    ],
+)
+def test_validate_contact_config_rejects_invalid_values(
+    config: ContactConfig,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        validate_contact_config(config)
+
+
+def test_legacy_validation_still_works() -> None:
+    with pytest.raises(ValueError, match="1–500"):
+        validate_run_config(_legacy_config(enrichment_limit=501))

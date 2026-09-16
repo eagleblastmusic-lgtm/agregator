@@ -7,7 +7,13 @@ from agregator.models import CompanyWebsiteCandidate, JobPosting
 from agregator.pipeline import EmployerDiscoveryPipeline
 from agregator.sources.base import SourceBatch
 from agregator.sources.registry import SourceRegistry
-from agregator.workflow import resolve_workflow_sources, run_end_to_end_workflow
+from agregator.storage import SQLiteStore
+from agregator.workflow import (
+    resolve_workflow_sources,
+    run_collection_workflow,
+    run_end_to_end_workflow,
+    run_enrichment_workflow,
+)
 
 
 class FakeSource:
@@ -117,6 +123,48 @@ def test_source_resolution_rejects_unknown_source() -> None:
             "does-not-exist",
             environment={},
         )
+
+
+@pytest.mark.asyncio
+async def test_collection_and_enrichment_are_independent_stages(tmp_path: Path) -> None:
+    registry = SourceRegistry()
+    registry.register("publictest", FakeSource, access_mode="public_html")
+    db = tmp_path / "workflow.sqlite3"
+    output = tmp_path / "faro_firmy_kontakt.xlsx"
+
+    collection = await run_collection_workflow(
+        db=str(db),
+        sources="all",
+        pages_per_source=1,
+        registry=registry,
+        environment={},
+    )
+
+    assert collection.status == "success"
+    assert collection.successful_sources == ["publictest"]
+    assert collection.source_results[0]["jobs_inserted"] == 1
+    assert not output.exists()
+
+    store = SQLiteStore(str(db))
+    assert len(store.companies_for_enrichment(limit=10, min_identity_confidence=0.7)) == 1
+
+    pipeline = EmployerDiscoveryPipeline(
+        crawler=FakeCrawler(),  # type: ignore[arg-type]
+        search_provider=None,
+    )
+    enrichment = await run_enrichment_workflow(
+        db=str(db),
+        output=str(output),
+        pipeline=pipeline,
+        enrichment_limit=10,
+    )
+
+    assert enrichment.status == "success"
+    assert enrichment.enrichment["enriched"] == 1
+    assert enrichment.enrichment["websites_found"] == 1
+    assert enrichment.enrichment["green_channels"] == 1
+    assert enrichment.export["companies"] == 1
+    assert output.exists()
 
 
 @pytest.mark.asyncio
