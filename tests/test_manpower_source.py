@@ -49,11 +49,15 @@ async def test_manpower_collects_public_all_jobs_listing_and_detail() -> None:
     assert job.source_id == "28977"
     assert job.title == "Specjalista/tka ds. kadr"
     assert job.company_name == "ManpowerGroup Sp. z o.o."
-    assert job.company_name_confidence == 0.35
+    assert job.company_name_confidence == 0.98
     assert job.city == "Warszawa"
     assert job.published_at == "2026-09-04"
+    assert len(job.company_website_candidates) == 1
+    assert job.company_website_candidates[0].url == "https://www.manpower.pl/"
+    assert job.company_website_candidates[0].source == "manpower.listing_agency.website"
     assert job.source_payload["reference_number"] == "28977"
     assert job.source_payload["agency_fallback"] is True
+    assert job.source_payload["represented_entity"] == "listing_agency"
     assert job.source_payload["client_employer_disclosed"] is False
     assert job.source_payload["discovery_source"].endswith("/pl/all-jobs")
 
@@ -151,5 +155,10 @@ def test_parse_manpower_prefers_disclosed_jsonld_employer() -> None:
     assert job.company_name_confidence == 0.99
     assert job.city == "Toruń"
     assert job.source_payload["agency_fallback"] is False
+    assert job.source_payload["represented_entity"] == "client_employer"
     assert job.source_payload["client_employer_disclosed"] is True
     assert job.source_payload["reference_number"] == "30001"
+    assert all(
+        candidate.url != "https://www.manpower.pl/"
+        for candidate in job.company_website_candidates
+    )
