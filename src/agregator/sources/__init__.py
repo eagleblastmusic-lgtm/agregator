@@ -14,6 +14,7 @@ from .manpower import ManpowerPublicSource
 from .ngo import NgoPublicSource
 from .ofertypracy_edu import OfertyPracyEduPublicSource
 from .olx import OlxPublicSource
+from .olx_browser_source import OlxBrowserFallbackSource
 from .public_sources import (
     bulldogjob_source,
     justjoinit_source,
@@ -111,12 +112,14 @@ def default_registry() -> SourceRegistry:
     registry = SourceRegistry()
     registry.register(
         "olx",
-        OlxPublicSource,
+        OlxBrowserFallbackSource,
         access_mode="public_web_endpoint",
         experimental=True,
         notes=(
-            "Uses a public read endpoint outside the documented partner API contract; "
-            "revalidate source terms/access before production use."
+            "Public OLX Praca HTML only. On interactive Windows runs Faro falls back to a "
+            "normal visible Edge/Chrome window when the plain HTTP client is rejected with "
+            "403/406. No private API, stealth, CAPTCHA solving, proxy rotation, or access-control "
+            "bypass is used; revalidate source terms/access before production use."
         ),
     )
     registry.register(
@@ -314,6 +317,7 @@ __all__ = [
     "ManpowerPublicSource",
     "NgoPublicSource",
     "OfertyPracyEduPublicSource",
+    "OlxBrowserFallbackSource",
     "OlxPublicSource",
     "RandstadPublicSource",
     "SourceRegistry",
