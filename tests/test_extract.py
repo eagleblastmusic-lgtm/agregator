@@ -103,6 +103,77 @@ def test_commercial_consent_checkbox_marks_form_for_review() -> None:
     assert form.confidence == 0.78
 
 
+def test_commercial_form_privacy_boilerplate_does_not_force_ignore() -> None:
+    html = """
+    <html><body>
+      <form action="/contact">
+        <label>Company name <input name="company"></label>
+        <label>Topic of interest <select name="topic"><option>IT services</option></select></label>
+        <textarea name="message">Message</textarea>
+        <label>
+          <input type="checkbox" name="marketing">
+          I would like to receive additional information about services and products.
+          Requested materials may contain marketing or commercial information.
+        </label>
+        <p>
+          The controller of the personal data provided via this form is Example Ltd.
+          Your data is processed under the GDPR. See our Privacy Policy.
+        </p>
+        <button type="submit">Send inquiry</button>
+      </form>
+    </body></html>
+    """
+
+    channels = extract_channels(html, "https://example.pl/")
+    form = next(item for item in channels if item.value == "https://example.pl/contact")
+
+    assert form.decision == Decision.REVIEW
+    assert form.purpose == ChannelPurpose.SALES
+    assert form.evidence.signal == "commercial"
+
+
+def test_recruitment_form_stays_ignored_despite_commercial_consent() -> None:
+    html = """
+    <html><body>
+      <form action="/career/apply">
+        <h2>Career recruitment</h2>
+        <label>CV <input name="cv"></label>
+        <label>
+          <input type="checkbox" name="marketing">
+          I consent to receive commercial information.
+        </label>
+        <p>Privacy Policy and GDPR information.</p>
+        <button type="submit">Apply</button>
+      </form>
+    </body></html>
+    """
+
+    channels = extract_channels(html, "https://example.pl/career")
+    form = next(item for item in channels if item.value == "https://example.pl/career/apply")
+
+    assert form.decision == Decision.IGNORE
+    assert form.purpose == ChannelPurpose.RECRUITMENT
+
+
+def test_explicit_partnership_form_stays_green_with_privacy_notice() -> None:
+    html = """
+    <html><body>
+      <form action="/partner" aria-label="Partnership enquiries">
+        <input name="company" placeholder="Company">
+        <textarea name="message" placeholder="Message"></textarea>
+        <p>Personal data is processed according to our Privacy Policy and GDPR.</p>
+        <button type="submit">Send</button>
+      </form>
+    </body></html>
+    """
+
+    channels = extract_channels(html, "https://example.pl/contact")
+    form = next(item for item in channels if item.value == "https://example.pl/partner")
+
+    assert form.decision == Decision.GREEN
+    assert form.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
+
+
 def test_form_structural_semantics_can_reveal_partnership_purpose() -> None:
     html = """
     <html><body>
