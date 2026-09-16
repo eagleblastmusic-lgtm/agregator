@@ -13,8 +13,9 @@ from ..models import CompanyIdentifier, CompanyWebsiteCandidate, JobPosting
 from .public_html import HtmlJobSourceConfig, PublicHtmlJobSource
 
 BASE_URL = "https://rocketjobs.pl"
+_ROCKETJOBS_ROOT_HOST = "rocketjobs.pl"
 _PORTAL_ROOT_HOSTS = {
-    "rocketjobs.pl",
+    _ROCKETJOBS_ROOT_HOST,
     "rocketjobs.com",
     "justjoin.it",
 }
@@ -131,7 +132,7 @@ def extract_employer_profile_url(
     detail_url: str,
     company_name: str,
 ) -> str | None:
-    """Return only a profile linked from the employer section, never the global footer."""
+    """Return only a RocketJobs profile linked from the employer section, never the footer."""
 
     soup = BeautifulSoup(html, "html.parser")
     normalized_company = _normalized_label(company_name)
@@ -145,7 +146,7 @@ def extract_employer_profile_url(
             continue
         absolute = _clean_url(urljoin(detail_url, raw))
         parsed = urlparse(absolute)
-        if not _is_portal_host(parsed.hostname or ""):
+        if not _is_rocketjobs_host(parsed.hostname or ""):
             continue
         if not parsed.path.startswith(_PROFILE_PREFIX):
             continue
@@ -214,6 +215,11 @@ def extract_employer_website(
 
 def _is_portal_url(value: str) -> bool:
     return _is_portal_host(urlparse(value).hostname or "")
+
+
+def _is_rocketjobs_host(value: str) -> bool:
+    host = value.strip().lower().rstrip(".")
+    return host == _ROCKETJOBS_ROOT_HOST or host.endswith(f".{_ROCKETJOBS_ROOT_HOST}")
 
 
 def _is_portal_host(value: str) -> bool:
