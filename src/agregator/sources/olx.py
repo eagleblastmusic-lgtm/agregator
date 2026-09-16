@@ -58,11 +58,18 @@ OLX_PRIMARY_CATEGORY_SLUGS = (
     "prawo",
     "produkcja",
     "rolnictwo-i-ogrodnictwo",
+    "sluzby-mundurowe",
     "sprzatanie",
     "sprzedaz",
     "ubezpieczenia",
     "wykladanie-ekspozycja-towaru",
     "zdrowie",
+    "praktyki-staze",
+    "kadra-kierownicza",
+    "praca-sezonowa",
+    "zapraszamy-seniorow",
+    "praca-dodatkowa",
+    "praca-od-zaraz",
     "inne-oferty-pracy",
 )
 
