@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import queue
 import subprocess
@@ -46,13 +47,22 @@ def validate_run_config(config: RunConfig) -> None:
         raise ValueError("Baza powinna mieć rozszerzenie .sqlite3, .sqlite albo .db.")
 
 
+def _default_runner_python() -> str:
+    executable = Path(sys.executable)
+    if executable.name.lower() == "pythonw.exe":
+        console_python = executable.with_name("python.exe")
+        if console_python.exists():
+            return str(console_python)
+    return str(executable)
+
+
 def build_run_command(
     config: RunConfig,
     *,
     python_executable: str | None = None,
 ) -> list[str]:
     validate_run_config(config)
-    executable = python_executable or sys.executable
+    executable = python_executable or _default_runner_python()
     command = [
         executable,
         "-m",
@@ -112,23 +122,25 @@ def main() -> None:
             self.strict_var = tk.BooleanVar(value=True)
             self.status_var = tk.StringVar(value="Gotowy")
 
-            self._configure_style(ttk)
-            self._build_ui(tk, ttk, filedialog)
+            self._configure_style()
+            self._build_ui()
             self.root.protocol("WM_DELETE_WINDOW", self._on_close)
             self.root.after(100, self._poll_events)
 
-        def _configure_style(self, ttk_module: object) -> None:
+        def _configure_style(self) -> None:
             style = ttk.Style()
-            try:
+            with contextlib.suppress(tk.TclError):
                 style.theme_use("vista")
-            except tk.TclError:
-                pass
             style.configure("Title.TLabel", font=("Segoe UI", 20, "bold"))
             style.configure("Subtitle.TLabel", font=("Segoe UI", 10))
             style.configure("Section.TLabelframe.Label", font=("Segoe UI", 10, "bold"))
-            style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), padding=(14, 8))
+            style.configure(
+                "Primary.TButton",
+                font=("Segoe UI", 10, "bold"),
+                padding=(14, 8),
+            )
 
-        def _build_ui(self, tk_module: object, ttk_module: object, filedialog_module: object) -> None:
+        def _build_ui(self) -> None:
             outer = ttk.Frame(self.root, padding=18)
             outer.pack(fill="both", expand=True)
 
@@ -241,7 +253,7 @@ def main() -> None:
                 folder_row,
                 text="…",
                 width=3,
-                command=lambda: self._choose_folder(filedialog_module),
+                command=self._choose_folder,
             ).pack(side="left", padx=(5, 0))
 
             ttk.Label(output, text="Excel:").grid(row=2, column=0, sticky="w")
@@ -324,8 +336,8 @@ def main() -> None:
             for variable in self.source_vars.values():
                 variable.set(False)
 
-        def _choose_folder(self, filedialog_module: object) -> None:
-            selected = filedialog_module.askdirectory(
+        def _choose_folder(self) -> None:
+            selected = filedialog.askdirectory(
                 initialdir=self.output_dir_var.get() or str(Path.cwd())
             )
             if selected:
@@ -471,10 +483,8 @@ def main() -> None:
                     "Skanowanie nadal trwa. Zatrzymać je i zamknąć program?",
                 ):
                     return
-                try:
+                with contextlib.suppress(OSError):
                     self.process.terminate()
-                except OSError:
-                    pass
             self.root.destroy()
 
     root = tk.Tk()
