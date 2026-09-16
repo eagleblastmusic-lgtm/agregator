@@ -37,7 +37,7 @@ class IdentifierAwareSQLiteStore(SQLiteStore):
 
         kind, value = strong
         digest = hashlib.sha1(  # noqa: S324 - deterministic identity key, not security
-            f"{kind}:{value}".encode("utf-8")
+            f"{kind}:{value}".encode()
         ).hexdigest()[:20]
         return f"strong-id:{kind}:{digest}"
 
