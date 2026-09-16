@@ -19,15 +19,15 @@ VERIFIED_SOURCES = (
     "ofertypracyedu",
     "rocketjobs",
     "skillshot",
+    "kprm",
+    "randstad",
 )
 
-PUBLIC_CANDIDATE_SOURCES = (
+HOLD_SOURCES = (
     "pracuj",
     "olx",
     "theprotocol",
     "bulldogjob",
-    "kprm",
-    "randstad",
 )
 
 CREDENTIAL_SOURCES = (
@@ -37,8 +37,9 @@ CREDENTIAL_SOURCES = (
     "adzuna",
 )
 
-EXPERIMENTAL_SOURCES = PUBLIC_CANDIDATE_SOURCES + CREDENTIAL_SOURCES
-ALL_GUI_SOURCES = VERIFIED_SOURCES + EXPERIMENTAL_SOURCES
+# Compatibility alias used by earlier GUI tests/callers.
+EXPERIMENTAL_SOURCES = HOLD_SOURCES + CREDENTIAL_SOURCES
+ALL_GUI_SOURCES = VERIFIED_SOURCES + HOLD_SOURCES + CREDENTIAL_SOURCES
 DEFAULT_SOURCES = VERIFIED_SOURCES
 
 SOURCE_LABELS = {
@@ -51,12 +52,12 @@ SOURCE_LABELS = {
     "ofertypracyedu": "OfertyPracy.edu.pl",
     "rocketjobs": "RocketJobs",
     "skillshot": "Skillshot.pl",
-    "pracuj": "Pracuj.pl",
-    "olx": "OLX Praca",
-    "theprotocol": "theprotocol.it",
-    "bulldogjob": "Bulldogjob",
     "kprm": "Nabory KPRM",
     "randstad": "Randstad Polska",
+    "pracuj": "Pracuj.pl — HOLD (403)",
+    "olx": "OLX Praca — HOLD (403)",
+    "theprotocol": "theprotocol.it — HOLD (robots.txt)",
+    "bulldogjob": "Bulldogjob — HOLD (403 / dostęp)",
     "epraca": "ePraca / CBOP",
     "jooble": "Jooble Polska",
     "careerjet": "Careerjet Polska",
@@ -248,8 +249,8 @@ def main() -> None:
         def __init__(self, root: tk.Tk) -> None:
             self.root = root
             self.root.title("Faro Emaile — 2 etapy")
-            self.root.geometry("1220x900")
-            self.root.minsize(1040, 780)
+            self.root.geometry("1220x920")
+            self.root.minsize(1040, 800)
 
             self.process: subprocess.Popen[str] | None = None
             self.active_stage: str | None = None
@@ -350,7 +351,7 @@ def main() -> None:
             row = self._source_group(
                 sources_frame,
                 row=0,
-                title="Zweryfikowane produkcyjnie",
+                title="Zweryfikowane live / produkcyjnie",
                 sources=VERIFIED_SOURCES,
             )
             ttk.Separator(sources_frame).grid(
@@ -363,9 +364,19 @@ def main() -> None:
             row = self._source_group(
                 sources_frame,
                 row=row + 1,
-                title="Publiczne — weryfikowane teraz",
-                sources=PUBLIC_CANDIDATE_SOURCES,
+                title="HOLD — blokada dostępu / robots.txt; domyślnie wyłączone",
+                sources=HOLD_SOURCES,
             )
+            ttk.Label(
+                sources_frame,
+                text=(
+                    "HOLD oznacza, że adapter pozostaje w kodzie, ale Faro nie próbuje "
+                    "obchodzić odpowiedzi 403, robots.txt ani innych ograniczeń dostępu."
+                ),
+                wraplength=980,
+                justify="left",
+            ).grid(row=row, column=0, columnspan=4, sticky="w", pady=(3, 0))
+            row += 1
             ttk.Separator(sources_frame).grid(
                 row=row,
                 column=0,
@@ -376,7 +387,7 @@ def main() -> None:
             row = self._source_group(
                 sources_frame,
                 row=row + 1,
-                title="Partner/API — wymagają odpowiednich danych dostępowych",
+                title="Partner/API — wymagają danych dostępowych",
                 sources=CREDENTIAL_SOURCES,
             )
 
@@ -385,12 +396,11 @@ def main() -> None:
             ttk.Button(buttons, text="Tylko zweryfikowane", command=self._select_verified).pack(
                 side="left"
             )
-            ttk.Button(buttons, text="Wszystkie publiczne", command=self._select_public).pack(
-                side="left", padx=(6, 0)
-            )
-            ttk.Button(buttons, text="Zaznacz wszystkie", command=self._select_all).pack(
-                side="left", padx=(6, 0)
-            )
+            ttk.Button(
+                buttons,
+                text="Zaznacz wszystkie (także HOLD)",
+                command=self._select_all,
+            ).pack(side="left", padx=(6, 0))
             ttk.Button(buttons, text="Wyczyść", command=self._clear_all).pack(
                 side="left", padx=(6, 0)
             )
@@ -633,11 +643,6 @@ def main() -> None:
         def _select_verified(self) -> None:
             for source, variable in self.source_vars.items():
                 variable.set(source in VERIFIED_SOURCES)
-
-        def _select_public(self) -> None:
-            public = set(VERIFIED_SOURCES + PUBLIC_CANDIDATE_SOURCES)
-            for source, variable in self.source_vars.items():
-                variable.set(source in public)
 
         def _clear_all(self) -> None:
             for variable in self.source_vars.values():
