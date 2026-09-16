@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from agregator.gui import RunConfig, build_run_command, validate_run_config
+from agregator.gui import (
+    ALL_GUI_SOURCES,
+    EXPERIMENTAL_SOURCES,
+    VERIFIED_SOURCES,
+    RunConfig,
+    build_run_command,
+    validate_run_config,
+)
 
 
 def _config(**overrides: object) -> RunConfig:
@@ -20,6 +27,15 @@ def _config(**overrides: object) -> RunConfig:
     return RunConfig(**values)  # type: ignore[arg-type]
 
 
+def test_gui_exposes_pracuj_and_olx_as_optional_sources() -> None:
+    assert "pracuj" in EXPERIMENTAL_SOURCES
+    assert "olx" in EXPERIMENTAL_SOURCES
+    assert "pracuj" in ALL_GUI_SOURCES
+    assert "olx" in ALL_GUI_SOURCES
+    assert "pracuj" not in VERIFIED_SOURCES
+    assert "olx" not in VERIFIED_SOURCES
+
+
 def test_build_run_command_contains_gui_selection() -> None:
     command = build_run_command(_config(), python_executable="python")
 
@@ -30,6 +46,15 @@ def test_build_run_command_contains_gui_selection() -> None:
     assert "--fresh-sources" in command
     assert "--strict" in command
     assert "--refresh-enrichment" not in command
+
+
+def test_build_run_command_supports_pracuj_and_olx() -> None:
+    command = build_run_command(
+        _config(sources=("pracuj", "olx")),
+        python_executable="python",
+    )
+
+    assert command[command.index("--sources") + 1] == "pracuj,olx"
 
 
 def test_build_run_command_supports_refresh_without_strict() -> None:

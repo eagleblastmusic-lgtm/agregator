@@ -9,7 +9,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_SOURCES = (
+VERIFIED_SOURCES = (
     "aplikuj",
     "justjoinit",
     "karierawfinansach",
@@ -20,6 +20,30 @@ DEFAULT_SOURCES = (
     "rocketjobs",
     "skillshot",
 )
+
+EXPERIMENTAL_SOURCES = (
+    "pracuj",
+    "olx",
+)
+
+ALL_GUI_SOURCES = VERIFIED_SOURCES + EXPERIMENTAL_SOURCES
+
+# Kept for compatibility with the first GUI revision.
+DEFAULT_SOURCES = VERIFIED_SOURCES
+
+SOURCE_LABELS = {
+    "aplikuj": "Aplikuj.pl",
+    "justjoinit": "Just Join IT",
+    "karierawfinansach": "Kariera w Finansach",
+    "manpower": "Manpower",
+    "ngo": "NGO.pl",
+    "nofluffjobs": "No Fluff Jobs",
+    "ofertypracyedu": "OfertyPracy.edu.pl",
+    "rocketjobs": "RocketJobs",
+    "skillshot": "Skillshot.pl",
+    "pracuj": "Pracuj.pl",
+    "olx": "OLX Praca",
+}
 
 
 @dataclass(frozen=True)
@@ -103,14 +127,15 @@ def main() -> None:
         def __init__(self, root: tk.Tk) -> None:
             self.root = root
             self.root.title("Faro Emaile — Employer Discovery")
-            self.root.geometry("1100x760")
-            self.root.minsize(920, 680)
+            self.root.geometry("1180x820")
+            self.root.minsize(980, 720)
 
             self.process: subprocess.Popen[str] | None = None
             self.events: queue.Queue[tuple[str, object]] = queue.Queue()
 
             self.source_vars = {
-                source: tk.BooleanVar(value=True) for source in DEFAULT_SOURCES
+                source: tk.BooleanVar(value=source in VERIFIED_SOURCES)
+                for source in ALL_GUI_SOURCES
             }
             self.pages_var = tk.IntVar(value=5)
             self.enrichment_var = tk.IntVar(value=300)
@@ -167,33 +192,113 @@ def main() -> None:
             right.rowconfigure(1, weight=1)
             right.columnconfigure(0, weight=1)
 
+            self._build_sources_panel(left)
+            self._build_settings_panel(left)
+            self._build_output_panel(left)
+            self._build_actions_panel(left)
+            self._build_log_panel(right)
+
+        def _build_sources_panel(self, parent: object) -> None:
             sources_frame = ttk.LabelFrame(
-                left,
+                parent,
                 text="Źródła",
                 padding=12,
                 style="Section.TLabelframe",
             )
             sources_frame.pack(fill="x")
-            for index, source in enumerate(DEFAULT_SOURCES):
-                row = index // 2
-                column = index % 2
+
+            ttk.Label(
+                sources_frame,
+                text="Zweryfikowane produkcyjnie",
+                font=("Segoe UI", 9, "bold"),
+            ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
+
+            for index, source in enumerate(VERIFIED_SOURCES):
+                row = 1 + index // 3
+                column = index % 3
                 ttk.Checkbutton(
                     sources_frame,
-                    text=source,
+                    text=SOURCE_LABELS[source],
                     variable=self.source_vars[source],
                 ).grid(row=row, column=column, sticky="w", padx=(0, 14), pady=3)
 
-            source_buttons = ttk.Frame(sources_frame)
-            source_buttons.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
-            ttk.Button(source_buttons, text="Zaznacz wszystkie", command=self._select_all).pack(
-                side="left"
+            experimental_row = 1 + (len(VERIFIED_SOURCES) + 2) // 3
+            ttk.Separator(sources_frame).grid(
+                row=experimental_row,
+                column=0,
+                columnspan=3,
+                sticky="ew",
+                pady=(8, 8),
             )
-            ttk.Button(source_buttons, text="Wyczyść", command=self._clear_all).pack(
-                side="left", padx=(6, 0)
+            ttk.Label(
+                sources_frame,
+                text="Dodatkowe / eksperymentalne",
+                font=("Segoe UI", 9, "bold"),
+            ).grid(
+                row=experimental_row + 1,
+                column=0,
+                columnspan=3,
+                sticky="w",
+                pady=(0, 3),
             )
 
+            for index, source in enumerate(EXPERIMENTAL_SOURCES):
+                ttk.Checkbutton(
+                    sources_frame,
+                    text=SOURCE_LABELS[source],
+                    variable=self.source_vars[source],
+                ).grid(
+                    row=experimental_row + 2,
+                    column=index,
+                    sticky="w",
+                    padx=(0, 14),
+                    pady=3,
+                )
+
+            ttk.Label(
+                sources_frame,
+                text=(
+                    "Pracuj.pl i OLX są dostępne, ale nie przeszły końcowego "
+                    "production gate. Przy trybie strict błąd takiego źródła "
+                    "oznaczy cały run jako nieudany."
+                ),
+                wraplength=450,
+                justify="left",
+            ).grid(
+                row=experimental_row + 3,
+                column=0,
+                columnspan=3,
+                sticky="w",
+                pady=(4, 0),
+            )
+
+            source_buttons = ttk.Frame(sources_frame)
+            source_buttons.grid(
+                row=experimental_row + 4,
+                column=0,
+                columnspan=3,
+                sticky="w",
+                pady=(10, 0),
+            )
+            ttk.Button(
+                source_buttons,
+                text="Zaznacz wszystkie",
+                command=self._select_all,
+            ).pack(side="left")
+            ttk.Button(
+                source_buttons,
+                text="Tylko zweryfikowane",
+                command=self._select_verified,
+            ).pack(side="left", padx=(6, 0))
+            ttk.Button(
+                source_buttons,
+                text="Wyczyść",
+                command=self._clear_all,
+            ).pack(side="left", padx=(6, 0))
+
+        def _build_settings_panel(self, parent: object) -> None:
             settings = ttk.LabelFrame(
-                left,
+                parent,
                 text="Zakres skanowania",
                 padding=12,
                 style="Section.TLabelframe",
@@ -236,8 +341,9 @@ def main() -> None:
                 variable=self.strict_var,
             ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
+        def _build_output_panel(self, parent: object) -> None:
             output = ttk.LabelFrame(
-                left,
+                parent,
                 text="Wyniki",
                 padding=12,
                 style="Section.TLabelframe",
@@ -246,7 +352,7 @@ def main() -> None:
             ttk.Label(output, text="Folder:").grid(row=0, column=0, sticky="w")
             folder_row = ttk.Frame(output)
             folder_row.grid(row=1, column=0, sticky="ew", pady=(3, 8))
-            ttk.Entry(folder_row, textvariable=self.output_dir_var, width=37).pack(
+            ttk.Entry(folder_row, textvariable=self.output_dir_var, width=45).pack(
                 side="left", fill="x", expand=True
             )
             ttk.Button(
@@ -257,15 +363,16 @@ def main() -> None:
             ).pack(side="left", padx=(5, 0))
 
             ttk.Label(output, text="Excel:").grid(row=2, column=0, sticky="w")
-            ttk.Entry(output, textvariable=self.xlsx_name_var, width=42).grid(
+            ttk.Entry(output, textvariable=self.xlsx_name_var, width=49).grid(
                 row=3, column=0, sticky="ew", pady=(3, 8)
             )
             ttk.Label(output, text="Baza SQLite:").grid(row=4, column=0, sticky="w")
-            ttk.Entry(output, textvariable=self.db_name_var, width=42).grid(
+            ttk.Entry(output, textvariable=self.db_name_var, width=49).grid(
                 row=5, column=0, sticky="ew", pady=(3, 0)
             )
 
-            actions = ttk.Frame(left)
+        def _build_actions_panel(self, parent: object) -> None:
+            actions = ttk.Frame(parent)
             actions.pack(fill="x", pady=(14, 0))
             self.start_button = ttk.Button(
                 actions,
@@ -292,7 +399,8 @@ def main() -> None:
                 command=self._copy_command,
             ).pack(fill="x", pady=(6, 0))
 
-            status_frame = ttk.Frame(right)
+        def _build_log_panel(self, parent: object) -> None:
+            status_frame = ttk.Frame(parent)
             status_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
             status_frame.columnconfigure(0, weight=1)
             ttk.Label(status_frame, textvariable=self.status_var).grid(
@@ -302,7 +410,7 @@ def main() -> None:
             self.progress.grid(row=0, column=1, sticky="e")
 
             log_frame = ttk.LabelFrame(
-                right,
+                parent,
                 text="Log",
                 padding=8,
                 style="Section.TLabelframe",
@@ -325,12 +433,17 @@ def main() -> None:
             scrollbar.grid(row=0, column=1, sticky="ns")
 
             self._append_log(
-                "Gotowy. Domyślnie wybrane jest 9 zweryfikowanych źródeł produkcyjnych.\n"
+                "Gotowy. Domyślnie wybrane jest 9 zweryfikowanych źródeł. "
+                "Pracuj.pl i OLX są dostępne jako opcjonalne źródła eksperymentalne.\n"
             )
 
         def _select_all(self) -> None:
             for variable in self.source_vars.values():
                 variable.set(True)
+
+        def _select_verified(self) -> None:
+            for source, variable in self.source_vars.items():
+                variable.set(source in VERIFIED_SOURCES)
 
         def _clear_all(self) -> None:
             for variable in self.source_vars.values():
@@ -345,7 +458,7 @@ def main() -> None:
 
         def _selected_sources(self) -> tuple[str, ...]:
             return tuple(
-                source for source in DEFAULT_SOURCES if self.source_vars[source].get()
+                source for source in ALL_GUI_SOURCES if self.source_vars[source].get()
             )
 
         def _current_config(self) -> RunConfig:
