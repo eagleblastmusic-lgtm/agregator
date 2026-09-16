@@ -236,9 +236,11 @@ def _job_from_jsonld(
     url: str,
     payload: dict[str, Any],
 ) -> JobPosting | None:
-    title = _text(payload.get("title"))
+    title = _display_text(payload.get("title"))
     organization = payload.get("hiringOrganization")
-    company_name = _text(organization.get("name")) if isinstance(organization, dict) else None
+    company_name = (
+        _display_text(organization.get("name")) if isinstance(organization, dict) else None
+    )
     if not title or not company_name:
         return None
 
@@ -389,11 +391,11 @@ def _job_city(payload: dict[str, Any]) -> str | None:
         address = location.get("address")
         if not isinstance(address, dict):
             continue
-        city = _text(address.get("addressLocality"))
+        city = _display_text(address.get("addressLocality"))
         if city:
             return city
         for key in ("addressRegion", "addressCountry"):
-            value = _text(address.get(key))
+            value = _display_text(address.get(key))
             if value and fallback is None:
                 fallback = value
     if fallback:
@@ -431,6 +433,14 @@ def _html_to_text(value: str | None) -> str | None:
 def _normalize_url(url: str) -> str:
     parsed = urlparse(url)
     return parsed._replace(fragment="").geturl()
+
+
+def _display_text(value: Any) -> str | None:
+    text = _text(value)
+    if text is None:
+        return None
+    decoded = unescape(text).strip()
+    return decoded or None
 
 
 def _text(value: Any) -> str | None:
