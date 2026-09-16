@@ -19,6 +19,7 @@ from .public_sources import (
     justjoinit_source,
     karierawfinansach_source,
     nofluffjobs_source,
+    olx_html_source,
     pracuj_source,
     rocketjobs_source,
     skillshot_source,
@@ -111,12 +112,12 @@ def default_registry() -> SourceRegistry:
     registry = SourceRegistry()
     registry.register(
         "olx",
-        OlxPublicSource,
-        access_mode="public_web_endpoint",
+        olx_html_source,
+        access_mode="public_html",
         experimental=True,
         notes=(
-            "Uses a public read endpoint outside the documented partner API contract; "
-            "revalidate source terms/access before production use."
+            "Uses robots-allowed public OLX Praca HTML listing/detail pages. The previous "
+            "/api/v1/offers path returned HTTP 403 and is no longer used by the registry."
         ),
     )
     registry.register(
