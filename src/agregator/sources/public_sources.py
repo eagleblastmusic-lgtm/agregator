@@ -9,6 +9,7 @@ from .base import SourceBatch
 from .karierawfinansach import KarieraWFinansachPublicSource
 from .public_html import HtmlJobSourceConfig, PublicHtmlJobSource
 from .sitemap_html import SitemapHtmlJobSource, SitemapJobSourceConfig
+from .skillshot import SkillshotPublicSource
 
 _NOFLUFF_STATIC_HOSTS = {
     "static-dev.nofluffjobs.com",
@@ -81,22 +82,7 @@ class _NoFluffJobsSource(PublicHtmlJobSource):
 
 
 def skillshot_source() -> PublicHtmlJobSource:
-    return PublicHtmlJobSource(
-        HtmlJobSourceConfig(
-            name="skillshot",
-            base_url="https://www.skillshot.pl",
-            listing_url_template="https://www.skillshot.pl/jobs?page={page}",
-            offer_path_patterns=(r"^/jobs/\d+-",),
-            paginated=True,
-            start_page=1,
-            max_offer_links=40,
-            company_selectors=(
-                "a[href*='/users/']",
-                "a[href*='/companies/']",
-                "a[href*='/company/']",
-            ),
-            description_selectors=("main", "article", ".job-description"),
-        ),
+    return SkillshotPublicSource(
         user_agent=_user_agent(),
         request_delay=_delay(),
     )
