@@ -39,6 +39,8 @@ WORD_OBFUSCATED_AT_RE = re.compile(
 )
 WORD_DOT_RE = re.compile(r"\s+(?:dot|kropka)\s+", re.I)
 _EMAIL_CONTEXT_TAGS = {"p", "li", "address", "td", "th", "dd", "dt", "label"}
+_CLOUDFLARE_EMAIL_PATH = "/cdn-cgi/l/email-protection"
+_CLOUDFLARE_HEX_RE = re.compile(r"^[0-9a-f]+$", re.I)
 
 
 def _clean_text(soup: BeautifulSoup) -> str:
@@ -148,6 +150,45 @@ def _attribute_text(tag: Tag, name: str) -> str:
     return str(value or "").strip()
 
 
+def _decode_cloudflare_email(encoded: str) -> str | None:
+    """Decode Cloudflare Email Address Obfuscation payloads without executing page JS."""
+
+    payload = unquote(encoded).strip().lstrip("#")
+    if (
+        len(payload) < 4
+        or len(payload) % 2 != 0
+        or _CLOUDFLARE_HEX_RE.fullmatch(payload) is None
+    ):
+        return None
+
+    try:
+        key = int(payload[:2], 16)
+        decoded = bytes(
+            int(payload[index : index + 2], 16) ^ key
+            for index in range(2, len(payload), 2)
+        ).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+    match = EMAIL_RE.fullmatch(decoded.strip())
+    return match.group(1).lower() if match else None
+
+
+def _cloudflare_email(anchor: Tag) -> str | None:
+    encoded = _attribute_text(anchor, "data-cfemail")
+    if not encoded:
+        protected = anchor.find(attrs={"data-cfemail": True})
+        if isinstance(protected, Tag):
+            encoded = _attribute_text(protected, "data-cfemail")
+
+    if not encoded:
+        href = _attribute_text(anchor, "href")
+        if _CLOUDFLARE_EMAIL_PATH in href.lower() and "#" in href:
+            encoded = href.rsplit("#", 1)[1].split("?", 1)[0]
+
+    return _decode_cloudflare_email(encoded) if encoded else None
+
+
 def _form_semantics(form: Tag) -> str:
     """Collect visible and structural form semantics without user-entered values."""
 
@@ -248,6 +289,26 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
             email_needles[key] = label or email
             email_contexts[key] = _email_tag_context(anchor, label or email)
 
+    # Cloudflare replaces protected addresses with a deterministic XOR payload. Decode the
+    # payload directly from HTML so the contact remains usable without running page JavaScript.
+    for anchor in soup.find_all("a", href=True):
+        if not isinstance(anchor, Tag):
+            continue
+        href = _attribute_text(anchor, "href")
+        protected = anchor.find(attrs={"data-cfemail": True})
+        if (
+            _CLOUDFLARE_EMAIL_PATH not in href.lower()
+            and not anchor.has_attr("data-cfemail")
+            and protected is None
+        ):
+            continue
+        email = _cloudflare_email(anchor)
+        if not email:
+            continue
+        label = " ".join(anchor.stripped_strings).strip()
+        email_needles[email] = label or email
+        email_contexts[email] = _email_tag_context(anchor, label or email)
+
     for email, needle in email_needles.items():
         context = email_contexts.get(email) or _context(text, needle)
         # The page path is useful evidence: /wspolpraca or /partnerzy should make an
@@ -290,6 +351,8 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
             continue
         label = " ".join(anchor.stripped_strings).strip()
         href = _attribute_text(anchor, "href")
+        if _CLOUDFLARE_EMAIL_PATH in href.lower():
+            continue
         discovery_probe = label or href
         if not contains_discovery_signal(discovery_probe):
             continue
