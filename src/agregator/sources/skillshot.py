@@ -24,11 +24,12 @@ _CONFIG = HtmlJobSourceConfig(
     description_selectors=("main", "article", ".job-description"),
 )
 
-_WEBSITE_LABELS = (
-    "web page",
-    "website",
-    "strona internetowa",
-    "strona www",
+_WEBSITE_FIELD_PREFIXES = (
+    "strona:",
+    "strona internetowa:",
+    "strona www:",
+    "web page:",
+    "website:",
 )
 
 
@@ -36,9 +37,9 @@ class SkillshotPublicSource(PublicHtmlJobSource):
     """Public Skillshot collector enriched from first-party employer profiles.
 
     Job details expose a public `/users/<id>` employer profile. Skillshot profiles
-    explicitly publish the employer's own site in a `Web page` field. Only that labelled
-    field is accepted as a source-provided website; recruitment-system links from job ads
-    and unrelated social links are deliberately ignored.
+    explicitly publish the employer's own site in a labelled `Strona` / `Web page` field.
+    Only that field is accepted as a source-provided website; recruitment-system links
+    from job ads and unrelated social links are deliberately ignored.
     """
 
     def __init__(
@@ -145,7 +146,7 @@ def extract_employer_website(
     html: str,
     profile_url: str,
 ) -> CompanyWebsiteCandidate | None:
-    """Extract only Skillshot's explicitly labelled employer `Web page` field."""
+    """Extract only Skillshot's explicitly labelled employer website field."""
 
     soup = BeautifulSoup(html, "html.parser")
     for anchor in soup.select("a[href]"):
@@ -155,8 +156,8 @@ def extract_employer_website(
         if not raw:
             continue
 
-        context = _anchor_context(anchor)
-        if not any(label in context for label in _WEBSITE_LABELS):
+        context = _field_context(anchor)
+        if not any(context.startswith(prefix) for prefix in _WEBSITE_FIELD_PREFIXES):
             continue
 
         absolute = _clean_url(urljoin(profile_url, raw))
@@ -176,13 +177,14 @@ def extract_employer_website(
     return None
 
 
-def _anchor_context(anchor: Tag) -> str:
+def _field_context(anchor: Tag) -> str:
+    container = anchor.find_parent(("p", "li", "td", "dd"))
+    if isinstance(container, Tag):
+        return _normalized_label(container.get_text(" ", strip=True))
     parent = anchor.parent
     if isinstance(parent, Tag):
-        text = parent.get_text(" ", strip=True)
-    else:
-        text = anchor.get_text(" ", strip=True)
-    return _normalized_label(text)
+        return _normalized_label(parent.get_text(" ", strip=True))
+    return _normalized_label(anchor.get_text(" ", strip=True))
 
 
 def _is_portal_host(value: str) -> bool:
