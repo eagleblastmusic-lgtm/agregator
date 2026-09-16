@@ -19,9 +19,9 @@ def test_collection_sources_exposes_access_policy_without_credentials() -> None:
     assert by_name["jooble"]["required_env"] == ["JOOBLE_API_KEY"]
     assert "JOOBLE_LOCATION" in by_name["jooble"]["configuration_env"]
     assert by_name["epraca"]["access_mode"] == "official_partner_feed"
-    assert by_name["olx"]["access_mode"] == "public_web_endpoint"
+    assert by_name["olx"]["access_mode"] == "public_html"
     assert by_name["olx"]["experimental"] is True
-    assert "revalidate" in (by_name["olx"]["notes"] or "")
+    assert "public OLX Praca HTML" in (by_name["olx"]["notes"] or "")
 
 
 def test_collection_credentials_reports_missing_required_env_without_values(monkeypatch) -> None:
