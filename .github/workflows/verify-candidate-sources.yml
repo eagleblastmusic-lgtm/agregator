@@ -11,6 +11,7 @@ on:
       - "src/agregator/workflow.py"
       - "src/agregator/workflow_cli.py"
       - "src/agregator/gui.py"
+      - "src/agregator/gui_app.py"
 
 permissions:
   contents: read
@@ -26,6 +27,7 @@ jobs:
     env:
       AGREGATOR_USER_AGENT: FaroSourceVerification/0.1
       AGREGATOR_REQUEST_DELAY: "0.8"
+      AGREGATOR_OLX_FULL_CATALOG: "0"
       JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
       ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
       ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
@@ -189,8 +191,8 @@ jobs:
           from pathlib import Path
 
           root = Path("source-verification")
-          required_live = {"kprm", "randstad"}
-          hold_sources = {"pracuj", "olx", "theprotocol", "bulldogjob"}
+          required_live = {"olx", "kprm", "randstad"}
+          hold_sources = {"pracuj", "theprotocol", "bulldogjob"}
           public_names = [
               "pracuj",
               "olx",
