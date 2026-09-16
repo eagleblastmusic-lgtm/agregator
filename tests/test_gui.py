@@ -6,7 +6,7 @@ from agregator.gui import (
     ALL_GUI_SOURCES,
     CREDENTIAL_SOURCES,
     EXPERIMENTAL_SOURCES,
-    PUBLIC_CANDIDATE_SOURCES,
+    HOLD_SOURCES,
     VERIFIED_SOURCES,
     CollectionConfig,
     ContactConfig,
@@ -35,24 +35,22 @@ def _legacy_config(**overrides: object) -> RunConfig:
     return RunConfig(**values)  # type: ignore[arg-type]
 
 
-def test_gui_exposes_all_implemented_sources() -> None:
+def test_gui_exposes_all_implemented_sources_with_verified_states() -> None:
     assert len(ALL_GUI_SOURCES) == 19
-    assert set(PUBLIC_CANDIDATE_SOURCES) == {
-        "pracuj",
-        "olx",
-        "theprotocol",
-        "bulldogjob",
-        "kprm",
-        "randstad",
-    }
+    assert "kprm" in VERIFIED_SOURCES
+    assert "randstad" in VERIFIED_SOURCES
+    assert set(HOLD_SOURCES) == {"pracuj", "olx", "theprotocol", "bulldogjob"}
     assert set(CREDENTIAL_SOURCES) == {"epraca", "jooble", "careerjet", "adzuna"}
-    assert set(EXPERIMENTAL_SOURCES) == set(PUBLIC_CANDIDATE_SOURCES + CREDENTIAL_SOURCES)
+    assert set(EXPERIMENTAL_SOURCES) == set(HOLD_SOURCES + CREDENTIAL_SOURCES)
     assert not (set(VERIFIED_SOURCES) & set(EXPERIMENTAL_SOURCES))
+    assert set(ALL_GUI_SOURCES) == (
+        set(VERIFIED_SOURCES) | set(HOLD_SOURCES) | set(CREDENTIAL_SOURCES)
+    )
 
 
 def test_collection_command_does_not_run_enrichment_or_export() -> None:
     config = CollectionConfig(
-        sources=("aplikuj", "pracuj", "olx"),
+        sources=("aplikuj", "kprm", "randstad"),
         pages_per_source=5,
         database_path=Path("wyniki/faro.sqlite3"),
         fresh_sources=True,
@@ -62,12 +60,28 @@ def test_collection_command_does_not_run_enrichment_or_export() -> None:
     command = build_collection_command(config, python_executable="python")
 
     assert command[:4] == ["python", "-m", "agregator.workflow_cli", "collect"]
-    assert command[command.index("--sources") + 1] == "aplikuj,pracuj,olx"
+    assert command[command.index("--sources") + 1] == "aplikuj,kprm,randstad"
     assert command[command.index("--pages-per-source") + 1] == "5"
     assert "--fresh-sources" in command
     assert "--strict" in command
     assert "--enrichment-limit" not in command
     assert "--output" not in command
+
+
+def test_collection_command_can_explicitly_include_hold_sources() -> None:
+    config = CollectionConfig(
+        sources=("pracuj", "olx", "theprotocol", "bulldogjob"),
+        pages_per_source=1,
+        database_path=Path("wyniki/faro.sqlite3"),
+        strict=False,
+    )
+
+    command = build_collection_command(config, python_executable="python")
+
+    assert command[command.index("--sources") + 1] == (
+        "pracuj,olx,theprotocol,bulldogjob"
+    )
+    assert "--strict" not in command
 
 
 def test_contact_command_does_not_collect_sources() -> None:
