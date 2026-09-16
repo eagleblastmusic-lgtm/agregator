@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from .company_identifiers import persist_job_company_identifiers
 from .company_websites import persist_job_company_website_candidates
+from .identifier_store import identifier_aware_store
 from .job_observations import record_job_observations
 from .sources.base import JobSource
 from .storage import SQLiteStore, UpsertStats
@@ -25,6 +26,11 @@ async def ingest_source(
     pages: int = 1,
     resume: bool = True,
 ) -> IngestResult:
+    # All source ingestion gets the conservative strong-identifier fallback while keeping
+    # the caller-facing SQLiteStore contract unchanged. The wrapper points at the exact
+    # same database path and only changes new-company key selection when an explicit,
+    # high-confidence company identifier is present.
+    store = identifier_aware_store(store)
     store.init_schema()
     requested_pages = max(1, pages)
     cursor = store.get_source_cursor(source.name) if resume else None
