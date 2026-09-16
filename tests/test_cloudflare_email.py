@@ -2,13 +2,16 @@ from agregator.extract import extract_channels
 from agregator.models import ChannelPurpose, Decision
 
 
+CF_EMAIL = "11736462787f74626251637473747d3c667e7d6774623f727e7c"
+
+
 def test_cloudflare_protected_business_email_is_decoded_and_not_pseudo_form() -> None:
-    html = """
+    html = f"""
     <html><body>
       <p>
         Business inquiries:
-        <a href="/cdn-cgi/l/email-protection#11736462787f74626251637473747d3c667e7d6774623f727e7c">
-          <span class="__cf_email__" data-cfemail="11736462787f74626251637473747d3c667e7d6774623f727e7c">
+        <a href="/cdn-cgi/l/email-protection#{CF_EMAIL}">
+          <span class="__cf_email__" data-cfemail="{CF_EMAIL}">
             [email protected]
           </span>
         </a>
