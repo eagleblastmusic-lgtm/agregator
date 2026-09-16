@@ -1,0 +1,150 @@
+name: Kariera w Finansach employer profile diagnostic
+
+on:
+  pull_request:
+    branches:
+      - feat/m0-employer-discovery-core
+    paths:
+      - ".github/workflows/karierawfinansach-employer-profile-diagnostic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install httpx beautifulsoup4
+      - name: Inspect offer-to-employer-profile and official website links
+        shell: bash
+        run: |
+          python - <<'PY'
+          import asyncio
+          import json
+          import urllib.robotparser
+          from urllib.parse import urljoin, urlparse
+
+          import httpx
+          from bs4 import BeautifulSoup
+
+          BASE = "https://www.karierawfinansach.pl"
+          LISTING = BASE + "/praca"
+          UA = "FaroEmployerDiscovery/0.2"
+          SOCIAL = {
+              "facebook.com", "www.facebook.com", "linkedin.com", "www.linkedin.com",
+              "youtube.com", "www.youtube.com", "instagram.com", "www.instagram.com",
+              "x.com", "www.x.com", "twitter.com", "www.twitter.com",
+          }
+
+          async def allowed(client, url):
+              response = await client.get(BASE + "/robots.txt", headers={"Accept": "text/plain,*/*;q=0.1"})
+              rp = urllib.robotparser.RobotFileParser()
+              rp.set_url(BASE + "/robots.txt")
+              if response.status_code in {401, 403}:
+                  rp.parse(["User-agent: *", "Disallow: /"])
+              elif response.status_code == 404:
+                  rp.parse(["User-agent: *", "Allow: /"])
+              else:
+                  response.raise_for_status()
+                  rp.parse(response.text.splitlines())
+              return rp.can_fetch(UA, url)
+
+          async def main():
+              async with httpx.AsyncClient(
+                  timeout=25,
+                  follow_redirects=True,
+                  headers={
+                      "User-Agent": UA,
+                      "Accept": "text/html,application/xhtml+xml",
+                      "Accept-Language": "pl-PL,pl;q=0.9",
+                  },
+              ) as client:
+                  print("ROBOTS_LISTING_ALLOWED", await allowed(client, LISTING))
+                  listing = await client.get(LISTING)
+                  print("LISTING", listing.status_code, len(listing.text))
+                  listing.raise_for_status()
+                  soup = BeautifulSoup(listing.text, "html.parser")
+                  offers = []
+                  for a in soup.select("a[href]"):
+                      href = str(a.get("href") or "").strip()
+                      if "/oferta-pracy/" not in href:
+                          continue
+                      url = urljoin(BASE, href)
+                      if url not in offers:
+                          offers.append(url)
+                      if len(offers) >= 8:
+                          break
+                  print("OFFERS", len(offers))
+
+                  profiles = []
+                  for offer_url in offers:
+                      if not await allowed(client, offer_url):
+                          print("OFFER_DISALLOWED", offer_url)
+                          continue
+                      response = await client.get(offer_url)
+                      print("OFFER", response.status_code, offer_url, len(response.text))
+                      if response.status_code != 200:
+                          continue
+                      page = BeautifulSoup(response.text, "html.parser")
+                      employer_links = []
+                      for a in page.select("a[href]"):
+                          href = str(a.get("href") or "").strip()
+                          if "/pracodawca/" in href:
+                              employer_links.append((urljoin(BASE, href), a.get_text(" ", strip=True)))
+                      print("EMPLOYER_LINKS", employer_links[:10])
+                      for profile_url, _ in employer_links:
+                          if profile_url not in profiles:
+                              profiles.append(profile_url)
+
+                  for profile_url in profiles[:6]:
+                      profile_allowed = await allowed(client, profile_url)
+                      print("PROFILE_ALLOWED", profile_allowed, profile_url)
+                      if not profile_allowed:
+                          continue
+                      response = await client.get(profile_url)
+                      print("PROFILE", response.status_code, profile_url, len(response.text))
+                      if response.status_code != 200:
+                          continue
+                      page = BeautifulSoup(response.text, "html.parser")
+
+                      external = []
+                      for a in page.select("a[href]"):
+                          href = str(a.get("href") or "").strip()
+                          absolute = urljoin(profile_url, href)
+                          host = (urlparse(absolute).hostname or "").lower()
+                          if not host or host.endswith("karierawfinansach.pl") or host in SOCIAL:
+                              continue
+                          external.append((absolute, a.get_text(" ", strip=True)))
+                      print("EXTERNAL", external[:30])
+
+                      organizations = []
+                      for script in page.find_all("script", attrs={"type": "application/ld+json"}):
+                          raw = script.string or script.get_text()
+                          try:
+                              payload = json.loads(raw)
+                          except Exception:
+                              continue
+                          stack = [payload]
+                          while stack:
+                              current = stack.pop()
+                              if isinstance(current, dict):
+                                  kind = current.get("@type")
+                                  kinds = kind if isinstance(kind, list) else [kind]
+                                  if any(k in {"Organization", "Corporation"} for k in kinds):
+                                      organizations.append({
+                                          "name": current.get("name"),
+                                          "url": current.get("url"),
+                                          "sameAs": current.get("sameAs"),
+                                      })
+                                  stack.extend(current.values())
+                              elif isinstance(current, list):
+                                  stack.extend(current)
+                      print("ORGANIZATIONS", organizations[:10])
+
+          asyncio.run(main())
+          PY
