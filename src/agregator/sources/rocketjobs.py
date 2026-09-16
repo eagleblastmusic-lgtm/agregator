@@ -13,7 +13,11 @@ from ..models import CompanyIdentifier, CompanyWebsiteCandidate, JobPosting
 from .public_html import HtmlJobSourceConfig, PublicHtmlJobSource
 
 BASE_URL = "https://rocketjobs.pl"
-_PORTAL_ROOT_HOST = "rocketjobs.pl"
+_PORTAL_ROOT_HOSTS = {
+    "rocketjobs.pl",
+    "rocketjobs.com",
+    "justjoin.it",
+}
 _PROFILE_PREFIX = "/brands/story/"
 _PROFILE_LABEL = "zobacz profil firmy"
 _SERIALIZED_WEBSITE_RE = re.compile(
@@ -214,7 +218,10 @@ def _is_portal_url(value: str) -> bool:
 
 def _is_portal_host(value: str) -> bool:
     host = value.strip().lower().rstrip(".")
-    return host == _PORTAL_ROOT_HOST or host.endswith(f".{_PORTAL_ROOT_HOST}")
+    return any(
+        host == root or host.endswith(f".{root}")
+        for root in _PORTAL_ROOT_HOSTS
+    )
 
 
 def _clean_url(url: str) -> str:
