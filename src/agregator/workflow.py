@@ -10,8 +10,7 @@ from .ingest import ingest_source
 from .lead_export import export_company_leads_xlsx
 from .pipeline import EmployerDiscoveryPipeline
 from .source_health import build_source_health
-from .sources import default_registry
-from .sources.registry import SourceRegistry
+from .sources import SourceRegistry, default_registry
 from .storage import SQLiteStore
 
 
