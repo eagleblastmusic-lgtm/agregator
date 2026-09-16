@@ -1,0 +1,98 @@
+name: Aplikuj employer profile diagnostic
+
+on:
+  pull_request:
+    branches:
+      - feat/m0-employer-discovery-core
+    paths:
+      - ".github/workflows/aplikuj-employer-profile-diagnostic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install httpx beautifulsoup4
+      - name: Inspect listing cards and employer profiles
+        shell: bash
+        run: |
+          python - <<'PY'
+          import asyncio
+          from urllib.parse import urljoin, urlparse
+          import httpx
+          from bs4 import BeautifulSoup, Tag
+
+          BASE='https://www.aplikuj.pl'
+          UA='FaroEmployerDiscovery/0.2'
+
+          async def main():
+              async with httpx.AsyncClient(
+                  timeout=25,
+                  follow_redirects=True,
+                  headers={
+                      'User-Agent': UA,
+                      'Accept-Language': 'pl-PL,pl;q=0.9',
+                  },
+              ) as client:
+                  robots = await client.get(BASE + '/robots.txt', headers={'Accept':'text/plain,*/*;q=0.1'})
+                  print('ROBOTS', robots.status_code, robots.headers.get('content-type'))
+                  listing = await client.get(BASE + '/praca', headers={'Accept':'text/html,application/xhtml+xml'})
+                  print('LISTING', listing.status_code, len(listing.text))
+                  listing.raise_for_status()
+                  soup=BeautifulSoup(listing.text,'html.parser')
+                  offers=[]
+                  for a in soup.select("a[href^='/oferta/']"):
+                      href=str(a.get('href') or '')
+                      if href in {x[0] for x in offers}:
+                          continue
+                      profile=None
+                      chosen=None
+                      node:Tag|None=a
+                      for depth in range(7):
+                          if not isinstance(node, Tag):
+                              break
+                          links=[]
+                          for x in node.select("a[href]"):
+                              h=str(x.get('href') or '').strip()
+                              if '/pracodawca/' in h or '/firma/' in h:
+                                  links.append((h, x.get_text(' ',strip=True)))
+                          if links:
+                              profile=links[0]
+                              chosen=(depth,node.name,node.get('class'))
+                              break
+                          node=node.parent if isinstance(node.parent,Tag) else None
+                      offers.append((href,profile,chosen,a.get_text(' ',strip=True)))
+                      if len(offers)>=8:
+                          break
+                  for row in offers:
+                      print('OFFER',row)
+
+                  profiles=[]
+                  for _,prof,_,_ in offers:
+                      if prof and prof[0] not in profiles:
+                          profiles.append(prof[0])
+                  for raw in profiles[:3]:
+                      url=urljoin(BASE,raw)
+                      resp=await client.get(url, headers={'Accept':'text/html,application/xhtml+xml'})
+                      print('PROFILE',resp.status_code,url,len(resp.text))
+                      if resp.status_code != 200:
+                          continue
+                      ps=BeautifulSoup(resp.text,'html.parser')
+                      externals=[]
+                      for x in ps.select('a[href]'):
+                          h=str(x.get('href') or '').strip()
+                          absu=urljoin(url,h)
+                          host=(urlparse(absu).hostname or '').lower()
+                          if host and not host.endswith('aplikuj.pl') and host not in {'facebook.com','www.facebook.com','linkedin.com','www.linkedin.com','youtube.com','www.youtube.com','instagram.com','www.instagram.com','x.com','www.google.com','google.com'}:
+                              externals.append((absu,x.get_text(' ',strip=True)))
+                      print('EXTERNALS',externals[:20])
+
+          asyncio.run(main())
+          PY
