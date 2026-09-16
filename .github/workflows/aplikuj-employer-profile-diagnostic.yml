@@ -47,28 +47,33 @@ jobs:
                   print('LISTING', listing.status_code, len(listing.text))
                   listing.raise_for_status()
                   soup=BeautifulSoup(listing.text,'html.parser')
+                  offer_anchors=[a for a in soup.select("a[href]") if '/oferta/' in str(a.get('href') or '')]
+                  print('OFFER_ANCHORS', len(offer_anchors))
                   offers=[]
-                  for a in soup.select("a[href^='/oferta/']"):
+                  seen=set()
+                  for a in offer_anchors:
                       href=str(a.get('href') or '')
-                      if href in {x[0] for x in offers}:
+                      absolute=urljoin(BASE,href)
+                      if absolute in seen:
                           continue
+                      seen.add(absolute)
                       profile=None
                       chosen=None
                       node:Tag|None=a
-                      for depth in range(7):
+                      for depth in range(9):
                           if not isinstance(node, Tag):
                               break
                           links=[]
                           for x in node.select("a[href]"):
                               h=str(x.get('href') or '').strip()
                               if '/pracodawca/' in h or '/firma/' in h:
-                                  links.append((h, x.get_text(' ',strip=True)))
+                                  links.append((urljoin(BASE,h), x.get_text(' ',strip=True)))
                           if links:
                               profile=links[0]
                               chosen=(depth,node.name,node.get('class'))
                               break
                           node=node.parent if isinstance(node.parent,Tag) else None
-                      offers.append((href,profile,chosen,a.get_text(' ',strip=True)))
+                      offers.append((absolute,profile,chosen,a.get_text(' ',strip=True)))
                       if len(offers)>=8:
                           break
                   for row in offers:
@@ -78,20 +83,24 @@ jobs:
                   for _,prof,_,_ in offers:
                       if prof and prof[0] not in profiles:
                           profiles.append(prof[0])
-                  for raw in profiles[:3]:
-                      url=urljoin(BASE,raw)
+                  for url in profiles[:3]:
                       resp=await client.get(url, headers={'Accept':'text/html,application/xhtml+xml'})
                       print('PROFILE',resp.status_code,url,len(resp.text))
                       if resp.status_code != 200:
                           continue
                       ps=BeautifulSoup(resp.text,'html.parser')
+                      website=[]
                       externals=[]
                       for x in ps.select('a[href]'):
                           h=str(x.get('href') or '').strip()
                           absu=urljoin(url,h)
+                          label=x.get_text(' ',strip=True)
                           host=(urlparse(absu).hostname or '').lower()
+                          if 'strona www' in label.casefold():
+                              website.append((absu,label))
                           if host and not host.endswith('aplikuj.pl') and host not in {'facebook.com','www.facebook.com','linkedin.com','www.linkedin.com','youtube.com','www.youtube.com','instagram.com','www.instagram.com','x.com','www.google.com','google.com'}:
-                              externals.append((absu,x.get_text(' ',strip=True)))
+                              externals.append((absu,label))
+                      print('WEBSITE_LABEL',website[:10])
                       print('EXTERNALS',externals[:20])
 
           asyncio.run(main())
