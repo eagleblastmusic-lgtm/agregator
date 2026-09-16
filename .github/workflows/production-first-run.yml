@@ -33,7 +33,7 @@ permissions:
 
 concurrency:
   group: faro-production-aggregate-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   production:
@@ -44,8 +44,8 @@ jobs:
       AGREGATOR_MAX_PAGES: "12"
       AGREGATOR_REQUEST_DELAY: "0.8"
       PRODUCTION_SOURCES: aplikuj,justjoinit,karierawfinansach,manpower,ngo,nofluffjobs,ofertypracyedu,rocketjobs,skillshot
-      PAGES_PER_SOURCE: ${{ inputs.pages_per_source || '5' }}
-      ENRICHMENT_LIMIT: ${{ inputs.enrichment_limit || '300' }}
+      PAGES_PER_SOURCE: ${{ github.event_name == 'workflow_dispatch' && inputs.pages_per_source || '1' }}
+      ENRICHMENT_LIMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.enrichment_limit || '50' }}
       BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
 
     steps:
@@ -74,6 +74,7 @@ jobs:
                   {
                       "commit": os.environ.get("GITHUB_SHA"),
                       "ref": os.environ.get("GITHUB_REF"),
+                      "event": os.environ.get("GITHUB_EVENT_NAME"),
                       "sources": os.environ["PRODUCTION_SOURCES"].split(","),
                       "pages_per_source": int(os.environ["PAGES_PER_SOURCE"]),
                       "enrichment_limit": int(os.environ["ENRICHMENT_LIMIT"]),
@@ -133,6 +134,8 @@ jobs:
               "job_observations": 0,
               "contact_channels": 0,
               "decisions": {},
+              "green_cloudflare_technical": 0,
+              "green_forbidden_purpose": 0,
           }
           if db_path.exists():
               con = sqlite3.connect(db_path)
@@ -159,6 +162,14 @@ jobs:
                       "SELECT decision, COUNT(*) FROM contact_channels GROUP BY decision"
                   )
               }
+              db["green_cloudflare_technical"] = con.execute(
+                  "SELECT COUNT(*) FROM contact_channels "
+                  "WHERE decision='green' AND lower(value) LIKE '%/cdn-cgi/l/email-protection%'"
+              ).fetchone()[0]
+              db["green_forbidden_purpose"] = con.execute(
+                  "SELECT COUNT(*) FROM contact_channels "
+                  "WHERE decision='green' AND purpose IN ('recruitment','privacy','franchise')"
+              ).fetchone()[0]
               con.close()
 
           source_results = result.get("source_results") or []
@@ -193,7 +204,6 @@ jobs:
               encoding="utf-8",
           )
 
-          enrichment = result.get("enrichment") or {}
           lines = [
               "## Production Aggregate Run",
               "",
@@ -208,6 +218,8 @@ jobs:
               f"- Companies with WWW: `{db['companies_with_website']}`",
               f"- Companies with GREEN: `{db['companies_with_green']}`",
               f"- Contact decisions: `{json.dumps(db['decisions'], ensure_ascii=False, sort_keys=True)}`",
+              f"- GREEN technical Cloudflare URLs: `{db['green_cloudflare_technical']}`",
+              f"- GREEN forbidden purposes: `{db['green_forbidden_purpose']}`",
               f"- XLSX bytes: `{payload['xlsx_bytes']}`",
               "",
               "### Per source",
@@ -248,6 +260,7 @@ jobs:
           result = metrics.get("workflow") or {}
           per_source = metrics.get("per_source") or {}
           enrichment = result.get("enrichment") or {}
+          database = metrics.get("database") or {}
 
           checks = {
               "runner_exit_zero": code == 0,
@@ -260,8 +273,14 @@ jobs:
                   int(per_source.get(name, {}).get("jobs_seen", 0) or 0) > 0
                   for name in expected
               ),
-              "database_has_companies": int(metrics["database"].get("companies", 0) or 0) > 0,
+              "database_has_companies": int(database.get("companies", 0) or 0) > 0,
               "enrichment_exercised": int(enrichment.get("candidates", 0) or 0) > 0,
+              "no_green_cloudflare_technical_urls": (
+                  int(database.get("green_cloudflare_technical", 0) or 0) == 0
+              ),
+              "no_green_forbidden_purposes": (
+                  int(database.get("green_forbidden_purpose", 0) or 0) == 0
+              ),
               "xlsx_created": bool(metrics.get("xlsx_exists")) and int(metrics.get("xlsx_bytes", 0) or 0) > 0,
           }
           failed = [name for name, ok in checks.items() if not ok]
