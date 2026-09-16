@@ -4,7 +4,7 @@ import re
 from urllib.parse import unquote
 
 from bs4 import BeautifulSoup
-from bs4.element import Tag
+from bs4.element import Comment, Tag
 
 from .models import ChannelKind, ContactChannel, Evidence
 from .signals import classify_context, classify_form_context, contains_discovery_signal
@@ -224,6 +224,8 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
     # Recover a DOM-local block for ordinary visible emails. This prevents unrelated footer
     # links such as `Polityka prywatności / RODO` from classifying a generic contact as DPO.
     for string_node in soup.find_all(string=True):
+        if isinstance(string_node, Comment):
+            continue
         raw = str(string_node)
         if "@" not in raw:
             continue
