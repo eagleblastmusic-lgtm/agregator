@@ -68,3 +68,14 @@ def test_explicit_partnership_mail_keeps_green_with_separate_privacy_link() -> N
 
     assert channel.decision == Decision.GREEN
     assert channel.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
+
+
+def test_email_inside_html_comment_is_not_discovered() -> None:
+    html = """
+    <div>Public contact page</div>
+    <!-- internal@example.pl -->
+    """
+
+    channels = extract_channels(html, "https://example.pl/contact")
+
+    assert all(item.value != "internal@example.pl" for item in channels)
