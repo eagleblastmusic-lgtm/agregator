@@ -106,6 +106,34 @@ def nofluffjobs_source() -> PublicHtmlJobSource:
     )
 
 
+def olx_html_source() -> PublicHtmlJobSource:
+    """Collect OLX jobs from robots-allowed public HTML instead of the 403 API path."""
+
+    return PublicHtmlJobSource(
+        HtmlJobSourceConfig(
+            name="olx",
+            base_url="https://www.olx.pl",
+            listing_url_template="https://www.olx.pl/praca/?page={page}",
+            offer_path_patterns=(r"^/oferta/praca/.+-CID4-ID[^/]+\.html$",),
+            paginated=True,
+            start_page=1,
+            max_offer_links=40,
+            company_selectors=(
+                "[data-testid*='company']",
+                "[data-testid*='seller']",
+                "[data-cy*='seller']",
+            ),
+            city_selectors=(
+                "[data-testid*='location']",
+                "[data-cy*='location']",
+            ),
+            description_selectors=("main", "article"),
+        ),
+        user_agent=_user_agent(),
+        request_delay=_delay(),
+    )
+
+
 def bulldogjob_source() -> PublicHtmlJobSource:
     return PublicHtmlJobSource(
         HtmlJobSourceConfig(
@@ -213,6 +241,7 @@ __all__ = [
     "justjoinit_source",
     "karierawfinansach_source",
     "nofluffjobs_source",
+    "olx_html_source",
     "pracuj_source",
     "rocketjobs_source",
     "skillshot_source",
