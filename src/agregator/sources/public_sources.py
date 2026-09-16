@@ -9,7 +9,6 @@ from .base import SourceBatch
 from .public_html import HtmlJobSourceConfig, PublicHtmlJobSource
 from .sitemap_html import SitemapHtmlJobSource, SitemapJobSourceConfig
 
-
 _NOFLUFF_STATIC_HOSTS = {
     "static-dev.nofluffjobs.com",
     "www.static-dev.nofluffjobs.com",
