@@ -16,6 +16,34 @@ from .storage import SQLiteStore
 
 
 @dataclass(slots=True)
+class CollectionWorkflowResult:
+    db: str
+    status: str
+    requested_sources: list[str] = field(default_factory=list)
+    selected_sources: list[str] = field(default_factory=list)
+    skipped_sources: list[dict[str, Any]] = field(default_factory=list)
+    successful_sources: list[str] = field(default_factory=list)
+    failed_sources: list[str] = field(default_factory=list)
+    source_results: list[dict[str, Any]] = field(default_factory=list)
+    source_health: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class EnrichmentWorkflowResult:
+    db: str
+    output: str
+    status: str
+    enrichment: dict[str, Any] = field(default_factory=dict)
+    export: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class WorkflowResult:
     db: str
     output: str
@@ -73,28 +101,17 @@ def resolve_workflow_sources(
     return requested, selected, skipped
 
 
-async def run_end_to_end_workflow(
+async def run_collection_workflow(
     *,
     db: str,
-    output: str,
-    pipeline: EmployerDiscoveryPipeline,
     sources: str = "all",
     pages_per_source: int = 1,
     fresh_sources: bool = False,
     fail_fast: bool = False,
-    enrichment_limit: int = 100,
-    min_identity_confidence: float = 0.7,
-    refresh_enrichment: bool = False,
     registry: SourceRegistry | None = None,
     environment: Mapping[str, str] | None = None,
-) -> WorkflowResult:
-    """Run one resumable collection -> enrichment -> lead-export slice.
-
-    Source cursors, company `enriched_at`, source runs, evidence history and website
-    verification are already persisted by the underlying components. Re-running this
-    workflow therefore continues from the previous state unless the explicit refresh
-    options are enabled.
-    """
+) -> CollectionWorkflowResult:
+    """Collect job offers only, without website/contact enrichment or Excel export."""
 
     registry = registry or default_registry()
     requested, selected, skipped = resolve_workflow_sources(
@@ -147,19 +164,9 @@ async def run_end_to_end_workflow(
             if fail_fast:
                 break
 
-    enrichment = await enrich_pending_companies(
-        store,
-        pipeline,
-        limit=max(1, enrichment_limit),
-        min_identity_confidence=min_identity_confidence,
-        refresh=refresh_enrichment,
-    )
-    export = export_company_leads_xlsx(store, output)
     source_health = [item.to_dict() for item in build_source_health(store, requested)]
-
-    return WorkflowResult(
+    return CollectionWorkflowResult(
         db=db,
-        output=str(export.path),
         status="partial" if failed else "success",
         requested_sources=requested,
         selected_sources=selected,
@@ -168,6 +175,90 @@ async def run_end_to_end_workflow(
         failed_sources=failed,
         source_results=source_results,
         source_health=source_health,
-        enrichment=asdict(enrichment),
+    )
+
+
+async def run_enrichment_workflow(
+    *,
+    db: str,
+    output: str,
+    pipeline: EmployerDiscoveryPipeline,
+    enrichment_limit: int = 100,
+    min_identity_confidence: float = 0.7,
+    refresh_enrichment: bool = False,
+) -> EnrichmentWorkflowResult:
+    """Find official websites and B2B contacts using companies already stored in ``db``."""
+
+    store = SQLiteStore(db)
+    store.init_schema()
+    enrichment_stats = await enrich_pending_companies(
+        store,
+        pipeline,
+        limit=max(1, enrichment_limit),
+        min_identity_confidence=min_identity_confidence,
+        refresh=refresh_enrichment,
+    )
+    export = export_company_leads_xlsx(store, output)
+    enrichment = asdict(enrichment_stats)
+    return EnrichmentWorkflowResult(
+        db=db,
+        output=str(export.path),
+        status="partial" if enrichment_stats.failed else "success",
+        enrichment=enrichment,
         export=export.to_dict(),
+    )
+
+
+async def run_end_to_end_workflow(
+    *,
+    db: str,
+    output: str,
+    pipeline: EmployerDiscoveryPipeline,
+    sources: str = "all",
+    pages_per_source: int = 1,
+    fresh_sources: bool = False,
+    fail_fast: bool = False,
+    enrichment_limit: int = 100,
+    min_identity_confidence: float = 0.7,
+    refresh_enrichment: bool = False,
+    registry: SourceRegistry | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> WorkflowResult:
+    """Compatibility wrapper: collection followed by contact enrichment and export."""
+
+    collection = await run_collection_workflow(
+        db=db,
+        sources=sources,
+        pages_per_source=pages_per_source,
+        fresh_sources=fresh_sources,
+        fail_fast=fail_fast,
+        registry=registry,
+        environment=environment,
+    )
+    enrichment = await run_enrichment_workflow(
+        db=db,
+        output=output,
+        pipeline=pipeline,
+        enrichment_limit=enrichment_limit,
+        min_identity_confidence=min_identity_confidence,
+        refresh_enrichment=refresh_enrichment,
+    )
+
+    return WorkflowResult(
+        db=db,
+        output=enrichment.output,
+        status=(
+            "partial"
+            if collection.failed_sources or enrichment.status == "partial"
+            else "success"
+        ),
+        requested_sources=collection.requested_sources,
+        selected_sources=collection.selected_sources,
+        skipped_sources=collection.skipped_sources,
+        successful_sources=collection.successful_sources,
+        failed_sources=collection.failed_sources,
+        source_results=collection.source_results,
+        source_health=collection.source_health,
+        enrichment=enrichment.enrichment,
+        export=enrichment.export,
     )
