@@ -34,13 +34,16 @@ def test_extract_employer_profile_url_rejects_non_numeric_user_path() -> None:
     ) is None
 
 
-def test_extract_employer_website_uses_only_labelled_web_page_field() -> None:
+def test_extract_employer_website_matches_real_nested_strona_field_only() -> None:
     html = """
     <html><body>
       <p>Recruitment: <a href="https://teyon.elevato.net/">ATS</a></p>
-      <p>Web page: <a href="http://teyon.com/#about">teyon.com</a></p>
-      <p>Showreel: <a href="https://www.youtube.com/watch?v=1">YouTube</a></p>
-      <p>FB: <a href="https://facebook.com/teyon">Facebook</a></p>
+      <p>Strona: <b><a href="http://teyon.com/#about">http://teyon.com/</a></b></p>
+      <p>
+        Showreel: <a href="https://www.youtube.com/watch?v=1">YouTube</a><br/>
+        FB: <a href="https://facebook.com/teyon">Facebook</a><br/>
+        Insta: <a href="https://instagram.com/teyon">Instagram</a>
+      </p>
     </body></html>
     """
 
@@ -55,10 +58,22 @@ def test_extract_employer_website_uses_only_labelled_web_page_field() -> None:
     assert candidate.confidence == 0.97
 
 
+def test_extract_employer_website_supports_english_web_page_label() -> None:
+    html = '<p>Web page: <b><a href="https://example.com/">example.com</a></b></p>'
+
+    candidate = extract_employer_website(
+        html,
+        "https://www.skillshot.pl/users/44",
+    )
+
+    assert candidate is not None
+    assert candidate.url == "https://example.com/"
+
+
 def test_extract_employer_website_rejects_portal_web_page_link() -> None:
     html = """
     <html><body>
-      <p>Web page: <a href="https://jobs.skillshot.pl/company">Portal</a></p>
+      <p>Strona: <b><a href="https://jobs.skillshot.pl/company">Portal</a></b></p>
     </body></html>
     """
 
@@ -95,7 +110,7 @@ async def test_collect_caches_employer_profile_and_adds_strong_identifier() -> N
     <html><body>
       <h1>Teyon</h1>
       <p>Account type: Pro</p>
-      <p>Web page: <a href="http://teyon.com/">teyon.com</a></p>
+      <p>Strona: <b><a href="http://teyon.com/">http://teyon.com/</a></b></p>
       <p>FB: <a href="https://facebook.com/teyon">Facebook</a></p>
     </body></html>
     """
@@ -165,7 +180,10 @@ async def test_existing_jsonld_website_avoids_profile_fetch_but_keeps_profile_id
             return httpx.Response(200, text=detail)
         if request.url.path == "/users/44":
             profile_requests += 1
-            return httpx.Response(200, text='<p>Web page: <a href="https://wrong.example">Wrong</a></p>')
+            return httpx.Response(
+                200,
+                text='<p>Strona: <b><a href="https://wrong.example">Wrong</a></b></p>',
+            )
         return httpx.Response(404)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
