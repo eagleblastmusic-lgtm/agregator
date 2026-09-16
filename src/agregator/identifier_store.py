@@ -42,6 +42,14 @@ class IdentifierAwareSQLiteStore(SQLiteStore):
         return f"strong-id:{kind}:{digest}"
 
 
+def identifier_aware_store(store: SQLiteStore) -> IdentifierAwareSQLiteStore:
+    """Return an identifier-aware view of the same SQLite database path."""
+
+    if isinstance(store, IdentifierAwareSQLiteStore):
+        return store
+    return IdentifierAwareSQLiteStore(store.path)
+
+
 def strongest_company_identifier(job: JobPosting) -> tuple[str, str] | None:
     """Return the safest normalized source-provided company identifier for keying.
 
