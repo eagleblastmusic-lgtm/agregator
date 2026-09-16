@@ -1,16 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 from pathlib import Path
 
-from playwright.async_api import (
-    BrowserContext,
-    Error as PlaywrightError,
-    Page,
-    Playwright,
-    async_playwright,
-)
+from playwright.async_api import BrowserContext, Page, Playwright, async_playwright
+from playwright.async_api import Error as PlaywrightError
 
 _ACCESS_CONTROL_MARKERS = (
     "access denied",
@@ -96,15 +92,11 @@ class OlxBrowserTransport:
         self.channel = None
 
         if context is not None:
-            try:
+            with contextlib.suppress(PlaywrightError):
                 await context.close()
-            except PlaywrightError:
-                pass
         if playwright is not None:
-            try:
+            with contextlib.suppress(PlaywrightError):
                 await playwright.stop()
-            except PlaywrightError:
-                pass
 
     async def _ensure_page(self) -> Page:
         if self._page is not None and not self._page.is_closed():
