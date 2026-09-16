@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from bs4.element import Tag
 
 from .models import ChannelKind, ContactChannel, Evidence
-from .signals import classify_context, contains_discovery_signal
+from .signals import classify_context, classify_form_context, contains_discovery_signal
 from .url_utils import canonicalize_http_url
 
 EMAIL_RE = re.compile(r"(?<![\w.+-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})(?![\w.-])", re.I)
@@ -204,7 +204,7 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
         raw_action = _attribute_text(form, "action")
         value = _channel_url(raw_action, page_url) if raw_action else None
         value = value or _page_channel_url(page_url)
-        purpose, decision, confidence, signal = classify_context(form_text, value)
+        purpose, decision, confidence, signal = classify_form_context(form_text, value)
         found[(ChannelKind.FORM.value, value)] = ContactChannel(
             kind=ChannelKind.FORM,
             value=value,
