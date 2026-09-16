@@ -1,0 +1,290 @@
+name: Production Aggregate Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      pages_per_source:
+        description: Pages/batches to collect per source
+        required: true
+        default: "5"
+        type: choice
+        options:
+          - "3"
+          - "5"
+          - "10"
+      enrichment_limit:
+        description: Maximum companies to enrich in this run
+        required: true
+        default: "300"
+        type: choice
+        options:
+          - "100"
+          - "200"
+          - "300"
+          - "500"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/production-first-run.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faro-production-aggregate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      AGREGATOR_USER_AGENT: FaroEmployerDiscoveryProduction/0.1
+      AGREGATOR_MAX_PAGES: "12"
+      AGREGATOR_REQUEST_DELAY: "0.8"
+      PRODUCTION_SOURCES: aplikuj,justjoinit,karierawfinansach,manpower,ngo,nofluffjobs,ofertypracyedu,rocketjobs,skillshot
+      PAGES_PER_SOURCE: ${{ github.event_name == 'workflow_dispatch' && inputs.pages_per_source || '1' }}
+      ENRICHMENT_LIMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.enrichment_limit || '50' }}
+      BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Prepare workspace
+        shell: bash
+        run: |
+          mkdir -p production-run
+          echo "99" > production-run/exit_code.txt
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          Path("production-run/run_manifest.json").write_text(
+              json.dumps(
+                  {
+                      "commit": os.environ.get("GITHUB_SHA"),
+                      "ref": os.environ.get("GITHUB_REF"),
+                      "event": os.environ.get("GITHUB_EVENT_NAME"),
+                      "sources": os.environ["PRODUCTION_SOURCES"].split(","),
+                      "pages_per_source": int(os.environ["PAGES_PER_SOURCE"]),
+                      "enrichment_limit": int(os.environ["ENRICHMENT_LIMIT"]),
+                  },
+                  ensure_ascii=False,
+                  indent=2,
+              ) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Run production aggregate collection
+        shell: bash
+        run: |
+          set +e
+          agregator-run run \
+            --sources "$PRODUCTION_SOURCES" \
+            --pages-per-source "$PAGES_PER_SOURCE" \
+            --enrichment-limit "$ENRICHMENT_LIMIT" \
+            --fresh-sources \
+            --db production-run/production.sqlite3 \
+            --output production-run/faro_firmy_kontakt.xlsx \
+            --strict \
+            > production-run/result.json
+          code=$?
+          echo "$code" > production-run/exit_code.txt
+          exit 0
+
+      - name: Build production audit metrics
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          root = Path("production-run")
+          result_path = root / "result.json"
+          db_path = root / "production.sqlite3"
+          xlsx_path = root / "faro_firmy_kontakt.xlsx"
+
+          result = {}
+          if result_path.exists():
+              try:
+                  result = json.loads(result_path.read_text(encoding="utf-8"))
+              except json.JSONDecodeError:
+                  result = {"status": "invalid_json"}
+
+          db = {
+              "companies": 0,
+              "companies_enriched": 0,
+              "companies_with_website": 0,
+              "companies_with_green": 0,
+              "job_postings": 0,
+              "job_observations": 0,
+              "contact_channels": 0,
+              "decisions": {},
+              "green_cloudflare_technical": 0,
+              "green_forbidden_purpose": 0,
+          }
+          if db_path.exists():
+              con = sqlite3.connect(db_path)
+              db["companies"] = con.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+              db["companies_enriched"] = con.execute(
+                  "SELECT COUNT(*) FROM companies WHERE enriched_at IS NOT NULL"
+              ).fetchone()[0]
+              db["companies_with_website"] = con.execute(
+                  "SELECT COUNT(*) FROM companies WHERE website_url IS NOT NULL"
+              ).fetchone()[0]
+              db["companies_with_green"] = con.execute(
+                  "SELECT COUNT(DISTINCT company_id) FROM contact_channels WHERE decision='green'"
+              ).fetchone()[0]
+              db["job_postings"] = con.execute("SELECT COUNT(*) FROM job_postings").fetchone()[0]
+              db["job_observations"] = con.execute(
+                  "SELECT COUNT(*) FROM job_posting_observations"
+              ).fetchone()[0]
+              db["contact_channels"] = con.execute(
+                  "SELECT COUNT(*) FROM contact_channels"
+              ).fetchone()[0]
+              db["decisions"] = {
+                  row[0]: row[1]
+                  for row in con.execute(
+                      "SELECT decision, COUNT(*) FROM contact_channels GROUP BY decision"
+                  )
+              }
+              db["green_cloudflare_technical"] = con.execute(
+                  "SELECT COUNT(*) FROM contact_channels "
+                  "WHERE decision='green' AND lower(value) LIKE '%/cdn-cgi/l/email-protection%'"
+              ).fetchone()[0]
+              db["green_forbidden_purpose"] = con.execute(
+                  "SELECT COUNT(*) FROM contact_channels "
+                  "WHERE decision='green' AND purpose IN ('recruitment','privacy','franchise')"
+              ).fetchone()[0]
+              con.close()
+
+          source_results = result.get("source_results") or []
+          per_source = {
+              item.get("source", "unknown"): {
+                  "status": item.get("status"),
+                  "jobs_seen": int(item.get("jobs_seen", 0) or 0),
+                  "jobs_inserted": int(item.get("jobs_inserted", 0) or 0),
+                  "companies_created": int(item.get("companies_created", 0) or 0),
+                  "pages": int(item.get("pages", 0) or 0),
+                  "error_type": item.get("error_type"),
+                  "error": item.get("error"),
+              }
+              for item in source_results
+          }
+
+          payload = {
+              "manifest": json.loads((root / "run_manifest.json").read_text(encoding="utf-8")),
+              "workflow": result,
+              "per_source": per_source,
+              "totals": {
+                  "jobs_seen": sum(item["jobs_seen"] for item in per_source.values()),
+                  "jobs_inserted": sum(item["jobs_inserted"] for item in per_source.values()),
+                  "companies_created": sum(item["companies_created"] for item in per_source.values()),
+              },
+              "database": db,
+              "xlsx_exists": xlsx_path.exists(),
+              "xlsx_bytes": xlsx_path.stat().st_size if xlsx_path.exists() else 0,
+          }
+          (root / "metrics.json").write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          lines = [
+              "## Production Aggregate Run",
+              "",
+              f"- Workflow status: `{result.get('status')}`",
+              f"- Pages per source target: `{os.environ['PAGES_PER_SOURCE']}`",
+              f"- Enrichment limit: `{os.environ['ENRICHMENT_LIMIT']}`",
+              f"- Successful sources: `{len(result.get('successful_sources') or [])}`",
+              f"- Failed sources: `{json.dumps(result.get('failed_sources') or [], ensure_ascii=False)}`",
+              f"- Jobs seen: `{payload['totals']['jobs_seen']}`",
+              f"- Unique companies: `{db['companies']}`",
+              f"- Enriched companies: `{db['companies_enriched']}`",
+              f"- Companies with WWW: `{db['companies_with_website']}`",
+              f"- Companies with GREEN: `{db['companies_with_green']}`",
+              f"- Contact decisions: `{json.dumps(db['decisions'], ensure_ascii=False, sort_keys=True)}`",
+              f"- GREEN technical Cloudflare URLs: `{db['green_cloudflare_technical']}`",
+              f"- GREEN forbidden purposes: `{db['green_forbidden_purpose']}`",
+              f"- XLSX bytes: `{payload['xlsx_bytes']}`",
+              "",
+              "### Per source",
+          ]
+          for name, item in per_source.items():
+              lines.append(
+                  f"- `{name}`: status=`{item['status']}`, jobs=`{item['jobs_seen']}`, "
+                  f"pages=`{item['pages']}`, companies_created=`{item['companies_created']}`"
+              )
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(
+              "\n".join(lines) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload production artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: faro-production-aggregate-${{ github.run_id }}
+          path: production-run/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce production proof
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          expected = set(os.environ["PRODUCTION_SOURCES"].split(","))
+          root = Path("production-run")
+          code = int((root / "exit_code.txt").read_text().strip())
+          metrics = json.loads((root / "metrics.json").read_text(encoding="utf-8"))
+          result = metrics.get("workflow") or {}
+          per_source = metrics.get("per_source") or {}
+          enrichment = result.get("enrichment") or {}
+          database = metrics.get("database") or {}
+
+          checks = {
+              "runner_exit_zero": code == 0,
+              "workflow_success": result.get("status") == "success",
+              "all_expected_selected": set(result.get("selected_sources") or []) == expected,
+              "all_expected_successful": set(result.get("successful_sources") or []) == expected,
+              "no_failed_sources": not (result.get("failed_sources") or []),
+              "all_sources_reported": set(per_source) == expected,
+              "every_source_collected_jobs": all(
+                  int(per_source.get(name, {}).get("jobs_seen", 0) or 0) > 0
+                  for name in expected
+              ),
+              "database_has_companies": int(database.get("companies", 0) or 0) > 0,
+              "enrichment_exercised": int(enrichment.get("candidates", 0) or 0) > 0,
+              "no_green_cloudflare_technical_urls": (
+                  int(database.get("green_cloudflare_technical", 0) or 0) == 0
+              ),
+              "no_green_forbidden_purposes": (
+                  int(database.get("green_forbidden_purpose", 0) or 0) == 0
+              ),
+              "xlsx_created": bool(metrics.get("xlsx_exists")) and int(metrics.get("xlsx_bytes", 0) or 0) > 0,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          print(json.dumps(checks, indent=2))
+          if failed:
+              raise SystemExit("Production aggregate proof failed: " + ", ".join(failed))
+          PY
