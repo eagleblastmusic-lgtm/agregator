@@ -29,6 +29,7 @@ def test_extract_employer_profile_url_prefers_matching_company_anchor() -> None:
 def test_extract_employer_website_skips_portal_social_and_app_links() -> None:
     html = """
     <html><body>
+      <a href="https://karierawfinansach.pl/praca">Oferty pracy</a>
       <a href="https://przewodnik.karierawfinansach.pl/">Przewodnik</a>
       <a href="https://www.linkedin.com/company/example">LinkedIn</a>
       <a href="https://www.bankmillennium.pl/o-banku/kariera#jobs">
@@ -48,6 +49,22 @@ def test_extract_employer_website_skips_portal_social_and_app_links() -> None:
     assert candidate.url == "https://www.bankmillennium.pl/o-banku/kariera"
     assert candidate.source == "karierawfinansach.employer_profile.website"
     assert candidate.confidence == 0.95
+
+
+def test_extract_employer_website_returns_none_for_portal_only_links() -> None:
+    html = """
+    <html><body>
+      <a href="https://karierawfinansach.pl/praca">Praca</a>
+      <a href="https://www.karierawfinansach.pl/artykul/test">Artykuł</a>
+      <a href="https://przewodnik.karierawfinansach.pl/">Przewodnik</a>
+      <a href="https://www.linkedin.com/company/example">LinkedIn</a>
+    </body></html>
+    """
+
+    assert extract_employer_website(
+        html,
+        "https://www.karierawfinansach.pl/pracodawca/example",
+    ) is None
 
 
 @pytest.mark.asyncio
@@ -74,6 +91,7 @@ async def test_collect_caches_employer_profile_for_multiple_offers() -> None:
     """
     profile = """
     <html><body>
+      <a href="https://karierawfinansach.pl/praca">Oferty pracy</a>
       <a href="https://www.bankmillennium.pl/o-banku/kariera">https://www.bankmillennium.pl/o-banku/kariera</a>
       <a href="https://grupambe.pl">Agencja employer branding</a>
     </body></html>
