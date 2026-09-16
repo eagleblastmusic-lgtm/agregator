@@ -16,7 +16,7 @@ def test_preflight_blocks_experimental_source_without_explicit_acknowledgement()
     assert len(result.sources) == 1
     source = result.sources[0]
     assert source.name == "olx"
-    assert source.access_mode == "public_web_endpoint"
+    assert source.access_mode == "public_html"
     assert source.experimental is True
     assert source.ready is False
     assert source.error == "experimental_source_requires_explicit_acknowledgement"
