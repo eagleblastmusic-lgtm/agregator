@@ -58,9 +58,6 @@ EXPLICIT_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("supplier inquiries", ChannelPurpose.SUPPLIER),
     ("vendor enquiries", ChannelPurpose.SUPPLIER),
     ("vendor inquiries", ChannelPurpose.SUPPLIER),
-    ("franczyza", ChannelPurpose.FRANCHISE),
-    ("franchise enquiries", ChannelPurpose.FRANCHISE),
-    ("franchise inquiries", ChannelPurpose.FRANCHISE),
 ]
 
 EXPLICIT_COMPANY_CONTACT_SIGNALS = (
@@ -104,6 +101,9 @@ REVIEW_SIGNALS: list[tuple[str, ChannelPurpose]] = [
     ("suppliers", ChannelPurpose.SUPPLIER),
     ("vendor", ChannelPurpose.SUPPLIER),
     ("vendors", ChannelPurpose.SUPPLIER),
+    ("franczyza", ChannelPurpose.FRANCHISE),
+    ("franchise enquiries", ChannelPurpose.FRANCHISE),
+    ("franchise inquiries", ChannelPurpose.FRANCHISE),
     ("franchise", ChannelPurpose.FRANCHISE),
 ]
 
