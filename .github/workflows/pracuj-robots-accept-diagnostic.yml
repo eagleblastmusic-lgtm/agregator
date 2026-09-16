@@ -1,0 +1,45 @@
+name: Pracuj robots Accept diagnostic
+
+on:
+  pull_request:
+    branches:
+      - feat/m0-employer-discovery-core
+    paths:
+      - ".github/workflows/pracuj-robots-accept-diagnostic.yml"
+      - "src/agregator/sources/public_html.py"
+      - "src/agregator/sources/public_sources.py"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe robots representation negotiation
+        shell: bash
+        run: |
+          set -u
+          UA='FaroEmployerDiscovery/0.2'
+          URL='https://www.pracuj.pl/robots.txt'
+          LIST='https://www.pracuj.pl/praca?pn=1'
+
+          probe() {
+            label="$1"
+            shift
+            code="$(curl -sS -L -o /tmp/body -w '%{http_code}' -A "$UA" "$@" "$URL" || true)"
+            ctype="$(curl -sS -L -I -A "$UA" "$@" "$URL" 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower($1)=="content-type" {print $2; exit}')"
+            echo "$label status=$code content_type=${ctype:-unknown} bytes=$(wc -c </tmp/body 2>/dev/null || echo 0)"
+          }
+
+          probe html_accept -H 'Accept: text/html,application/xhtml+xml'
+          probe text_accept -H 'Accept: text/plain,*/*;q=0.1'
+          probe default_accept
+
+          list_code="$(curl -sS -L -o /tmp/listing -w '%{http_code}' -A "$UA" -H 'Accept: text/html,application/xhtml+xml' "$LIST" || true)"
+          echo "listing_html status=$list_code bytes=$(wc -c </tmp/listing 2>/dev/null || echo 0)"
+
+          # Diagnostic only. Do not fail based on source response codes.
+          exit 0
