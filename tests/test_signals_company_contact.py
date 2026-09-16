@@ -4,7 +4,7 @@ from agregator.signals import classify_context
 
 def test_explicit_company_contact_beats_generic_support_word() -> None:
     purpose, decision, confidence, signal = classify_context(
-        "Kontakt dla firm. Zapraszamy do współpracy z biznesem. Pomoc seniorom.",
+        "Kontakt dla firm. Pomoc seniorom i wsparcie społeczne.",
         "biznes@example.org",
     )
 
