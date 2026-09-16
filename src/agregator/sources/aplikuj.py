@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlparse, urlunparse
 import httpx
 from bs4 import BeautifulSoup, Tag
 
-from ..models import CompanyIdentifier, JobPosting
+from ..models import CompanyIdentifier, CompanyWebsiteCandidate, JobPosting
 from .base import SourceBatch
 from .public_html import HtmlJobSourceConfig, parse_job_detail_html
 
@@ -74,8 +74,10 @@ class AplikujPublicSource:
     """Collect public Aplikuj.pl job listing/detail pages.
 
     The portal exposes a public, server-rendered `/praca/strona-N` sequence and
-    `/oferta/<id>/<slug>` detail pages. Only public HTML is used and robots.txt is
-    checked before listing/detail requests.
+    `/oferta/<id>/<slug>` detail pages. Listing cards also link to first-party
+    employer profiles; when a profile explicitly labels an external link as
+    `Strona www`, that URL is preserved as a source-provided website candidate.
+    Only public HTML is used and robots.txt is checked before each Aplikuj path.
     """
 
     name = "aplikuj"
@@ -110,14 +112,15 @@ class AplikujPublicSource:
             },
         )
 
+        profile_cache: dict[str, CompanyWebsiteCandidate | None] = {}
         try:
             await self._assert_allowed(client, listing_url)
             listing_html = await self._get_text(client, listing_url)
-            links = extract_offer_links(listing_url, listing_html)
-            links = links[: self.max_details_per_page]
+            entries = extract_offer_entries(listing_url, listing_html)
+            entries = entries[: self.max_details_per_page]
 
             jobs: list[JobPosting] = []
-            for index, url in enumerate(links):
+            for index, (url, listing_profile_url) in enumerate(entries):
                 await self._assert_allowed(client, url)
                 if index and self.request_delay:
                     await asyncio.sleep(self.request_delay)
@@ -126,14 +129,60 @@ class AplikujPublicSource:
                 except httpx.HTTPError:
                     continue
                 job = parse_aplikuj_detail(url, detail_html)
-                if job is not None:
-                    jobs.append(job)
+                if job is None:
+                    continue
+
+                profile_url = listing_profile_url or _payload_profile_url(job)
+                if profile_url:
+                    _set_payload_profile_url(job, profile_url)
+                    if not job.company_website_candidates:
+                        candidate = await self._profile_website_candidate(
+                            client,
+                            profile_url,
+                            profile_cache,
+                        )
+                        if candidate is not None:
+                            job.company_website_candidates.append(
+                                candidate.model_copy(deep=True)
+                            )
+                jobs.append(job)
         finally:
             if owns_client:
                 await client.aclose()
 
-        next_cursor = str(page + 1) if links else None
+        next_cursor = str(page + 1) if entries else None
         return SourceBatch(jobs=jobs, next_cursor=next_cursor)
+
+    async def _profile_website_candidate(
+        self,
+        client: httpx.AsyncClient,
+        profile_url: str,
+        cache: dict[str, CompanyWebsiteCandidate | None],
+    ) -> CompanyWebsiteCandidate | None:
+        if profile_url in cache:
+            return cache[profile_url]
+
+        try:
+            await self._assert_allowed(client, profile_url)
+            if self.request_delay:
+                await asyncio.sleep(self.request_delay)
+            profile_html = await self._get_text(client, profile_url)
+        except (httpx.HTTPError, PermissionError):
+            cache[profile_url] = None
+            return None
+
+        website_url = extract_employer_website(profile_url, profile_html)
+        candidate = (
+            CompanyWebsiteCandidate(
+                url=website_url,
+                source="aplikuj.employer_profile.website",
+                confidence=0.95,
+            )
+            if website_url
+            else None
+        )
+        cache[profile_url] = candidate
+        return candidate
 
     @staticmethod
     def _parse_page(cursor: str | None) -> int:
@@ -150,7 +199,10 @@ class AplikujPublicSource:
     async def _assert_allowed(self, client: httpx.AsyncClient, url: str) -> None:
         if self._robots is None:
             robots_url = f"{BASE_URL}/robots.txt"
-            response = await client.get(robots_url)
+            response = await client.get(
+                robots_url,
+                headers={"Accept": "text/plain,*/*;q=0.1"},
+            )
             parser = urllib.robotparser.RobotFileParser()
             parser.set_url(robots_url)
             if response.status_code in {401, 403}:
@@ -180,15 +232,20 @@ class AplikujPublicSource:
         raise last_error
 
 
-def extract_offer_links(listing_url: str, html: str) -> list[str]:
+def extract_offer_entries(
+    listing_url: str,
+    html: str,
+) -> list[tuple[str, str | None]]:
+    """Return canonical offer URLs paired with their listing-card employer profile."""
+
     soup = BeautifulSoup(html, "html.parser")
     expected_host = urlparse(BASE_URL).netloc.lower()
-    output: list[str] = []
+    output: list[tuple[str, str | None]] = []
     seen: set[str] = set()
 
     for anchor in soup.select("a[href]"):
         raw = str(anchor.get("href") or "").strip()
-        if not raw:
+        if not raw or "/oferta/" not in raw:
             continue
         absolute = urljoin(listing_url, raw)
         parsed = urlparse(absolute)
@@ -201,8 +258,42 @@ def extract_offer_links(listing_url: str, html: str) -> list[str]:
         if normalized in seen:
             continue
         seen.add(normalized)
-        output.append(normalized)
+        output.append(
+            (
+                normalized,
+                _listing_employer_profile_url(anchor, listing_url),
+            )
+        )
     return output
+
+
+def extract_offer_links(listing_url: str, html: str) -> list[str]:
+    return [url for url, _ in extract_offer_entries(listing_url, html)]
+
+
+def extract_employer_website(profile_url: str, html: str) -> str | None:
+    """Extract only Aplikuj's explicitly labelled employer `Strona www` link."""
+
+    soup = BeautifulSoup(html, "html.parser")
+    aplikuj_host = urlparse(BASE_URL).hostname or ""
+    for anchor in soup.select("a[href]"):
+        label = anchor.get_text(" ", strip=True).casefold()
+        if "strona www" not in label:
+            continue
+        raw = str(anchor.get("href") or "").strip()
+        if not raw:
+            continue
+        absolute = urljoin(profile_url, raw)
+        parsed = urlparse(absolute)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"} or not host:
+            continue
+        if host == aplikuj_host or host.endswith(f".{aplikuj_host}"):
+            continue
+        return urlunparse(
+            (parsed.scheme, parsed.netloc, parsed.path or "/", "", parsed.query, "")
+        )
+    return None
 
 
 def parse_aplikuj_detail(url: str, html: str) -> JobPosting | None:
@@ -285,6 +376,35 @@ def _augment_job(job: JobPosting, soup: BeautifulSoup, text: str, url: str) -> N
     job.source_payload = payload
 
 
+def _listing_employer_profile_url(anchor: Tag, base_url: str) -> str | None:
+    wrapper = anchor.find_parent("div", class_="offer-card-main-wrapper")
+    if not isinstance(wrapper, Tag):
+        return None
+    for profile_anchor in wrapper.select("a[href*='/pracodawca/'], a[href*='/firma/']"):
+        raw = str(profile_anchor.get("href") or "").strip()
+        if raw:
+            return _normalize_aplikuj_url(urljoin(base_url, raw))
+    return None
+
+
+def _payload_profile_url(job: JobPosting) -> str | None:
+    value = job.source_payload.get("employer_profile_url")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
+def _set_payload_profile_url(job: JobPosting, profile_url: str) -> None:
+    payload = dict(job.source_payload)
+    payload["employer_profile_url"] = profile_url
+    job.source_payload = payload
+
+
+def _normalize_aplikuj_url(url: str) -> str:
+    parsed = urlparse(url)
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
+
+
 def _source_id(url: str) -> str | None:
     match = _OFFER_PATH.match(urlparse(url).path)
     return match.group(1) if match else None
@@ -307,7 +427,7 @@ def _employer_profile_url(soup: BeautifulSoup, base_url: str) -> str | None:
     for anchor in soup.select("a[href*='/pracodawca/'], a[href*='/firma/']"):
         raw = str(anchor.get("href") or "").strip()
         if raw:
-            return urljoin(base_url, raw)
+            return _normalize_aplikuj_url(urljoin(base_url, raw))
     return None
 
 
