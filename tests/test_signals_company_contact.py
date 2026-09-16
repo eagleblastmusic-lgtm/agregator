@@ -25,7 +25,7 @@ def test_dedicated_business_contact_route_allows_generic_mailbox_green() -> None
 
     assert purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
     assert decision == Decision.GREEN
-    assert signal == "kontakt dla firm"
+    assert signal == "wspolpraca z biznesem"
 
 
 def test_nearby_company_heading_does_not_promote_media_mailbox() -> None:
