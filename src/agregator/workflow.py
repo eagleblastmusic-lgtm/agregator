@@ -15,6 +15,14 @@ from .sources.registry import SourceRegistry
 from .storage import SQLiteStore
 
 
+HOLD_SOURCE_REASONS: dict[str, str] = {
+    "pracuj": "public route currently unavailable for the collector (HTTP 406/403)",
+    "olx": "OLX automated collection route is access-blocked (HTTP 403 / robots policy)",
+    "theprotocol": "robots.txt disallows the listing route used by the adapter",
+    "bulldogjob": "public listing route currently returns HTTP 403",
+}
+
+
 @dataclass(slots=True)
 class CollectionWorkflowResult:
     db: str
@@ -68,7 +76,7 @@ def resolve_workflow_sources(
     *,
     environment: Mapping[str, str] | None = None,
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
-    """Resolve implemented sources and skip only adapters missing required credentials."""
+    """Resolve runnable sources and explicitly skip HOLD/credential-blocked adapters."""
 
     env = os.environ if environment is None else environment
     requested = [item.strip().lower() for item in source_value.split(",") if item.strip()]
@@ -84,7 +92,25 @@ def resolve_workflow_sources(
     skipped: list[dict[str, Any]] = []
     for source_name in requested:
         registration = registry.describe(source_name)
-        missing = [name for name in registration.required_env if not str(env.get(name, "")).strip()]
+
+        hold_reason = HOLD_SOURCE_REASONS.get(source_name)
+        if hold_reason:
+            skipped.append(
+                {
+                    "source": source_name,
+                    "status": "skipped",
+                    "reason": "hold_access_blocked",
+                    "detail": hold_reason,
+                    "access_mode": registration.access_mode,
+                }
+            )
+            continue
+
+        missing = [
+            name
+            for name in registration.required_env
+            if not str(env.get(name, "")).strip()
+        ]
         if missing:
             skipped.append(
                 {
