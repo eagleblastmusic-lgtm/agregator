@@ -81,6 +81,7 @@ class PublicHtmlJobSource:
                     continue
                 job = parse_job_detail_html(self.config, url, detail_html)
                 if job is not None:
+                    await self._enrich_job_from_detail(client, job, detail_html, url)
                     jobs.append(job)
         finally:
             if owns_client:
@@ -88,6 +89,22 @@ class PublicHtmlJobSource:
 
         next_cursor = str(page + 1) if self.config.paginated and links else None
         return SourceBatch(jobs=jobs, next_cursor=next_cursor)
+
+    async def _enrich_job_from_detail(
+        self,
+        client: httpx.AsyncClient,
+        job: JobPosting,
+        detail_html: str,
+        detail_url: str,
+    ) -> None:
+        """Optional source-specific enrichment hook after a public detail page is parsed.
+
+        Subclasses may use already-visible detail data to follow another robots-allowed,
+        first-party public page such as an employer profile. The default implementation is
+        intentionally a no-op so existing sources keep their current request behavior.
+        """
+
+        return None
 
     def _parse_cursor(self, cursor: str | None) -> int:
         if cursor is None:
