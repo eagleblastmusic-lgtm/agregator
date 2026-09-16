@@ -38,6 +38,7 @@ WORD_OBFUSCATED_AT_RE = re.compile(
     re.I,
 )
 WORD_DOT_RE = re.compile(r"\s+(?:dot|kropka)\s+", re.I)
+_EMAIL_CONTEXT_TAGS = {"p", "li", "address", "td", "th", "dd", "dt", "label"}
 
 
 def _clean_text(soup: BeautifulSoup) -> str:
@@ -53,6 +54,53 @@ def _context(text: str, needle: str, radius: int = 220) -> str:
     start = max(0, idx - radius)
     end = min(len(text), idx + len(needle) + radius)
     return text[start:end]
+
+
+def _node_text(node: object) -> str:
+    if isinstance(node, Tag):
+        return " ".join(node.stripped_strings).strip()
+    return str(node).strip()
+
+
+def _bounded_preceding_context(tag: Tag, *, limit: int = 260) -> str:
+    """Collect nearby labels before a contact without swallowing the whole footer."""
+
+    parts: list[str] = []
+    total = 0
+    for sibling in tag.previous_siblings:
+        if isinstance(sibling, Tag) and sibling.name == "a":
+            break
+        value = _node_text(sibling)
+        if not value:
+            continue
+        if total + len(value) > limit:
+            break
+        parts.append(value)
+        total += len(value) + 1
+        if len(parts) >= 3:
+            break
+    parts.reverse()
+    return " ".join(parts)
+
+
+def _email_tag_context(tag: Tag, needle: str) -> str:
+    """Prefer the smallest semantic contact block over page-wide flattened context."""
+
+    current: Tag | None = tag
+    while current is not None:
+        if current.name in _EMAIL_CONTEXT_TAGS:
+            value = _node_text(current)
+            if value:
+                return value[:1000]
+        parent = current.parent
+        current = parent if isinstance(parent, Tag) else None
+
+    own = _node_text(tag)
+    preceding = _bounded_preceding_context(tag)
+    value = " ".join(part for part in (preceding, own) if part).strip()
+    if value:
+        return value[:1000]
+    return needle
 
 
 def _obfuscated_emails(text: str) -> dict[str, str]:
@@ -168,9 +216,24 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
     found: dict[tuple[str, str], ContactChannel] = {}
 
     email_needles: dict[str, str] = {}
+    email_contexts: dict[str, str] = {}
     for email in EMAIL_RE.findall(text):
         email_needles[email.lower()] = email
     email_needles.update(_obfuscated_emails(text))
+
+    # Recover a DOM-local block for ordinary visible emails. This prevents unrelated footer
+    # links such as `Polityka prywatności / RODO` from classifying a generic contact as DPO.
+    for string_node in soup.find_all(string=True):
+        raw = str(string_node)
+        if "@" not in raw:
+            continue
+        parent = string_node.parent
+        if not isinstance(parent, Tag):
+            continue
+        for email in EMAIL_RE.findall(raw):
+            key = email.lower()
+            email_needles[key] = email
+            email_contexts[key] = _email_tag_context(parent, email)
 
     for anchor in soup.select('a[href^="mailto:"]'):
         encoded = anchor.get("href", "")[7:].split("?", 1)[0]
@@ -179,10 +242,12 @@ def extract_channels(html: str, page_url: str) -> list[ContactChannel]:
             continue
         label = " ".join(anchor.stripped_strings).strip()
         for email in EMAIL_RE.findall(decoded):
-            email_needles[email.lower()] = label or email
+            key = email.lower()
+            email_needles[key] = label or email
+            email_contexts[key] = _email_tag_context(anchor, label or email)
 
     for email, needle in email_needles.items():
-        context = _context(text, needle)
+        context = email_contexts.get(email) or _context(text, needle)
         # The page path is useful evidence: /wspolpraca or /partnerzy should make an
         # otherwise generic mailbox review-worthy, while /kariera can suppress it.
         purpose, decision, confidence, signal = classify_context(
