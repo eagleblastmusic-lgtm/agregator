@@ -7,8 +7,11 @@ on:
       - feat/m0-employer-discovery-core
     paths:
       - ".github/workflows/p11-ofertypracyedu-e2e.yml"
-      - "src/agregator/**"
-      - "tests/**"
+      - "src/agregator/*.py"
+      - "src/agregator/sources/__init__.py"
+      - "src/agregator/sources/base.py"
+      - "src/agregator/sources/registry.py"
+      - "src/agregator/sources/ofertypracy_edu.py"
 
 permissions:
   contents: read
