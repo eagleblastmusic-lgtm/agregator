@@ -7,8 +7,13 @@ on:
       - feat/m0-employer-discovery-core
     paths:
       - ".github/workflows/p11-rocketjobs-e2e.yml"
-      - "src/agregator/**"
-      - "tests/**"
+      - "src/agregator/*.py"
+      - "src/agregator/sources/__init__.py"
+      - "src/agregator/sources/base.py"
+      - "src/agregator/sources/registry.py"
+      - "src/agregator/sources/public_sources.py"
+      - "src/agregator/sources/public_html.py"
+      - "src/agregator/sources/rocketjobs.py"
 
 permissions:
   contents: read
