@@ -7,6 +7,7 @@ from urllib.parse import unquote, urlparse
 from ..models import CompanyWebsiteCandidate
 from .base import SourceBatch
 from .public_html import HtmlJobSourceConfig, PublicHtmlJobSource
+from .sitemap_html import SitemapHtmlJobSource, SitemapJobSourceConfig
 
 _NOFLUFF_STATIC_HOSTS = {
     "static-dev.nofluffjobs.com",
@@ -215,20 +216,24 @@ def karierawfinansach_source() -> PublicHtmlJobSource:
     )
 
 
-def pracuj_source() -> PublicHtmlJobSource:
-    """Collect Pracuj.pl from its public HTML listing instead of the blocked sitemap."""
-
-    return PublicHtmlJobSource(
-        HtmlJobSourceConfig(
-            name="pracuj",
-            base_url="https://www.pracuj.pl",
-            listing_url_template="https://www.pracuj.pl/praca?pn={page}",
-            offer_path_patterns=(r"^/praca/.+,oferta,\d+$",),
-            paginated=True,
-            start_page=1,
-            max_offer_links=50,
-            company_selectors=("a[href*='pracodawcy.pracuj.pl']",),
-            description_selectors=("main", "article"),
+def pracuj_source() -> SitemapHtmlJobSource:
+    detail = HtmlJobSourceConfig(
+        name="pracuj",
+        base_url="https://www.pracuj.pl",
+        listing_url_template="https://www.pracuj.pl/praca",
+        offer_path_patterns=(r"^/praca/.+,oferta,\d+$",),
+        paginated=False,
+        company_selectors=("a[href*='pracodawcy.pracuj.pl']",),
+        description_selectors=("main", "article"),
+    )
+    return SitemapHtmlJobSource(
+        SitemapJobSourceConfig(
+            detail=detail,
+            sitemap_url=(
+                "https://www.pracuj.pl/SiteMaps/CurrentOffers/"
+                "SiteMapIndexJobOffers.xml"
+            ),
+            chunk_size=25,
         ),
         user_agent=_user_agent(),
         request_delay=_delay(),
