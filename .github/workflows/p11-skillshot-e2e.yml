@@ -7,8 +7,15 @@ on:
       - feat/m0-employer-discovery-core
     paths:
       - ".github/workflows/p11-skillshot-e2e.yml"
+      - "pyproject.toml"
       - "src/agregator/**"
-      - "tests/**"
+      - "!src/agregator/sources/**"
+      - "src/agregator/sources/__init__.py"
+      - "src/agregator/sources/base.py"
+      - "src/agregator/sources/registry.py"
+      - "src/agregator/sources/public_html.py"
+      - "src/agregator/sources/public_sources.py"
+      - "src/agregator/sources/skillshot.py"
 
 permissions:
   contents: read
