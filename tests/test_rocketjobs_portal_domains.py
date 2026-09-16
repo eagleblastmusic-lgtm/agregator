@@ -24,12 +24,16 @@ def test_related_portal_domains_are_not_employer_websites() -> None:
         "https://justjoin.it/",
         "https://jobs.rocketjobs.com/",
     ):
+        payload = (
+            '{"socialMedia":['
+            f'{{"link":"{website}","type":"Website"}}'
+            "]}"
+        )
+        serialized = payload.replace('"', r'\"')
         html = f'''
         <html><body>
           <a href="{website}"></a>
-          <script>
-            self.__next_f.push([1,"{{\\"socialMedia\\":[{{\\"link\\":\\"{website}\\",\\"type\\":\\"Website\\"}}]}}"])
-          </script>
+          <script>self.__next_f.push([1,"{serialized}"])</script>
         </body></html>
         '''
 
