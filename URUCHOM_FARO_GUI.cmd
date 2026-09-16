@@ -71,9 +71,9 @@ if errorlevel 1 (
 )
 
 if exist ".venv\Scripts\pythonw.exe" (
-    start "Faro Emaile" ".venv\Scripts\pythonw.exe" -m agregator.gui
+    start "Faro Emaile" ".venv\Scripts\pythonw.exe" -m agregator.gui_app
 ) else (
-    start "Faro Emaile" ".venv\Scripts\python.exe" -m agregator.gui
+    start "Faro Emaile" ".venv\Scripts\python.exe" -m agregator.gui_app
 )
 exit /b 0
 
