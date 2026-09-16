@@ -252,6 +252,60 @@ def classify_context(context: str, value: str = "") -> tuple[ChannelPurpose, Dec
     return ChannelPurpose.GENERIC, Decision.REVIEW, 0.40, "generic"
 
 
+def classify_form_context(
+    context: str,
+    value: str = "",
+) -> tuple[ChannelPurpose, Decision, float, str]:
+    """Classify a form without letting standard privacy boilerplate hide its purpose.
+
+    Contact and sales forms routinely contain mandatory GDPR/privacy notices. Those
+    notices should not turn an otherwise commercial form into a privacy-only channel.
+    Recruitment and support intent still suppress commercial use, and explicit negative
+    solicitation language remains authoritative.
+    """
+
+    normalized = normalize_text(f"{context} {value}")
+
+    for phrase in NEGATIVE_SIGNALS:
+        if _contains_phrase(normalized, phrase):
+            return ChannelPurpose.NEGATIVE, Decision.IGNORE, 0.99, phrase
+
+    if any(_contains_phrase(normalized, signal) for signal in RECRUITMENT_SIGNALS):
+        return ChannelPurpose.RECRUITMENT, Decision.IGNORE, 0.94, "recruitment"
+
+    if any(_contains_phrase(normalized, signal) for signal in SUPPORT_SIGNALS):
+        return ChannelPurpose.SUPPORT, Decision.IGNORE, 0.90, "support"
+
+    for phrase in COMMERCIAL_CONSENT_SIGNALS:
+        if _contains_phrase(normalized, phrase):
+            return ChannelPurpose.SALES, Decision.REVIEW, 0.78, phrase
+
+    for phrase, purpose in EXPLICIT_SIGNALS:
+        if _contains_phrase(normalized, phrase):
+            return purpose, Decision.GREEN, 0.95, phrase
+
+    company_contact_signal = _explicit_company_contact_signal(normalized)
+    dedicated_company_route = any(
+        marker in normalized for marker in DEDICATED_COMPANY_CONTACT_PATHS
+    )
+    if company_contact_signal and dedicated_company_route:
+        return (
+            ChannelPurpose.BUSINESS_PARTNERSHIP,
+            Decision.GREEN,
+            0.95,
+            company_contact_signal,
+        )
+
+    for phrase, purpose in REVIEW_SIGNALS:
+        if _contains_phrase(normalized, phrase):
+            return purpose, Decision.REVIEW, 0.72, phrase
+
+    if any(_contains_phrase(normalized, signal) for signal in PRIVACY_SIGNALS):
+        return ChannelPurpose.PRIVACY, Decision.IGNORE, 0.98, "privacy"
+
+    return ChannelPurpose.GENERIC, Decision.REVIEW, 0.40, "generic"
+
+
 def contains_discovery_signal(text: str) -> bool:
     normalized = normalize_text(text)
     phrases = [phrase for phrase, _ in EXPLICIT_SIGNALS + REVIEW_SIGNALS]
