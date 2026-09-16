@@ -63,7 +63,7 @@ def test_default_registry_exposes_access_policy_metadata() -> None:
     registry = default_registry()
 
     olx = registry.describe("OLX")
-    assert olx.access_mode == "public_web_endpoint"
+    assert olx.access_mode == "public_html"
     assert olx.experimental is True
     assert olx.notes is not None
     assert olx.required_env == ()
