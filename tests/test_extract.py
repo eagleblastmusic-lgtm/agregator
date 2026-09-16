@@ -1,0 +1,264 @@
+from agregator.extract import extract_channels
+from agregator.models import ChannelPurpose, Decision
+
+
+def test_explicit_partnership_email_is_green() -> None:
+    html = """
+    <html><body>
+      <p>Propozycje współpracy biznesowej prosimy kierować na
+      <a href="mailto:wspolpraca@example.pl">wspolpraca@example.pl</a>.</p>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.pl/kontakt")
+    email = next(item for item in channels if item.value == "wspolpraca@example.pl")
+    assert email.decision == Decision.GREEN
+    assert email.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
+    assert email.confidence >= 0.9
+
+
+def test_negative_commercial_context_is_ignored() -> None:
+    html = """
+    <html><body>
+      <p>Nie przyjmujemy ofert handlowych. kontakt@example.pl</p>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.pl/kontakt")
+    email = next(item for item in channels if item.value == "kontakt@example.pl")
+    assert email.decision == Decision.IGNORE
+    assert email.purpose == ChannelPurpose.NEGATIVE
+
+
+def test_privacy_email_is_ignored() -> None:
+    html = """
+    <html><body>
+      <p>Inspektor Ochrony Danych (RODO): iod@example.pl</p>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.pl/rodo")
+    email = next(item for item in channels if item.value == "iod@example.pl")
+    assert email.decision == Decision.IGNORE
+    assert email.purpose == ChannelPurpose.PRIVACY
+
+
+def test_generic_contact_is_not_green() -> None:
+    html = "<html><body><p>Kontakt: kontakt@example.pl</p></body></html>"
+    channels = extract_channels(html, "https://example.pl/kontakt")
+    email = next(item for item in channels if item.value == "kontakt@example.pl")
+    assert email.decision == Decision.REVIEW
+
+
+def test_obfuscated_at_and_dot_email_is_reconstructed_with_context() -> None:
+    html = """
+    <html><body>
+      <p>Propozycje współpracy prosimy kierować na wspolpraca [at] example [dot] pl.</p>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.pl/wspolpraca")
+    email = next(item for item in channels if item.value == "wspolpraca@example.pl")
+    assert email.decision == Decision.GREEN
+    assert email.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
+    assert "wspolpraca [at] example [dot] pl" in email.evidence.text.lower()
+
+
+def test_obfuscated_polish_malpa_email_is_reconstructed() -> None:
+    html = """
+    <html><body>
+      <p>Kontakt dla partnerów: partnerzy (małpa) example.pl</p>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.pl/partnerzy")
+    email = next(item for item in channels if item.value == "partnerzy@example.pl")
+    assert email.decision == Decision.GREEN
+    assert email.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
+
+
+def test_unbracketed_obfuscated_email_is_reconstructed() -> None:
+    html = """
+    <html><body>
+      <p>Business enquiries: partnerships at example dot com dot pl</p>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.com.pl/business")
+    email = next(item for item in channels if item.value == "partnerships@example.com.pl")
+    assert email.decision == Decision.GREEN
+    assert email.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
+
+
+def test_commercial_consent_checkbox_marks_form_for_review() -> None:
+    html = """
+    <html><body>
+      <form action="/kontakt/wyslij">
+        <label>
+          <input type="checkbox" name="marketing">
+          Zgadzam się na otrzymywanie informacji handlowych drogą elektroniczną.
+        </label>
+        <button>Wyślij</button>
+      </form>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.pl/kontakt")
+    form = next(item for item in channels if item.value == "https://example.pl/kontakt/wyslij")
+    assert form.decision == Decision.REVIEW
+    assert form.purpose == ChannelPurpose.SALES
+    assert form.confidence == 0.78
+
+
+def test_commercial_form_privacy_boilerplate_does_not_force_ignore() -> None:
+    html = """
+    <html><body>
+      <form action="/contact">
+        <label>Company name <input name="company"></label>
+        <label>Topic of interest <select name="topic"><option>IT services</option></select></label>
+        <textarea name="message">Message</textarea>
+        <label>
+          <input type="checkbox" name="marketing">
+          I would like to receive additional information about services and products.
+          Requested materials may contain marketing or commercial information.
+        </label>
+        <p>
+          The controller of the personal data provided via this form is Example Ltd.
+          Your data is processed under the GDPR. See our Privacy Policy.
+        </p>
+        <button type="submit">Send inquiry</button>
+      </form>
+    </body></html>
+    """
+
+    channels = extract_channels(html, "https://example.pl/")
+    form = next(item for item in channels if item.value == "https://example.pl/contact")
+
+    assert form.decision == Decision.REVIEW
+    assert form.purpose == ChannelPurpose.SALES
+    assert form.evidence.signal == "commercial"
+
+
+def test_recruitment_form_stays_ignored_despite_commercial_consent() -> None:
+    html = """
+    <html><body>
+      <form action="/career/apply">
+        <h2>Career recruitment</h2>
+        <label>CV <input name="cv"></label>
+        <label>
+          <input type="checkbox" name="marketing">
+          I consent to receive commercial information.
+        </label>
+        <p>Privacy Policy and GDPR information.</p>
+        <button type="submit">Apply</button>
+      </form>
+    </body></html>
+    """
+
+    channels = extract_channels(html, "https://example.pl/career")
+    form = next(item for item in channels if item.value == "https://example.pl/career/apply")
+
+    assert form.decision == Decision.IGNORE
+    assert form.purpose == ChannelPurpose.RECRUITMENT
+
+
+def test_explicit_partnership_form_stays_green_with_privacy_notice() -> None:
+    html = """
+    <html><body>
+      <form action="/partner" aria-label="Partnership enquiries">
+        <input name="company" placeholder="Company">
+        <textarea name="message" placeholder="Message"></textarea>
+        <p>Personal data is processed according to our Privacy Policy and GDPR.</p>
+        <button type="submit">Send</button>
+      </form>
+    </body></html>
+    """
+
+    channels = extract_channels(html, "https://example.pl/contact")
+    form = next(item for item in channels if item.value == "https://example.pl/partner")
+
+    assert form.decision == Decision.GREEN
+    assert form.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
+
+
+def test_form_structural_semantics_can_reveal_partnership_purpose() -> None:
+    html = """
+    <html><body>
+      <form action="/send" aria-label="Partnership enquiries">
+        <input name="company" placeholder="Company">
+        <textarea name="message" placeholder="Message"></textarea>
+        <button type="submit">Send</button>
+      </form>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.pl/contact")
+    form = next(item for item in channels if item.value == "https://example.pl/send")
+    assert form.decision == Decision.GREEN
+    assert form.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP
+    assert "Partnership enquiries" in form.evidence.text
+
+
+def test_form_and_link_tracking_aliases_deduplicate_to_canonical_url() -> None:
+    html = """
+    <html><body>
+      <form action="/partner?utm_source=footer#send" aria-label="Partnership enquiries">
+        <button>Send</button>
+      </form>
+      <a href="/partner?utm_campaign=spring#form">Partnership enquiries</a>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://EXAMPLE.pl/contact?utm_source=search")
+    forms = [item for item in channels if item.kind.value == "form"]
+    assert len(forms) == 1
+    assert forms[0].value == "https://example.pl/partner"
+    assert forms[0].decision == Decision.GREEN
+
+
+def test_javascript_form_action_uses_page_as_stable_channel_url() -> None:
+    html = """
+    <html><body>
+      <form action="javascript:void(0)" aria-label="Business enquiries">
+        <button>Send</button>
+      </form>
+    </body></html>
+    """
+    channels = extract_channels(html, "https://example.pl/contact#form")
+    form = next(item for item in channels if item.kind.value == "form")
+    assert form.value == "https://example.pl/contact"
+    assert form.decision == Decision.GREEN
+
+
+def test_mailto_percent_encoded_whitespace_is_not_part_of_email() -> None:
+    html = """
+    <html><body>
+      <p>Any additional questions? Contact us at:
+      <a href="mailto:contact@polishedgames.com%20">contact@polishedgames.com</a></p>
+    </body></html>
+    """
+
+    channels = extract_channels(html, "https://polishedgames.com/")
+    values = {item.value for item in channels if item.kind.value == "email"}
+
+    assert "contact@polishedgames.com" in values
+    assert "contact@polishedgames.com%20" not in values
+
+
+def test_partner_word_in_destination_url_does_not_create_pseudo_form() -> None:
+    html = """
+    <html><body>
+      <a href="https://news.xbox.com/en-us/2026/03/26/hunter-reckoning-xbox-partner-preview/">
+        Xbox
+      </a>
+    </body></html>
+    """
+
+    channels = extract_channels(
+        html,
+        "https://teyon.com/news/what-hunter-the-reckoning-deathwish-is-about/",
+    )
+
+    assert [item for item in channels if item.kind.value == "form"] == []
+
+
+def test_visible_partnership_link_remains_a_reviewable_channel() -> None:
+    html = '<a href="/about">Our partnership</a>'
+
+    channels = extract_channels(html, "https://example.pl/")
+    form = next(item for item in channels if item.kind.value == "form")
+
+    assert form.value == "https://example.pl/about"
+    assert form.decision == Decision.REVIEW
+    assert form.purpose == ChannelPurpose.BUSINESS_PARTNERSHIP

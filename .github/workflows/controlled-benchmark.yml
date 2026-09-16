@@ -1,0 +1,242 @@
+name: Controlled Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Comma-separated job sources"
+        required: true
+        default: "jooble,adzuna"
+        type: string
+      allow_experimental_sources:
+        description: "Allow sources marked experimental (for example OLX public-web adapter)"
+        required: true
+        default: false
+        type: boolean
+      target_jobs:
+        description: "Target number of jobs in the benchmark database"
+        required: true
+        default: "1000"
+        type: string
+      max_rounds:
+        description: "Maximum collection rounds"
+        required: true
+        default: "100"
+        type: string
+      max_enrichment_companies:
+        description: "Maximum companies to enrich"
+        required: true
+        default: "1000"
+        type: string
+      label_sampling_seed:
+        description: "Deterministic ground-truth sampling seed"
+        required: true
+        default: "faro-ground-truth-v1"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faro-controlled-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+      JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
+      ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+      ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+      CAREERJET_API_KEY: ${{ secrets.CAREERJET_API_KEY }}
+      CAREERJET_REFERER: ${{ secrets.CAREERJET_REFERER }}
+      CAREERJET_USER_IP: ${{ secrets.CAREERJET_USER_IP }}
+      CAREERJET_USER_AGENT: ${{ secrets.CAREERJET_USER_AGENT }}
+      EPRACA_PARTNER: ${{ secrets.EPRACA_PARTNER }}
+      EPRACA_WOJEWODZTWO: ${{ vars.EPRACA_WOJEWODZTWO }}
+      EPRACA_JEDNOSTKA: ${{ vars.EPRACA_JEDNOSTKA }}
+      EPRACA_ALL: ${{ vars.EPRACA_ALL }}
+      AGREGATOR_USER_AGENT: FaroEmployerDiscoveryBenchmark/0.1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Initialize benchmark workspace
+        shell: bash
+        run: |
+          mkdir -p benchmark
+          echo "99" > benchmark/preflight_exit_code.txt
+          echo "99" > benchmark/exit_code.txt
+
+      - name: Preflight
+        id: preflight
+        shell: bash
+        run: |
+          set +e
+          experimental_args=()
+          if [ "${{ inputs.allow_experimental_sources }}" = "true" ]; then
+            experimental_args+=(--allow-experimental-sources)
+          fi
+          agregator-benchmark preflight \
+            --sources "${{ inputs.sources }}" \
+            "${experimental_args[@]}" \
+            --strict \
+            > benchmark/preflight.json
+          code=$?
+          echo "$code" > benchmark/preflight_exit_code.txt
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run controlled benchmark
+        if: steps.preflight.outputs.exit_code == '0'
+        shell: bash
+        run: |
+          set +e
+          experimental_args=()
+          if [ "${{ inputs.allow_experimental_sources }}" = "true" ]; then
+            experimental_args+=(--allow-experimental-sources)
+          fi
+          agregator-benchmark run \
+            --db benchmark/benchmark.sqlite3 \
+            --output-dir benchmark/run \
+            --sources "${{ inputs.sources }}" \
+            --target-jobs "${{ inputs.target_jobs }}" \
+            --max-rounds "${{ inputs.max_rounds }}" \
+            --enrichment-batch-size 25 \
+            --max-enrichment-companies "${{ inputs.max_enrichment_companies }}" \
+            --label-sampling-seed "${{ inputs.label_sampling_seed }}" \
+            "${experimental_args[@]}" \
+            --strict \
+            > benchmark/run_result.json
+          code=$?
+          echo "$code" > benchmark/exit_code.txt
+          exit 0
+
+      - name: Export source diagnostics
+        if: steps.preflight.outputs.exit_code == '0'
+        shell: bash
+        run: |
+          if [ -f benchmark/benchmark.sqlite3 ]; then
+            agregator-benchmark source-diagnostics \
+              --db benchmark/benchmark.sqlite3 \
+              > benchmark/source_diagnostics.json
+          fi
+
+      - name: Record benchmark skip after failed preflight
+        if: steps.preflight.outputs.exit_code != '0'
+        shell: bash
+        run: |
+          echo "Benchmark skipped because preflight failed." > benchmark/run_skipped.txt
+
+      - name: Write benchmark summary
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("benchmark")
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+
+          def load(name):
+              path = root / name
+              if not path.exists():
+                  return None
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"))
+              except json.JSONDecodeError:
+                  return None
+
+          preflight = load("preflight.json")
+          result = load("run_result.json")
+          diagnostics = load("source_diagnostics.json")
+
+          lines = ["## Faro controlled benchmark", ""]
+          if preflight is not None:
+              lines.extend([
+                  f"- Preflight ready: `{preflight.get('ready')}`",
+                  f"- Search provider ready: `{preflight.get('search_provider_ready')}`",
+              ])
+              blockers = preflight.get("blockers") or []
+              if blockers:
+                  lines.append("- Preflight blockers: `" + ", ".join(map(str, blockers)) + "`")
+
+          if result is not None:
+              collection = result.get("collection") or {}
+              enrichment = result.get("enrichment") or {}
+              readiness = result.get("readiness") or {}
+              benchmark = result.get("benchmark") or {}
+              lines.extend([
+                  f"- Collection target reached: `{collection.get('target_reached')}`",
+                  f"- Jobs collected: `{collection.get('jobs_after')}`",
+                  f"- Companies: `{benchmark.get('companies_total')}`",
+                  f"- Enriched companies: `{enrichment.get('enriched')}`",
+                  f"- Websites found: `{enrichment.get('websites_found')}`",
+                  f"- GREEN channels: `{enrichment.get('green_channels')}`",
+                  f"- Ready for manual labeling: `{readiness.get('ready_for_manual_labeling')}`",
+              ])
+              blockers = readiness.get("blockers") or []
+              if blockers:
+                  lines.append("- Readiness blockers: `" + ", ".join(map(str, blockers)) + "`")
+
+          if diagnostics is not None:
+              identity = diagnostics.get("identity") or {}
+              lines.extend(["", "### Source identity", ""])
+              lines.extend([
+                  "| Source | Jobs | Companies | Name conf. | Resolution conf. | City coverage |",
+                  "| --- | ---: | ---: | ---: | ---: | ---: |",
+              ])
+              for source, metrics in sorted(identity.items()):
+                  lines.append(
+                      f"| {source} | {metrics.get('jobs', 0)} | {metrics.get('companies', 0)} | "
+                      f"{metrics.get('avg_company_name_confidence', 0)} | "
+                      f"{metrics.get('avg_resolution_confidence', 0)} | "
+                      f"{metrics.get('city_coverage', 0)} |"
+                  )
+
+          summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload benchmark workspace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: faro-controlled-benchmark-${{ github.run_id }}
+          path: benchmark/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce benchmark result
+        if: always()
+        shell: bash
+        run: |
+          preflight_code=99
+          benchmark_code=99
+          if [ -f benchmark/preflight_exit_code.txt ]; then
+            preflight_code=$(cat benchmark/preflight_exit_code.txt)
+          fi
+          if [ -f benchmark/exit_code.txt ]; then
+            benchmark_code=$(cat benchmark/exit_code.txt)
+          fi
+
+          if [ "$preflight_code" -ne 0 ]; then
+            echo "Controlled benchmark preflight failed (exit code: $preflight_code)."
+            exit "$preflight_code"
+          fi
+
+          if [ "$benchmark_code" -ne 0 ]; then
+            echo "Controlled benchmark did not complete successfully (exit code: $benchmark_code)."
+            exit "$benchmark_code"
+          fi

@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "faro-agregator"
+version = "0.1.0"
+description = "Faro Employer Discovery Engine"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "beautifulsoup4>=4.12",
+  "httpx>=0.27",
+  "pydantic>=2.8",
+  "typer>=0.12",
+  "xlsxwriter>=3.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+agregator = "agregator.cli:app"
+agregator-benchmark = "agregator.benchmark_cli:app"
+agregator-collect = "agregator.collection_cli:app"
+agregator-export = "agregator.lead_cli:app"
+agregator-run = "agregator.workflow_cli:app"
+agregator-scrape = "agregator.scrape_cli:app"
+agregator-validate = "agregator.validation_cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agregator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

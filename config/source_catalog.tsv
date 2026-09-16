@@ -1,0 +1,92 @@
+id	name	url	priority	type	public_api	integration
+1	Pracuj.pl	https://www.pracuj.pl	A0	Portal ogólny	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+2	Praca.pl	https://www.praca.pl	A0	Portal ogólny	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+3	GoWork.pl	https://www.gowork.pl	A1	Portal ogólny	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+4	Aplikuj.pl	https://www.aplikuj.pl	A1	Portal ogólny	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+5	InfoPraca.pl	https://www.infopraca.pl	B	Portal ogólny	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+6	Jobs.pl	https://www.jobs.pl	B	Portal ogólny	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+7	OLX Praca	https://www.olx.pl/praca	A0	Serwis ogłoszeniowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+8	Gratka Praca	https://gratka.pl/praca	B	Portal/ogłoszenia	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+9	Sprzedajemy.pl Praca	https://sprzedajemy.pl/praca	B	Serwis ogłoszeniowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+10	Just Join IT	https://justjoin.it	A0	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+11	No Fluff Jobs	https://nofluffjobs.com	A0	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+12	theprotocol.it	https://theprotocol.it	A1	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+13	Bulldogjob	https://bulldogjob.pl	A1	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+14	Solid.jobs	https://solid.jobs	B	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+15	4programmers Praca	https://4programmers.net/Praca	B	Społeczność + oferty	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+16	RocketJobs	https://rocketjobs.pl	A0	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+17	MamStartup Praca	https://mamstartup.pl/praca	B	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+18	WirtualneMedia Praca	https://www.wirtualnemedia.pl/praca	A1	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+19	Useme	https://useme.com	A1	Marketplace freelance	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+20	ePraca / CBOP	https://oferty.praca.gov.pl	A0	Źródło oficjalne	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+21	Nabory KPRM	https://nabory.kprm.gov.pl	A0	Źródło oficjalne	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+22	BIP.gov.pl / BIP-y instytucjonalne	https://www.bip.gov.pl	A1	Źródło oficjalne	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+23	Baza Ofert Nauka	https://bazaofert.nauka.gov.pl	A1	Źródło oficjalne	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+24	EURAXESS Polska	https://euraxess.pl	A1	Źródło oficjalne/UE	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+25	MP.pl Praca	https://www.mp.pl/praca	A1	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+26	Konsylium24	https://konsylium24.pl	B	Portal branżowy/społeczność	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+27	LinkedIn Jobs	https://www.linkedin.com/jobs	A0	Sieć zawodowa	Ograniczone/partnerskie	Partner/API/redirect; nie opierać produkcji na scrapingu LinkedIn
+28	Absolvent.pl	https://www.absolvent.pl	A1	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+29	Indeed Polska	https://pl.indeed.com	A0	Agregator/portal	Brak ogólnego publicznego API / programy partnerskie	Preferować partnerstwo/feed; mocna deduplikacja
+30	Jooble Polska	https://pl.jooble.org	A0	Agregator	Tak – REST API, klucz per domena; limity	API-first
+31	Jobrapido Polska	https://pl.jobrapido.com	B	Agregator	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+32	Careerjet Polska	https://www.careerjet.pl	A1	Agregator	Tak – Publisher API	API-first / publisher partnership
+33	Randstad Polska	https://www.randstad.pl	A1	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+34	Manpower Polska	https://www.manpower.pl	A1	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+35	Adecco Polska	https://www.adecco.pl	A1	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+36	Gi Group Polska	https://www.gigroup.com.pl	A1	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+37	Hays Polska	https://www.hays.pl	A1	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+38	Michael Page Polska	https://www.michaelpage.pl	A1	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+39	Fachpraca.pl	https://www.fachpraca.pl	A1	Portal branżowo-ogólny	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+40	Jober.pl	https://www.jober.pl	A1	Portal ogólny	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+41	Jobdesk.pl	https://www.jobdesk.pl	C	Portal ogólny	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+42	ZnajdzPrace.plus	https://znajdzprace.plus	A1	Portal/agregator	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+43	Lento Praca	https://www.lento.pl/praca/	B	Serwis ogłoszeniowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+44	Money.pl Praca	https://praca.money.pl/oferty-pracy/	B	Portal/agregator	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+45	Pracownicy.pl	https://pracownicy.pl	C	Portal ogólny	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+46	Students.pl	https://students.pl	A1	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+47	DoKarierY / OHP	https://dokariery.pl/praca-38002	A1	Źródło publiczne	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+48	NGO.pl – Praca i staż	https://ogloszenia.ngo.pl/praca-staz/dam-prace	A1	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+49	HoReCaPraca.pl	https://horecapraca.pl	A1	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+50	Kariera w Finansach	https://www.karierawfinansach.pl/praca	A0	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+51	Careers in Poland	https://www.careersinpoland.com	B	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+52	LinguaJob.pl	https://www.linguajob.pl	C	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+53	Skillshot.pl	https://www.skillshot.pl/jobs/	A0	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+54	TeamQuest	https://teamquest.pl/praca-w-it	A1	Agencja/portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+55	iPracujZdalnie.pl	https://ipracujzdalnie.pl	A1	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+56	OfertyPracy.edu.pl	https://ofertypracy.edu.pl	A0	Źródło oficjalne	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+57	KarieraBohatera.pl	https://karierabohatera.pl	A1	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+58	Pielęgniarki.info.pl – Oferty	https://www.pielegniarki.info.pl/oferty-pracy-dla-pielegniarek	B	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+59	Europa.jobs	https://europa.jobs/pl/oferty-pracy	A1	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+60	EURES	https://europa.eu/eures/portal/	A1	Źródło oficjalne/UE	API tylko dla uprawnionych partnerów EURES	Partnerstwo/API zgodnie z zasadami EURES
+61	Academic Positions	https://academicpositions.com/find-jobs?regions=poland	B	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+62	AcademicJobs Poland	https://www.academicjobs.com/en-pl/jobs	C	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+63	Narodowe Centrum Nauki	https://www.ncn.gov.pl	B	Źródło oficjalne	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+64	Fundacja na rzecz Nauki Polskiej	https://www.fnp.org.pl	C	Źródło branżowe/publiczne	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+65	BDI – Bank Danych o Inżynierach	https://www.bdi.com.pl	A1	Portal/agencja branżowa	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+66	Antal	https://antal.pl	A1	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+67	Grafton Recruitment	https://pl.grafton.com/pl/job-search	A1	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+68	HRK	https://www.hrk.pl	B	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+69	Devire	https://devire.pl	A1	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+70	Synergie Poland (dawniej InterKadra)	https://www.synergie.pl/praca-w-polsce	A1	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+71	Grupa Progres	https://grupaprogres.pl/oferty-pracy/	B	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+72	Personnel Service	https://personnelservice.pl	B	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+73	LeasingTeam	https://leasingteam.pl	B	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+74	Trenkwalder Polska	https://pl.trenkwalder.com	B	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+75	OTTO Work Force	https://www.ottoworkforce.pl	B	Agencja	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+76	Asistwork	https://praca.asistwork.pl	B	Agencja/portal	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+77	Jobsora Polska	https://pl.jobsora.com	B	Agregator	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+78	Talent.com Polska	https://pl.talent.com	C	Agregator	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+79	Adzuna Polska	https://www.adzuna.pl	A1	Agregator	Tak – REST API	API-first
+80	Trovit Praca	https://praca.trovit.pl	C	Agregator	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+81	GoldenLine Praca	https://www.goldenline.pl/praca/	C	Sieć zawodowa/portal	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+82	Praca.eGospodarka.pl	https://praca.egospodarka.pl	C	Portal/agregator	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+83	Interia Praca	https://praca.interia.pl	C	Portal/agregator	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+84	JobisJob Polska	https://www.jobisjob.pl	C	Agregator	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+85	WhatJobs Polska	https://pl.whatjobs.com	C	Agregator	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+86	PracaProdukcja.pl	https://www.pracaprodukcja.pl	B	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+87	Werbeo	https://werbeo.pl	C	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+88	Sprawni w Pracy	https://sprawniwpracy.com	C	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+89	Integralia	https://integralia.pl	C	Fundacja/pośrednictwo	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+90	Fundacja Aktywizacja – praca	https://aktywizacja.org.pl	C	Fundacja/pośrednictwo	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots
+91	Poltalento	https://poltalento.pl	C	Portal branżowy	Niepotwierdzone	Partner/API jeśli dostępne; inaczej HTML po audycie ToS/robots

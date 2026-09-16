@@ -1,0 +1,214 @@
+name: P11 Aplikuj E2E
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - feat/m0-employer-discovery-core
+    paths:
+      - ".github/workflows/p11-aplikuj-e2e.yml"
+      - "pyproject.toml"
+      - "src/agregator/**"
+      - "!src/agregator/sources/**"
+      - "src/agregator/sources/__init__.py"
+      - "src/agregator/sources/base.py"
+      - "src/agregator/sources/registry.py"
+      - "src/agregator/sources/public_html.py"
+      - "src/agregator/sources/aplikuj.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faro-p11-aplikuj-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      AGREGATOR_USER_AGENT: FaroEmployerDiscoveryP11/0.1
+      AGREGATOR_MAX_PAGES: "5"
+      AGREGATOR_REQUEST_DELAY: "0.5"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Prepare workspace
+        shell: bash
+        run: |
+          mkdir -p p11
+          echo "99" > p11/exit_code.txt
+
+      - name: Run real end-to-end slice
+        shell: bash
+        run: |
+          set +e
+          agregator-run run \
+            --sources aplikuj \
+            --pages-per-source 1 \
+            --enrichment-limit 10 \
+            --fresh-sources \
+            --db p11/aplikuj.sqlite3 \
+            --output p11/aplikuj-leads.xlsx \
+            --strict \
+            > p11/result.json
+          code=$?
+          echo "$code" > p11/exit_code.txt
+          exit 0
+
+      - name: Build audit metrics
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          root = Path("p11")
+          result_path = root / "result.json"
+          db_path = root / "aplikuj.sqlite3"
+          xlsx_path = root / "aplikuj-leads.xlsx"
+
+          result = {}
+          if result_path.exists():
+              try:
+                  result = json.loads(result_path.read_text(encoding="utf-8"))
+              except json.JSONDecodeError:
+                  result = {"status": "invalid_json"}
+
+          sql = {
+              "companies": 0,
+              "companies_enriched": 0,
+              "companies_with_website": 0,
+              "companies_with_green": 0,
+              "contact_channels": 0,
+              "decisions": {},
+              "channel_kinds": {},
+          }
+          if db_path.exists():
+              con = sqlite3.connect(db_path)
+              sql["companies"] = con.execute(
+                  "SELECT COUNT(*) FROM companies"
+              ).fetchone()[0]
+              sql["companies_enriched"] = con.execute(
+                  "SELECT COUNT(*) FROM companies WHERE enriched_at IS NOT NULL"
+              ).fetchone()[0]
+              sql["companies_with_website"] = con.execute(
+                  "SELECT COUNT(*) FROM companies WHERE website_url IS NOT NULL"
+              ).fetchone()[0]
+              sql["companies_with_green"] = con.execute(
+                  "SELECT COUNT(DISTINCT company_id) FROM contact_channels WHERE decision = 'green'"
+              ).fetchone()[0]
+              sql["contact_channels"] = con.execute(
+                  "SELECT COUNT(*) FROM contact_channels"
+              ).fetchone()[0]
+              sql["decisions"] = {
+                  row[0]: row[1]
+                  for row in con.execute(
+                      "SELECT decision, COUNT(*) FROM contact_channels GROUP BY decision"
+                  )
+              }
+              sql["channel_kinds"] = {
+                  f"{row[0]}:{row[1]}": row[2]
+                  for row in con.execute(
+                      "SELECT kind, decision, COUNT(*) FROM contact_channels GROUP BY kind, decision"
+                  )
+              }
+              con.close()
+
+          payload = {
+              "workflow": result,
+              "database": sql,
+              "xlsx_exists": xlsx_path.exists(),
+              "xlsx_bytes": xlsx_path.stat().st_size if xlsx_path.exists() else 0,
+          }
+          (root / "metrics.json").write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          source = (result.get("source_results") or [{}])[0]
+          enrichment = result.get("enrichment") or {}
+          lines = [
+              "## P11 Aplikuj real E2E",
+              "",
+              f"- Workflow status: `{result.get('status')}`",
+              f"- Jobs seen: `{source.get('jobs_seen', 0)}`",
+              f"- Companies created: `{source.get('companies_created', 0)}`",
+              f"- Enrichment candidates: `{enrichment.get('candidates', 0)}`",
+              f"- Source WWW checked: `{enrichment.get('source_website_candidates_checked', 0)}`",
+              f"- Source WWW verified: `{enrichment.get('source_website_candidates_verified', 0)}`",
+              f"- Websites found: `{enrichment.get('websites_found', 0)}`",
+              f"- Channels found: `{enrichment.get('channels_found', 0)}`",
+              f"- GREEN channels: `{enrichment.get('green_channels', 0)}`",
+              f"- Search skipped: `{enrichment.get('search_skipped', 0)}`",
+              f"- Enrichment failures: `{enrichment.get('failed', 0)}`",
+              f"- DB companies with WWW: `{sql['companies_with_website']}` / `{sql['companies']}`",
+              f"- DB companies with GREEN: `{sql['companies_with_green']}`",
+              f"- Decisions: `{json.dumps(sql['decisions'], ensure_ascii=False, sort_keys=True)}`",
+              f"- XLSX bytes: `{payload['xlsx_bytes']}`",
+          ]
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(
+              "\n".join(lines) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload E2E artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: faro-p11-aplikuj-${{ github.run_id }}
+          path: p11/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce E2E proof
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("p11")
+          code = int((root / "exit_code.txt").read_text().strip())
+          if code != 0:
+              raise SystemExit(f"agregator-run exited with code {code}")
+
+          metrics = json.loads((root / "metrics.json").read_text(encoding="utf-8"))
+          result = metrics.get("workflow") or {}
+          source = (result.get("source_results") or [{}])[0]
+          enrichment = result.get("enrichment") or {}
+
+          checks = {
+              "workflow_success": result.get("status") == "success",
+              "jobs_collected": int(source.get("jobs_seen", 0) or 0) > 0,
+              "enrichment_exercised": int(enrichment.get("candidates", 0) or 0) > 0,
+              "source_websites_checked": int(
+                  enrichment.get("source_website_candidates_checked", 0) or 0
+              ) > 0,
+              "source_website_verified": int(
+                  enrichment.get("source_website_candidates_verified", 0) or 0
+              ) > 0,
+              "xlsx_created": bool(metrics.get("xlsx_exists")),
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit(
+                  "P11 Aplikuj E2E proof failed: " + ", ".join(failed)
+              )
+          print(json.dumps(checks, indent=2))
+          PY
